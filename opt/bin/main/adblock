@@ -1,9 +1,9 @@
 #!/bin/sh
-. /opt/apps/kvas/bin/libs/vpn
+. /opt/apps/mors/bin/libs/vpn
 
 #------------------------------------------------------------------------------
 #
-#	ПАКЕТ КВАС
+#	ПАКЕТ МОРС
 #
 #------------------------------------------------------------------------------
 #
@@ -21,13 +21,13 @@
 # -----------------------------------------------------------------------------
 
 [ -z "${1}" ] && echo "Загрузка хостов для блокировки из источников..."
-logger -t "kvas" "Запущен файл ${0}"
+logger -t "mors" "Запущен файл ${0}"
 
 tmp_path="/opt/tmp/adblock"
 TMP_FILE="/opt/tmp/hosts.tmp"
 TMP_ADS_FILE="/opt/tmp/hosts.ads"
 DNSMASQ_DEMON="/opt/etc/init.d/S56dnsmasq"
-ERROR_SOURCE="/opt/tmp/kvas.err.log"
+ERROR_SOURCE="/opt/tmp/mors.err.log"
 ADS_SOURCES_FILE="/opt/etc/adblock/sources.list"
 ADBLOCK_LIST_EXCEPTION="/opt/etc/adblock/exception.list"
 
@@ -67,7 +67,7 @@ EOF
 #--------------------------------------------------------------
 check_files_present(){
 	! [ -f "${ADS_SOURCES_FILE}" ] && {
-		cp -f /opt/apps/kvas/etc/conf/adblock.sources "${ADS_SOURCES_FILE}"
+		cp -f /opt/apps/mors/etc/conf/adblock.sources "${ADS_SOURCES_FILE}"
 		 ! [ -f "${ADS_SOURCES_FILE}" ] && {
 			error "Файл с ссылками на списки блокировки рекламы отсутствует.";
 			exit 1
@@ -145,8 +145,8 @@ remove_duplicates(){
 remove_white_hosts(){
 
 	nlines_amount=$(cat < "${ADBLOCK_HOSTS_FILE}" | wc -l)
-	if [ -f "${KVAS_LIST_FILE}" ] && [ "$(cat < "${KVAS_LIST_FILE}" | wc -l )" -ge 1 ]; then
-		exclude_com=".*.$(cat < "${KVAS_LIST_FILE}" | tr -d '*' | sed ':a;N;$!ba;s/\n/$|.*./g')$"
+	if [ -f "${MORS_LIST_FILE}" ] && [ "$(cat < "${MORS_LIST_FILE}" | wc -l )" -ge 1 ]; then
+		exclude_com=".*.$(cat < "${MORS_LIST_FILE}" | tr -d '*' | sed ':a;N;$!ba;s/\n/$|.*./g')$"
 		ready "Удаляем хосты, находящиеся в защищенном списке"
 		cat < "${TMP_FILE}" | grep -vE "${exclude_com}" > "${ADBLOCK_HOSTS_FILE}"
 		when_ok "ГОТОВО"

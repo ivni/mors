@@ -1,7 +1,7 @@
 #!/bin/sh
-. /opt/apps/kvas/bin/libs/main
-. /opt/apps/kvas/bin/libs/vpn
-. /opt/apps/kvas/bin/libs/vless
+. /opt/apps/mors/bin/libs/main
+. /opt/apps/mors/bin/libs/vpn
+. /opt/apps/mors/bin/libs/vless
 
 # В случае проблем с инсталляцией пакета ставим в значение true
 ANSWER_AGH=n
@@ -20,9 +20,9 @@ setup_test_provider_dns(){
 
 	is_dns_override && {
 		echo "Подключаем DNS провайдера..."
-		echo "В случае, выхода из сессии, зайдите снова по ssh и выполните команду 'kvas setup'"
+		echo "В случае, выхода из сессии, зайдите снова по ssh и выполните команду 'mors setup'"
 		post_api_query '[{"opkg": {"no dns-override": true}},{"system": {"configuration": {"save": true}}}]' &>/dev/null && when_ok || when_err
-	} 
+	}
 	# if ! is_dns_override ; then
 	# 	cli="$(get_router_host)/a"
 	# 	log_in_file "ОШИБКА: Не отключено использование DNS провайдера."
@@ -41,7 +41,7 @@ setup_test_provider_dns(){
 setup_print_welcome(){
 
 	[ -n "${APP_RELEASE}" ] && full_version="${APP_VERSION} ${APP_RELEASE}" || full_version="${APP_VERSION}"
-	welcome="Установка пакета ${GREEN}КВАС${NOCL} версии ${GREEN}${full_version}${NOCL}"
+	welcome="Установка пакета ${GREEN}МОРС${NOCL} версии ${GREEN}${full_version}${NOCL}"
 	echo -e "${welcome}"
 	print_line
 
@@ -74,7 +74,7 @@ setup_adguard(){
 					exit 1
 				fi
 			}
-			cp /opt/etc/AdGuardHome/AdGuardHome.yaml "${KVAS_BACKUP_PATH}"/AdGuardHome.yaml
+			cp /opt/etc/AdGuardHome/AdGuardHome.yaml "${MORS_BACKUP_PATH}"/AdGuardHome.yaml
 		fi
 		print_line
 	fi
@@ -109,12 +109,12 @@ restore_backup(){
 #		Если нет архивной копии файла, то в случае наличия файла
 #		по умолчанию в настройках пакета - восстанавливаем его
 		file_name=$(basename "${dest_file}")
-		kvas_config_path=/opt/apps/kvas/etc/conf
+		mors_config_path=/opt/apps/mors/etc/conf
 
-		if [ -f "${kvas_config_path}/${file_name}" ]; then
+		if [ -f "${mors_config_path}/${file_name}" ]; then
 #			warning "Архивный файл ${description} не обнаружен."
 			ready "Копируем файл ${description} по умолчанию"
-			if cp -f "${kvas_config_path}/${file_name}" "${dest_file}" &>/dev/null ; then
+			if cp -f "${mors_config_path}/${file_name}" "${dest_file}" &>/dev/null ; then
 				log_in_file "УСТАНОВЛЕН файл ${description} ПО УМОЛЧАНИЮ."
 				when_ok "УСПЕШНО"
 			else
@@ -131,27 +131,27 @@ restore_backup(){
 
 
 # Функция временной остановки работы пакета
-cmd_pause_kvas(){
+cmd_pause_mors(){
 
-	ready "Временно приостановливаем работу Кваса..."
+	ready "Временно приостановливаем работу Морса..."
 	{
 		ip4__flush &> /dev/null
 
 		# Архивируем файлы механизма ndm
-		[ -f /opt/etc/ndm/iflayerchanged.d/100-kvas-vpn ] && {
-			mv /opt/etc/ndm/iflayerchanged.d/100-kvas-vpn ${KVAS_BACKUP_PATH}/100-kvas-vpn-layer
+		[ -f /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ] && {
+			mv /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ${MORS_BACKUP_PATH}/100-mors-vpn-layer
 		}
-		[ -f /opt/etc/ndm/iflayerchanged.d/kvas-ips-reset ] && {
-			mv /opt/etc/ndm/iflayerchanged.d/kvas-ips-reset ${KVAS_BACKUP_PATH}/kvas-ips-reset-layer
+		[ -f /opt/etc/ndm/iflayerchanged.d/mors-ips-reset ] && {
+			mv /opt/etc/ndm/iflayerchanged.d/mors-ips-reset ${MORS_BACKUP_PATH}/mors-ips-reset-layer
 		}
-		[ -f /opt/etc/ndm/ifstatechanged.d/kvas-ips-reset ] && {
-			mv /opt/etc/ndm/ifstatechanged.d/100-kvas-vpn ${KVAS_BACKUP_PATH}/100-kvas-vpn-state
+		[ -f /opt/etc/ndm/ifstatechanged.d/100-mors-vpn ] && {
+			mv /opt/etc/ndm/ifstatechanged.d/100-mors-vpn ${MORS_BACKUP_PATH}/100-mors-vpn-state
 		}
 		[ -f /opt/etc/ndm/netfilter.d/100-proxy-redirect ] && {
-			mv /opt/etc/ndm/netfilter.d/100-proxy-redirect ${KVAS_BACKUP_PATH}/100-proxy-redirect 
+			mv /opt/etc/ndm/netfilter.d/100-proxy-redirect ${MORS_BACKUP_PATH}/100-proxy-redirect
 		}
 		[ -f /opt/etc/ndm/netfilter.d/100-vpn-mark ] && {
-			mv /opt/etc/ndm/netfilter.d/100-vpn-mark ${KVAS_BACKUP_PATH}/100-vpn-mark
+			mv /opt/etc/ndm/netfilter.d/100-vpn-mark ${MORS_BACKUP_PATH}/100-vpn-mark
 		}
 	} &> /dev/null && when_ok "УСПЕШНО" || when_bad "C ОШИБКАМИ"
 }
@@ -160,17 +160,17 @@ restart_all_services(){
 
 	if cmd_adguardhome_status | grep -qE "(ВКЛЮЧЕН|ОТКЛЮЧЕН)" ; then
 		service_action dnsmasq stop
-		service_action shadowsocks stop 
-		service_action adguardhome restart 
+		service_action shadowsocks stop
+		service_action adguardhome restart
 	else
 		if has_ssr_enable ; then
 			service_action xray stop
-			service_action shadowsocks restart 
+			service_action shadowsocks restart
 		else
-			service_action xray restart 
-			service_action dnsmasq restart 
+			service_action xray restart
+			service_action dnsmasq restart
 			get_dns_crypt_status | grep -q "on" && {
-				service_action dnscrypt-proxy2 restart  
+				service_action dnscrypt-proxy2 restart
 			}
 		fi
 
@@ -180,46 +180,46 @@ restart_all_services(){
 
 }
 # Функция восстановления архивных файлов конфигурации пакета
-cmd_unpause_kvas(){
+cmd_unpause_mors(){
 
-	ready "Восстанавливаем работу Кваса после паузы..."
+	ready "Восстанавливаем работу Морса после паузы..."
 	{
 		#  Восстанавливаем из архива файлы механизма ndm
-		[ -f ${KVAS_BACKUP_PATH}/100-kvas-vpn-layer ] && {
-			mv ${KVAS_BACKUP_PATH}/100-kvas-vpn-layer /opt/etc/ndm/iflayerchanged.d/100-kvas-vpn 
+		[ -f ${MORS_BACKUP_PATH}/mors-ips-reset-layer ] && {
+			mv ${MORS_BACKUP_PATH}/mors-ips-reset-layer /opt/etc/ndm/iflayerchanged.d/mors-ips-reset
 		}
-		[ -f ${KVAS_BACKUP_PATH}/100-kvas-vpn-layer ] && {
-			mv ${KVAS_BACKUP_PATH}/100-kvas-vpn-layer /opt/etc/ndm/iflayerchanged.d/100-kvas-vpn 
+		[ -f ${MORS_BACKUP_PATH}/100-mors-vpn-layer ] && {
+			mv ${MORS_BACKUP_PATH}/100-mors-vpn-layer /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
 		}
-		[ -f ${KVAS_BACKUP_PATH}/100-kvas-vpn-state ] && {
-			mv ${KVAS_BACKUP_PATH}/100-kvas-vpn-state /opt/etc/ndm/ifstatechanged.d/100-kvas-vpn
+		[ -f ${MORS_BACKUP_PATH}/100-mors-vpn-state ] && {
+			mv ${MORS_BACKUP_PATH}/100-mors-vpn-state /opt/etc/ndm/ifstatechanged.d/100-mors-vpn
 		}
-		[ -f ${KVAS_BACKUP_PATH}/100-proxy-redirect ] && {
-			mv ${KVAS_BACKUP_PATH}/100-proxy-redirect /opt/etc/ndm/netfilter.d/100-proxy-redirect  
+		[ -f ${MORS_BACKUP_PATH}/100-proxy-redirect ] && {
+			mv ${MORS_BACKUP_PATH}/100-proxy-redirect /opt/etc/ndm/netfilter.d/100-proxy-redirect
 		}
-		[ -f ${KVAS_BACKUP_PATH}/100-vpn-mark ] && {
-			mv ${KVAS_BACKUP_PATH}/100-vpn-mark /opt/etc/ndm/netfilter.d/100-vpn-mark 
-		}	
+		[ -f ${MORS_BACKUP_PATH}/100-vpn-mark ] && {
+			mv ${MORS_BACKUP_PATH}/100-vpn-mark /opt/etc/ndm/netfilter.d/100-vpn-mark
+		}
 
-		cmd_kvas_init
+		cmd_mors_init
 		restart_all_services
 
 	} &> /dev/null && when_ok "УСПЕШНО" || when_bad "C ОШИБКАМИ"
-	
+
 }
 
 
 #------------------------------------------------------
 # 	ВОССТАНАВЛИВАЕМ СОСТОЯНИЕ AdGuardHome,
-# 	КОТОРОЕ БЫЛО ПЕРЕД УСТАНОВКОЙ ПАКЕТА КВАС
+# 	КОТОРОЕ БЫЛО ПЕРЕД УСТАНОВКОЙ ПАКЕТА МОРС
 #------------------------------------------------------
 restore_adguard(){
 
 	agh_service=/opt/etc/init.d/S99adguardhome
 	ready "Восстанавливаем службу AdGuardHome"
-	if [ -f "${KVAS_BACKUP_PATH}/S99adguardhome.origin" ]; then
+	if [ -f "${MORS_BACKUP_PATH}/S99adguardhome.origin" ]; then
 
-		cp "${KVAS_BACKUP_PATH}/S99adguardhome.origin" "${agh_service}"
+		cp "${MORS_BACKUP_PATH}/S99adguardhome.origin" "${agh_service}"
 		[ -f /opt/etc/AdGuardHome/AdGuardHome.yaml ] && \
 			cp /opt/etc/AdGuardHome/AdGuardHome.yaml /opt/bin/AdGuardHome.yaml
 	fi
@@ -269,8 +269,8 @@ stop_crypt(){
 
 # восставившем архивные копии файлов конфигурации
 restore_backups(){
-	restore_backup "${KVAS_LIST_FILE_BACKUP}" "${KVAS_LIST_FILE}" "защищенного списка"
-	restore_backup "${KVAS_CONFIG_BACKUP}" "${KVAS_CONF_FILE}" "конфигурации пакета Квас"
+	restore_backup "${MORS_LIST_FILE_BACKUP}" "${MORS_LIST_FILE}" "защищенного списка"
+	restore_backup "${MORS_CONFIG_BACKUP}" "${MORS_CONF_FILE}" "конфигурации пакета Морс"
 
 	restore_backup "${ADGUARDHOME_CONFIG_BACKUP}" "${ADGUARDHOME_CONFIG}" "конфигурации AdGuardHome"
 	restore_backup "${ADGUARD_IPSET_FILE_BACKUP}" "${ADGUARD_IPSET_FILE}" "списка ipset для AdGuardHome"
@@ -291,10 +291,10 @@ restore_backups(){
 }
 
 
-# Сохраняем все значимые файлы конфигурации пакета Квас
+# Сохраняем все значимые файлы конфигурации пакета Морс
 save_backups(){
-	backup_copy "${KVAS_CONF_FILE}" "${KVAS_CONFIG_BACKUP}"
-	backup_copy "${KVAS_LIST_FILE}" "${KVAS_LIST_FILE_BACKUP}"
+	backup_copy "${MORS_CONF_FILE}" "${MORS_CONFIG_BACKUP}"
+	backup_copy "${MORS_LIST_FILE}" "${MORS_LIST_FILE_BACKUP}"
 
 	backup_copy "${ADGUARDHOME_CONFIG}" "${ADGUARDHOME_CONFIG_BACKUP}"
 	backup_copy "${ADGUARD_IPSET_FILE}" "${ADGUARD_IPSET_FILE_BACKUP}"
@@ -317,17 +317,17 @@ save_backups(){
 
 list__backup() {
 	if [ -z "${1}" ] ; then
-		if [ -f "${KVAS_LIST_FILE}" ] ; then
-			list__backup "${KVAS_LIST_FILE}"
-		elif [ -f "${KVAS_LIST_FILE_BACKUP}" ] ; then
-			list__backup "${KVAS_LIST_FILE_BACKUP}"
+		if [ -f "${MORS_LIST_FILE}" ] ; then
+			list__backup "${MORS_LIST_FILE}"
+		elif [ -f "${MORS_LIST_FILE_BACKUP}" ] ; then
+			list__backup "${MORS_LIST_FILE_BACKUP}"
 		fi
 
 		return
 	fi
 	local source_file="${1}"
 
-	local backup_path="${HOME}/kvas"
+	local backup_path="${HOME}/mors"
 	local backup_filename
 	backup_filename=$( date '+%y-%m-%d' )
 	backup_filename="list_${backup_filename}.txt"
@@ -367,41 +367,41 @@ rm_package_files() {
 	local full=${1:-no}
 
 	if [ "${full}" = full ] ; then
-		ready 'Удаляем архивные копии пакета Квас' && {
+		ready 'Удаляем архивные копии пакета Морс' && {
 			find /opt ! -path '/opt/packages/*' ! -path '/opt/lib/opkg/*' ! -path "${HOME}/*" \
-			  -name '*kvas*' ! -regex '.*/kvas[a-zA-Z].*' \
+			  -name '*mors*' ! -regex '.*/mors[a-zA-Z].*' \
 			  -exec rm -rf {} +
 
 			rm_file /opt/etc/inface_equals
-			rm_file /opt/etc/kvas.conf
-			rm_file /opt/etc/kvas.list
+			rm_file /opt/etc/mors.conf
+			rm_file /opt/etc/mors.list
 
-			rm_dir /opt/etc/.kvas
+			rm_dir /opt/etc/.mors
 
 			# корректно ли так поступать вместо opkg remove?
 			rm_file /opt/etc/init.d/S22shadowsocks
 		} && when_ok || when_bad
 	fi
-	ready 'Удаляем файлы пакета Квас' && {
+	ready 'Удаляем файлы пакета Морс' && {
 		rm_file /opt/etc/ndm/netfilter.d/100-dns-local
 		rm_file /opt/etc/ndm/netfilter.d/100-vpn-mark
 		rm_file /opt/etc/ndm/netfilter.d/100-proxy-redirect
 
-		rm_file /opt/etc/ndm/ifcreated.d/kvas-iface-add
-		rm_file /opt/etc/ndm/ifdestroyed.d/kvas-iface-del
-		rm_file /opt/etc/ndm/iflayerchanged.d/kvas-ips-reset
-		rm_file /opt/etc/ndm/iflayerchanged.d/100-kvas-vpn
-		rm_file /opt/etc/ndm/ifstatechanged.d/100-kvas-vpn
+		rm_file /opt/etc/ndm/ifcreated.d/mors-iface-add
+		rm_file /opt/etc/ndm/ifdestroyed.d/mors-iface-del
+		rm_file /opt/etc/ndm/iflayerchanged.d/mors-ips-reset
+		rm_file /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
+		rm_file /opt/etc/ndm/ifstatechanged.d/100-mors-vpn
 
-		rm_file /opt/etc/ndm/fs.d/15-kvas-start.sh
+		rm_file /opt/etc/ndm/fs.d/15-mors-start.sh
 		rm_file /opt/etc/cron.5mins/check_vpn
 
-		rm_file /opt/etc/dnsmasq.d/kvas.dnsmasq
+		rm_file /opt/etc/dnsmasq.d/mors.dnsmasq
 		rm_dir /opt/etc/adblock
 		rm_dir /opt/tmp/adblock
 
-		rm_file /opt/bin/kvas
-		rm_dir /opt/apps/kvas
+		rm_file /opt/bin/mors
+		rm_dir /opt/apps/mors
 	} && when_ok || when_bad
 }
 
@@ -412,12 +412,12 @@ rm_previous_version_files() {
 	rm_file /opt/etc/ndm/netfilter.d/100-proxy-redirect
 
 	# текущие, создадутся в cmd_install позже
-	rm_file /opt/etc/ndm/ifcreated.d/kvas-iface-add
-	rm_file /opt/etc/ndm/ifdestroyed.d/kvas-iface-del
-	rm_file /opt/etc/ndm/iflayerchanged.d/kvas-ips-reset
-	rm_file /opt/etc/ndm/iflayerchanged.d/100-kvas-vpn
+	rm_file /opt/etc/ndm/ifcreated.d/mors-iface-add
+	rm_file /opt/etc/ndm/ifdestroyed.d/mors-iface-del
+	rm_file /opt/etc/ndm/iflayerchanged.d/mors-ips-reset
+	rm_file /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
 	rm_file /opt/etc/ndm/iflayerchanged.d/100-unblock-vpn
-	rm_file /opt/etc/ndm/ifstatechanged.d/100-kvas-vpn
+	rm_file /opt/etc/ndm/ifstatechanged.d/100-mors-vpn
 	# исторический
 	rm_file /opt/etc/ndm/wan.d/internet-up
 
@@ -428,13 +428,13 @@ rm_previous_version_files() {
 	# текущий, создастся при включении соединения
 	rm_file /opt/etc/cron.5mins/check_vpn
 	# исторический
-	rm_file /opt/etc/cron.5mins/ipset.kvas
+	rm_file /opt/etc/cron.5mins/ipset.mors
 	# оптимизированные
-	rm_file /opt/etc/cron.hourly/ipset.kvas
-	rm_file /opt/etc/cron.daily/ipset.kvas
+	rm_file /opt/etc/cron.hourly/ipset.mors
+	rm_file /opt/etc/cron.daily/ipset.mors
 
 	# текущие, создадутся позже
-	rm_file /opt/etc/dnsmasq.d/kvas.dnsmasq
+	rm_file /opt/etc/dnsmasq.d/mors.dnsmasq
 	rm_dir /opt/etc/adblock
 	rm_dir /opt/tmp/adblock
 	# исторические
@@ -442,36 +442,37 @@ rm_previous_version_files() {
 	rm_file /opt/etc/hosts.list
 	rm_dir /opt/etc/.backup
 
-	# бекапы
-	rm_dir /opt/etc/.kvas
+	# Архивы оставляем: при update/rollback uninstall сохраняет туда пользовательские
+	# конфиги, а cmd_install ниже восстанавливает их через restore_backups.
+	# Полное удаление архивов выполняется только через rm_package_files full.
 }
 
 clear_previous_version_net_rules() {
 	ip4__rule__delete_mark_to_table
 	ip4__route__flush_table
 
-	ip4__chain__delete_jump 'nat'    'KVAS_DNS'
-	ip4__chain__delete      'nat'    'KVAS_DNS'
+	ip4__chain__delete_jump 'nat'    'MORS_DNS'
+	ip4__chain__delete      'nat'    'MORS_DNS'
 
 	#24-12-21 7791b886b2f233a71447c985ec8dfe57c53cab40
-	ip4__chain__delete_jump 'mangle' 'KVAS_MARK'
-	ip4__chain__delete      'mangle' 'KVAS_MARK'
+	ip4__chain__delete_jump 'mangle' 'MORS_MARK'
+	ip4__chain__delete      'mangle' 'MORS_MARK'
 	#24-11-27 7bda08de3472da3a8e6f17903f65ff10c899ceb7
-	ip4__chain__delete_jump 'mangle' 'KVAS_MARK_TO_TABLE'
-	ip4__chain__delete      'mangle' 'KVAS_MARK_TO_TABLE'
-	ip4__chain__delete_jump 'nat'    'KVAS_DNAT_TO_PORT'
-	ip4__chain__delete      'nat'    'KVAS_DNAT_TO_PORT'
+	ip4__chain__delete_jump 'mangle' 'MORS_MARK_TO_TABLE'
+	ip4__chain__delete      'mangle' 'MORS_MARK_TO_TABLE'
+	ip4__chain__delete_jump 'nat'    'MORS_DNAT_TO_PORT'
+	ip4__chain__delete      'nat'    'MORS_DNAT_TO_PORT'
 	#24-11-26 10c31fcf4c1a9b201b7e21946a9ee055a82a9183
-	ip4__chain__delete_jump 'mangle' 'KVAS_VPN_FAST'
-	ip4__chain__delete      'mangle' 'KVAS_VPN_FAST'
+	ip4__chain__delete_jump 'mangle' 'MORS_VPN_FAST'
+	ip4__chain__delete      'mangle' 'MORS_VPN_FAST'
 	#24-11-26 df8b36e2e64ae3844073518ce9a6db64c8bb7efd
-	ip4__chain__delete_jump 'nat'    'KVAS_PROXY_TCP'
-	ip4__chain__delete      'nat'    'KVAS_PROXY_TCP'
-	ip4__chain__delete_jump 'nat'    'KVAS_PROXY_UDP'
-	ip4__chain__delete      'nat'    'KVAS_PROXY_UDP'
+	ip4__chain__delete_jump 'nat'    'MORS_PROXY_TCP'
+	ip4__chain__delete      'nat'    'MORS_PROXY_TCP'
+	ip4__chain__delete_jump 'nat'    'MORS_PROXY_UDP'
+	ip4__chain__delete      'nat'    'MORS_PROXY_UDP'
 	#24-11-26 0e67e8aa45ba287c02a1e270f9f56afe76b72b2c
-	ip4__chain__delete_jump 'mangle' 'KVAS_VPN'
-	ip4__chain__delete      'mangle' 'KVAS_VPN'
+	ip4__chain__delete_jump 'mangle' 'MORS_VPN'
+	ip4__chain__delete      'mangle' 'MORS_VPN'
 	# давно
 	ip4__chain__delete_jump 'mangle' 'VPNREDIR'
 	ip4__chain__delete      'mangle' 'VPNREDIR'
@@ -481,9 +482,9 @@ clear_previous_version_net_rules() {
 	ip4__chain__delete      'nat'    'SHADOWSOCKS_UDP_MARK'
 
 	# ss доцепочечных времён
-	iptables__delete_rules 'nat' 'KVAS_LIST'
-	iptables__delete_rules 'nat' 'kvas_ipset'
-	iptables__delete_rules 'nat' 'kvas'
+	iptables__delete_rules 'nat' 'MORS_LIST'
+	iptables__delete_rules 'nat' 'mors_ipset'
+	iptables__delete_rules 'nat' 'mors'
 	iptables__delete_rules 'nat' 'unblock'
 
 	# dns доцепочечных времён
@@ -491,17 +492,17 @@ clear_previous_version_net_rules() {
 	iptables__delete_rules 'nat' '--dport 53 -j DNAT'
 
 	#24-12-15 b3dec7293bb8e3de59cce200b4e8dc8d4b9f3dac
-	ip4__ipset__destroy 'KVAS_DESTINATION_EXCLUDED'
+	ip4__ipset__destroy 'MORS_DESTINATION_EXCLUDED'
 	#24-11-26 5efb5035c33fffb18c5d17cd7c56e453b0b64ac8
-	ip4__ipset__destroy 'KVAS_RESERVED'
+	ip4__ipset__destroy 'MORS_RESERVED'
 
 	#ToDo: найти почему вываливаются с ошибкой
 	#24-11-29 0dabaa19b8dc788d56650b20092dec4a9dce1acc
-	ip4__ipset__destroy 'KVAS_LIST'
+	ip4__ipset__destroy 'MORS_LIST'
 	#24-11-09 fb1f8cb5755dd4c7b683b314096ccf903ee05525
-	ip4__ipset__destroy 'kvas_ipset'
+	ip4__ipset__destroy 'mors_ipset'
 	#24-09-07 f78979503e9866f2dca3770455b241c3db8f850d
-	ip4__ipset__destroy 'kvas'
+	ip4__ipset__destroy 'mors'
 	# давно
 	ip4__ipset__destroy 'unblock'
 }
@@ -509,10 +510,10 @@ clear_previous_version_net_rules() {
 cmd_install(){
 
 #	Если режим обновления, то не спрашиваем про выбор соединения,
-#	а просто берем его из файла конфигурации Кваса
+#	а просто берем его из файла конфигурации Морса
 	update_mode=${1:-false}
 
-	log_warning 'Установка пакета КВАС начата...'
+	log_warning 'Установка пакета МОРС начата...'
 
 	list__backup
 
@@ -537,31 +538,31 @@ cmd_install(){
 	cmd_install_proxy_package || return 1
 
 	[ "${update_mode}" ] || setup_print_welcome
-	mkdir -p "${KVAS_BACKUP_PATH}"
+	mkdir -p "${MORS_BACKUP_PATH}"
 	cat /dev/null > "${INSTALL_LOG}"
 
 	[ -d "/opt/etc/ndm/iflayerchanged.d" ] || mkdir -p /opt/etc/ndm/iflayerchanged.d
-	hook_dir=$(get_hook_dir); home_dir=/opt/apps/kvas
-	ln -sf "${home_dir}/etc/ndm/${hook_dir}/100-kvas-vpn" "/opt/etc/ndm/${hook_dir}/100-kvas-vpn"
-	ln -sf "${home_dir}/etc/ndm/iflayerchanged.d/kvas-ips-reset" "/opt/etc/ndm/iflayerchanged.d/kvas-ips-reset"
-	ln -sf "${home_dir}/etc/ndm/ifcreated.d/kvas-iface-add" "/opt/etc/ndm/ifcreated.d/kvas-iface-add"
-	ln -sf "${home_dir}/etc/ndm/ifdestroyed.d/kvas-iface-del" "/opt/etc/ndm/ifdestroyed.d/kvas-iface-del"
+	hook_dir=$(get_hook_dir); home_dir=/opt/apps/mors
+	ln -sf "${home_dir}/etc/ndm/${hook_dir}/100-mors-vpn" "/opt/etc/ndm/${hook_dir}/100-mors-vpn"
+	ln -sf "${home_dir}/etc/ndm/iflayerchanged.d/mors-ips-reset" "/opt/etc/ndm/iflayerchanged.d/mors-ips-reset"
+	ln -sf "${home_dir}/etc/ndm/ifcreated.d/mors-iface-add" "/opt/etc/ndm/ifcreated.d/mors-iface-add"
+	ln -sf "${home_dir}/etc/ndm/ifdestroyed.d/mors-iface-del" "/opt/etc/ndm/ifdestroyed.d/mors-iface-del"
 
 	check_crypto_ssr_libs
 
-	[ -f "${KVAS_START_FILE}" ] || cp -f /opt/apps/kvas/etc/init.d/S96kvas "${KVAS_START_FILE}"
-	chmod +x "${KVAS_START_FILE}"
+	[ -f "${MORS_START_FILE}" ] || cp -f /opt/apps/mors/etc/init.d/S96mors "${MORS_START_FILE}"
+	chmod +x "${MORS_START_FILE}"
 
 	# Если не установлен xray - устанавливаем его
 	has_xray_installed || opkg install xray &> /dev/null
-	# Создаем ссылку на наш скрипт для запуска xray в /opt/etc/init.d 
-	[ -f "${XRAY_INIT}" ] || ln -s /opt/apps/kvas/etc/init.d/S97xray ${XRAY_INIT}
+	# Создаем ссылку на наш скрипт для запуска xray в /opt/etc/init.d
+	[ -f "${XRAY_INIT}" ] || ln -s /opt/apps/mors/etc/init.d/S97xray ${XRAY_INIT}
 
 	# Код отключения IPv6 не помогает
 	#if [ "$(ipv6_status)" = 0 ]; then
 	#	ipv6_inface_off "$(get_defaultgw_interface)"
 	#fi
-	# В kvas debug dns сейчас есть подсказка по отключению DHCPv6 централизованно.
+	# В mors debug dns сейчас есть подсказка по отключению DHCPv6 централизованно.
 	# Также выводится в конце установки.
 	# Но применять её или IPv6 отключать руками — решать пользователю,
 	# т.к. с отключением IPv6 можно потерять некоторых провайдеров.
@@ -625,7 +626,7 @@ cmd_install(){
 	#----------------------------------------------------------
 
 	if [ "${ANSWER_AGH}" = n ]; then
-	
+
 		if [ -f "${ADGUARDHOME_DEMON}" ]; then
 			if "${ADGUARDHOME_DEMON}" status | grep -q alive; then
 				"${ADGUARDHOME_DEMON}" stop &> /dev/null
@@ -650,15 +651,15 @@ cmd_install(){
 	fi
 
 	# Подключаем библиотеку keen_api
-	#source /opt/apps/kvas/bin/libs/keen_api
+	#source /opt/apps/mors/bin/libs/keen_api
 	# Устанавливаем DNS роутера и порт по умолчанию
 	#set_dns_router_server_ip "$(get_router_ip)" "${MAIN_DNS_PORT}"
 
 	# Закрываем снаружи DNS порты для всех вншних сетей
-	# deny_firewall_port "53" "tcp" "Квас: закрываем снаружи 53/TCP DNS порт"
-	# deny_firewall_port "53" "udp" "Квас: закрываем снаружи 53/UDP DNS порт"
-	# allow_firewall_local_net_to_port "53" "tcp" "Квас: разрешаем локальной сети обращения в 53/TCP DNS порт"
-	# allow_firewall_local_net_to_port "53" "udp" "Квас: разрешаем локальной сети обращения в 53/UDP DNS порт"
+	# deny_firewall_port "53" "tcp" "Морс: закрываем снаружи 53/TCP DNS порт"
+	# deny_firewall_port "53" "udp" "Морс: закрываем снаружи 53/UDP DNS порт"
+	# allow_firewall_local_net_to_port "53" "tcp" "Морс: разрешаем локальной сети обращения в 53/TCP DNS порт"
+	# allow_firewall_local_net_to_port "53" "udp" "Морс: разрешаем локальной сети обращения в 53/UDP DNS порт"
 	# # Устанавливаем вышесозданные правила на первое место в списке правил
 	# set_firewall_order_for_rule "53" "tcp" "deny" "0"
 	# set_firewall_order_for_rule "53" "udp" "deny" "0"
@@ -668,30 +669,30 @@ cmd_install(){
 	#save_system_configuration_by_api
 
 	#------------------------------------------------------
-	# 	Запускаем КВАС в работу
+	# 	Запускаем МОРС в работу
 	#------------------------------------------------------
-	ready "Запускаем КВАС в работу"
-	if cmd_kvas_init &> /dev/null ; then
+	ready "Запускаем МОРС в работу"
+	if cmd_mors_init &> /dev/null ; then
 		when_ok "УСПЕШНО"
 	else
 		when_bad "ОШИБКА"
-		ready "Пробуем перезапустить КВАС снова"
-		if cmd_kvas_init &> /dev/null ; then
+		ready "Пробуем перезапустить МОРС снова"
+		if cmd_mors_init &> /dev/null ; then
 			when_ok "УСПЕШНО"
 		else
 			when_bad "ОШИБКА"
-			mess="Проблема при запуске КВАСа"
+			mess="Проблема при запуске МОРСа"
 			log_in_file "ОШИБКА: ${mess}"
 			exit 1
 		fi
 	fi
 
 	set_config_value 'SETUP_FINISHED' 'true'
-	log_warning 'Установка пакета КВАС завершена'
+	log_warning 'Установка пакета МОРС завершена'
 
 	print_line
-	echo 'Установка пакета КВАС завершена.'
-	echo -e "Для справки по командам введите ${BLUE}kvas help${NOCL}."
+	echo 'Установка пакета МОРС завершена.'
+	echo -e "Для справки по командам введите ${BLUE}mors help${NOCL}."
 
 	local output
 
@@ -721,7 +722,7 @@ cmd_install(){
 
 
 #------------------------------------------------------
-#  Обрабатываем режим тестировщика 
+#  Обрабатываем режим тестировщика
 #  удаляем под ноль все запущенные службы
 #------------------------------------------------------
 all_services_rm_develop_mode() {
@@ -729,18 +730,18 @@ all_services_rm_develop_mode() {
 	if cmd_adguardhome_status | grep -q "ВКЛЮЧЕН" ; then
 		ready "Останавливаем и удаляем службу AdGuardHome "
 		{
-			${ADGUARDHOME_DEMON} stop &> /dev/null 
+			${ADGUARDHOME_DEMON} stop &> /dev/null
 			rm_file /opt/etc/AdGuardHome/AdGuardHome.yaml
 			opkg remove adguardhome-go --force-depends &> /dev/null
 		} && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
-		
-	else 
-		
+
+	else
+
 		if has_ssr_enable ; then
 			ready "Останавливаем службу Shadowsocks "
 			{
 				# Останавливаем сервер SSR
-				/opt/etc/init.d/S22shadowsocks stop &> /dev/null 
+				/opt/etc/init.d/S22shadowsocks stop &> /dev/null
 				rm_file /opt/etc/shadowsocks.json
 				opkg remove shadowsocks-libev --force-depends &> /dev/null
 
@@ -748,14 +749,14 @@ all_services_rm_develop_mode() {
 		else
 			ready "Останавливаем службу dnsmasq "
 			{
-				/opt/etc/init.d/S56dnsmasq stop &> /dev/null 
+				/opt/etc/init.d/S56dnsmasq stop &> /dev/null
 				rm_file /opt/etc/dnsmasq.conf
 				opkg remove dnsmasq --force-depends &> /dev/null
 			} && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
 
 			ready "Останавливаем службу dnscrypt-proxy2 "
 			{
-				/opt/etc/init.d/S09dnscrypt-proxy2 stop &> /dev/null 
+				/opt/etc/init.d/S09dnscrypt-proxy2 stop &> /dev/null
 				rm_file /opt/etc/dnscrypt-proxy.toml
 				opkg remove dnscrypt-proxy2 --force-depends &> /dev/null
 			} && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
@@ -767,7 +768,7 @@ all_services_rm_develop_mode() {
 
 # ------------------------------------------------------------------------------------------
 #
-#	 Удаляет полностью пакет Квас с устройства
+#	 Удаляет полностью пакет Морс с устройства
 #	 $1 - тип удаления
 #		<ПУСТО> - если без аргументов, то удаляем без удаления пакетов, но со всеми архивами
 #	 	full - удаляем полностью со всеми ранее установленными пакетами и файлами архивов
@@ -781,7 +782,7 @@ cmd_uninstall() {
 	rm_type=${1}; sure="${2}";
 	answer_yes='y|Y|Yes|yes|YES|да|Да|ДА'
 	[ -n "${APP_RELEASE}" ] && rel="-${APP_RELEASE}" || rel=''
-	echo -e "Удаление пакета ${GREEN}КВАС™${NOCL} версии ${GREEN}${APP_VERSION}${rel}${NOCL}..."
+	echo -e "Удаление пакета ${GREEN}МОРС™${NOCL} версии ${GREEN}${APP_VERSION}${rel}${NOCL}..."
 
 
 	if [ -n "${rm_type}" ] && [[ "${rm_type}" =~ "${answer_yes}" ]] \
@@ -829,17 +830,17 @@ cmd_uninstall() {
 		fi
 
 		# Подключаем библиотеку keen_api
-		#source /opt/apps/kvas/bin/libs/keen_api
-		# Удаляем DNS сервера, установленне для Кваса
+		#source /opt/apps/mors/bin/libs/keen_api
+		# Удаляем DNS сервера, установленне для Морса
 		#del_dns_router_server_ip $(get_router_ip) ${MAIN_DNS_PORT}
 		# Устанавливаем DNS роутера и порт по умолчанию
 		#set_dns_router_server_ip "77.88.8.8" "53"
 
-		# Удаляем правила в брандмауэре, установленные при инсталяции Кваса
+		# Удаляем правила в брандмауэре, установленные при инсталяции Морса
 		# del_firewall_rules 53 tcp "deny"
 		# del_firewall_rules 53 udp "deny"
 
-		# Удаляем правила в брандмауэре, установленные при инсталяции Кваса
+		# Удаляем правила в брандмауэре, установленные при инсталяции Морса
 		# local _local_net="$(get_router_ip | cut -d'.' -f1-3).0"
 		# del_firewall_rules 53 tcp "permit" "${_local_net}"
 		# del_firewall_rules 53 udp "permit" "${_local_net}"
@@ -853,8 +854,8 @@ cmd_uninstall() {
 		#ip4__flush &> /dev/null
 		#if [ $? = 0 ]; then when_ok 'УСПЕШНО'; else when_bad 'ОШИБКА'; fi
 
-		ready 'Удаляем пакет Квас...'
-		opkg remove kvas --autoremove &> /dev/null 
+		ready 'Удаляем пакет Морс...'
+		opkg remove mors --autoremove &> /dev/null
 		when_ok 'УСПЕШНО'
 
 		ready 'Удаляем интегрированные в систему файлы...'
@@ -877,7 +878,7 @@ cmd_uninstall() {
 		fi
 
 		print_line
-		echo "Удаление КВАСа завершено."
+		echo "Удаление МОРСа завершено."
 	fi
 }
 

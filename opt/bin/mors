@@ -1,22 +1,22 @@
 #!/bin/sh
 
-. /opt/apps/kvas/bin/libs/check
-. /opt/apps/kvas/bin/libs/hosts
-. /opt/apps/kvas/bin/libs/route
-. /opt/apps/kvas/bin/libs/tags
-. /opt/apps/kvas/bin/libs/update
-. /opt/apps/kvas/bin/libs/vless
-. /opt/apps/kvas/bin/libs/vpn
-. /opt/apps/kvas/bin/main/setup
+. /opt/apps/mors/bin/libs/check
+. /opt/apps/mors/bin/libs/hosts
+. /opt/apps/mors/bin/libs/route
+. /opt/apps/mors/bin/libs/tags
+. /opt/apps/mors/bin/libs/update
+. /opt/apps/mors/bin/libs/vless
+. /opt/apps/mors/bin/libs/vpn
+. /opt/apps/mors/bin/main/setup
 
 #------------------------------------------------------------------------------
 #
-#	ПАКЕТ КВАС
-#	файл ./kvas/bin/kvas -> /opt/bin/kvas
+#	ПАКЕТ МОРС
+#	файл ./mors/bin/mors -> /opt/bin/mors
 #
 #------------------------------------------------------------------------------
 #
-#	Данный файл служит для запуска пакета КВАС из командной строки
+#	Данный файл служит для запуска пакета МОРС из командной строки
 #	и содержит основные команды запуска пакета:
 #	Обработка получаемых аргументов скрипта
 #	$1 - команда для обработки
@@ -33,7 +33,7 @@
 #	Функция оторажения списка доменных имен и поиска доменного имени
 #	$1 - строка поиска
 # ------------------------------------------------------------------------------------------
-cmd_show_kvas_list(){
+cmd_show_mors_list(){
 
 	local domain_to_search="${1}"
 	if [ -z "${domain_to_search}" ] ; then
@@ -56,19 +56,19 @@ if  echo "${1}" | grep -qvEi 'uninstall' && [ -z "$(get_config_value "SETUP_FINI
 	exit 0
 fi
 
-#clear_file_content "${KVAS_LIST_FILE}"
+#clear_file_content "${MORS_LIST_FILE}"
 
 print_line
 case "${1}" in
 	setup)
-							echo "Настройка пакета КВАС завершена!"
-							echo "Для удаления пакета наберите 'kvas uninstall'"
+							echo "Настройка пакета МОРС завершена!"
+							echo "Для удаления пакета наберите 'mors uninstall'"
 							;;
 
 	# Работа со списком
 
 	show | list | search | find)
-							cmd_show_kvas_list "${2}"
+							cmd_show_mors_list "${2}"
 		;;
 	purge | clear)			cmd_clear_list "${2}"
 		;;
@@ -214,16 +214,16 @@ case "${1}" in
 
 	log)
 		case "${2}" in
-			error | err) syslog__show "${2}" 'КВАС' 'Ошибки Кваса:'                   "${3}" ;;
-			info)        syslog__show "${2}" 'КВАС' 'Информационные сообщения Кваса:' "${3}" ;;
-			*)           syslog__show ''     'КВАС' 'События Кваса:'                  "${2}" ;;
+			error | err) syslog__show "${2}" 'МОРС' 'Ошибки Морса:'                   "${3}" ;;
+			info)        syslog__show "${2}" 'МОРС' 'Информационные сообщения Морса:' "${3}" ;;
+			*)           syslog__show ''     'МОРС' 'События Морса:'                  "${2}" ;;
 		esac
 	;;
 	syslog)
 		case "${2}" in
-			error | err) syslog__show "${2}" '!КВАС' 'Ошибки системы:'                   "${3}" ;;
-			info)        syslog__show "${2}" '!КВАС' 'Информационные сообщения системы:' "${3}" ;;
-			*)           syslog__show ''     '!КВАС' 'События системы:'                  "${2}" ;;
+			error | err) syslog__show "${2}" '!МОРС' 'Ошибки системы:'                   "${3}" ;;
+			info)        syslog__show "${2}" '!МОРС' 'Информационные сообщения системы:' "${3}" ;;
+			*)           syslog__show ''     '!МОРС' 'События системы:'                  "${2}" ;;
 		esac
 	;;
 
@@ -250,7 +250,7 @@ case "${1}" in
 	                      [ -n "${2}" ] && exit 0
 	;;
 
-	reset | init)	        cmd_kvas_init
+	reset | init)	        cmd_mors_init
 		;;
 
 	# Управление пакетом
@@ -259,15 +259,15 @@ case "${1}" in
 
 	version | ver)			version
 		;;
-	upgrade | update)		sh /opt/apps/kvas/bin/main/upgrade "${2}" "${3}"; exit 0
+	upgrade | update)		sh /opt/apps/mors/bin/main/upgrade "${2}" "${3}"; exit 0
 		;;
-	rollback)				sh /opt/apps/kvas/bin/main/upgrade rollback "${2}"; exit 0
+	rollback)				sh /opt/apps/mors/bin/main/upgrade rollback "${2}"; exit 0
 		;;
 
 	# Отключение и удаление
 
-	pause|freeze)           cmd_pause_kvas ;;
-	unpause|unfreeze)       cmd_unpause_kvas ;;
+	pause|freeze)           cmd_pause_mors ;;
+	unpause|unfreeze)       cmd_unpause_mors ;;
 
 	uninstall ) 			cmd_uninstall  "${2}" "${3}"
 		;;

@@ -1,7 +1,7 @@
 #!/bin/sh
 
 if [ "${1}" = 'start' ] ; then
-	. /opt/apps/kvas/bin/libs/ndm
+	. /opt/apps/mors/bin/libs/ndm
 
 	# стартуем ipset'ы, используемые DNS-серверами
 	# до старта самих DNS-серверов

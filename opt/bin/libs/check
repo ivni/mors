@@ -1,9 +1,9 @@
 #!/bin/sh
 #------------------------------------------------------------------------------
-#	ПАКЕТ КВАС
+#	ПАКЕТ МОРС
 #------------------------------------------------------------------------------
 #
-#	Данный файл содержит функции для проверки работы пакета Квас
+#	Данный файл содержит функции для проверки работы пакета Морс
 #
 # ------------------------------------------------------------------------------
 #	Разработчик: mail@zeleza.ru
@@ -11,8 +11,8 @@
 #	Лицензия: Apache License 2.0
 # ------------------------------------------------------------------------------------------
 
-. /opt/apps/kvas/bin/libs/main
-. /opt/apps/kvas/bin/libs/vpn
+. /opt/apps/mors/bin/libs/main
+. /opt/apps/mors/bin/libs/vpn
 
 NOT_IN_TABLE=false
 IPSET=$(which ipset)
@@ -98,7 +98,7 @@ dnsmasq_check() {
 
 	[ -f /opt/etc/init.d/S56dnsmasq ] && {
 	
-		! [ -f "${DNSMASQ_IPSET_HOSTS}" ] && /opt/apps/kvas/bin/main/dnsmasq &> /dev/null
+		! [ -f "${DNSMASQ_IPSET_HOSTS}" ] && /opt/apps/mors/bin/main/dnsmasq &> /dev/null
 		ready "Состояние службы dnsmasq"
 		if /opt/etc/init.d/S56dnsmasq status | grep -q alive ; then
 			when_ok "ЗАПУЩЕНА"
@@ -109,7 +109,7 @@ dnsmasq_check() {
 				when_ok "УСПЕШНО"
 			else
 				when_bad "ОШИБКА"
-				error "Запустите диагностику командой kvas debug"
+				error "Запустите диагностику командой mors debug"
 				exit 1
 			fi
 		fi
@@ -154,17 +154,17 @@ vpn_check(){
 						when_ok "ДОБАВЛЕНЫ"
 					else
 						when_bad "ОТСУТСТВУЮТ"
-						error "Запустите диагностику командой kvas debug"
+						error "Запустите диагностику командой mors debug"
 						exit 1
 					fi
 				else
 					when_bad "ОТСУТСТВУЕТ"
-					error "Запустите диагностику командой kvas debug"
+					error "Запустите диагностику командой mors debug"
 					exit 1
 				fi
 			else
 				when_bad "ПУСТА"
-				error "Запустите диагностику командой kvas debug"
+				error "Запустите диагностику командой mors debug"
 				exit 1
 			fi
 		else
@@ -179,7 +179,7 @@ vpn_check(){
 				when_ok "ПОДКЮЧЕНО"
 			else
 				when_bad "ОШИБКА"
-				error "Запустите диагностику командой kvas debug"
+				error "Запустите диагностику командой mors debug"
 				exit 1
 			fi
 		fi
@@ -204,7 +204,7 @@ shadowsocks_check() {
 				when_ok "УСПЕШНО"
 			else
 				when_bad "ОШИБКА"
-				error "Запустите диагностику командой kvas debug"
+				error "Запустите диагностику командой mors debug"
 				exit 1
 			fi
 		fi
@@ -239,7 +239,7 @@ dnscrypt_proxy_check() {
 				when_ok "ЗАПУЩЕНА"
 			else
 				when_bad "ОШИБКА"
-				error "Запустите диагностику командой kvas debug"
+				error "Запустите диагностику командой mors debug"
 				exit 1
 			fi
 		fi
@@ -301,26 +301,26 @@ iptable_check() {
 #
 # ------------------------------------------------------------------------------------------
 ipset_check() {
-	ready "Заполнение ipset таблицы скриптами КВАСа"
-	if ! [ -f "${KVAS_LIST_FILE}" ] || \
-	[ "$(grep -vcE '^$|#' "${KVAS_LIST_FILE}" )" -eq 0 ] ; then
-		cp /opt/apps/kvas/etc/conf/kvas.list "${KVAS_LIST_FILE}"
+	ready "Заполнение ipset таблицы скриптами МОРСа"
+	if ! [ -f "${MORS_LIST_FILE}" ] || \
+	[ "$(grep -vcE '^$|#' "${MORS_LIST_FILE}" )" -eq 0 ] ; then
+		cp /opt/apps/mors/etc/conf/mors.list "${MORS_LIST_FILE}"
 	fi
 	ip4set_create_table
 	sleep 3
-	/opt/apps/kvas/bin/main/ipset &> /dev/null
+	/opt/apps/mors/bin/main/ipset &> /dev/null
 	if ipset list "${IPSET_TABLE_NAME}" | grep -vEi '^[a-z]' &> /dev/null; then
 		when_ok "ЗАПОЛНЕНА"
 	else
 		when_bad "ПУСТАЯ"
 		ipset_flush &> /dev/null
-		/opt/apps/kvas/bin/main/ipset &> /dev/null
+		/opt/apps/mors/bin/main/ipset &> /dev/null
 		ready "Повторная проверка заполнения ipset таблицы"
 		if ipset list "${IPSET_TABLE_NAME}" | grep -vEi '^[a-z]' &> /dev/null; then
 			when_ok "ПРОЙДЕНА"
 		else
 			when_bad "ОШИБКА"
-			error "Проверьте работу скрипта /opt/apps/kvas/bin/main/ipset"
+			error "Проверьте работу скрипта /opt/apps/mors/bin/main/ipset"
 			exit 1
 		fi
 	fi
@@ -328,27 +328,27 @@ ipset_check() {
 
 # ------------------------------------------------------------------------------------------
 #
-#	 Проверяем заполнение kvas.dnsmasq
+#	 Проверяем заполнение mors.dnsmasq
 #
 # ------------------------------------------------------------------------------------------
-kvas_dnsmasq_check() {
+mors_dnsmasq_check() {
 	ready "Список правил ipset для dnsmasq"
 	if [ "$(cat < "${DNSMASQ_IPSET_HOSTS}" | wc -l)" -gt 0 ]; then
 		when_ok "ЗАПОЛНЕН"
 	else
 		when_bad "ПУСТ"
-		/opt/apps/kvas/bin/main/dnsmasq
+		/opt/apps/mors/bin/main/dnsmasq
 		ready "Повторная проверка заполнения списка правил ipset для dnsmasq"
 		if [ "$(cat < "${DNSMASQ_IPSET_HOSTS}" | wc -l)" -gt 0 ]; then
 			when_ok "ПРОЙДЕНА"
 		else
 			when_bad "ОШИБКА"
 			print_line
-			if [ "$(cat < "${KVAS_LIST_FILE}" | wc -l)" -gt 0 ]; then
-				error "Белый список пуст - /opt/etc/kvas.list"
-				warning "Добавьте туда хосты командой ${BLUE}kvas add host.com"
+			if [ "$(cat < "${MORS_LIST_FILE}" | wc -l)" -gt 0 ]; then
+				error "Белый список пуст - /opt/etc/mors.list"
+				warning "Добавьте туда хосты командой ${BLUE}mors add host.com"
 			else
-				error "Проверьте работу скрипта/opt/apps/kvas/bin/main/dnsmasq"
+				error "Проверьте работу скрипта/opt/apps/mors/bin/main/dnsmasq"
 			fi
 			print_line
 			exit 1
@@ -368,18 +368,18 @@ cmd_adguard_check() {
 			echo_debug "Журнал загрузки AdGuard Home (20 крайних записей)\nиз файла ${ADGUARDHOME_LOG}" "$(cat < "${ADGUARDHOME_LOG}" | tail )"
 		else
 			when_bad "ПУСТ"
-			/opt/apps/kvas/bin/main/adguard &> /dev/null
+			/opt/apps/mors/bin/main/adguard &> /dev/null
 			ready "Повторная проверка заполнения списка правил ipset для AdGuard Home"
 			if [ "$(cat < "${ADGUARD_IPSET_FILE}" | wc -c)" -gt 6 ]; then
 				when_ok "ПРОЙДЕНА"
 			else
 				when_bad "ОШИБКА"
 				print_line
-				if [ "$(cat < "${KVAS_LIST_FILE}" | wc -l)" -gt 0 ]; then
-					error "Белый список пуст - /opt/etc/kvas.list"
-					warning "Добавьте в него хосты командой ${BLUE}kvas add имя_домена${NOCL}"
+				if [ "$(cat < "${MORS_LIST_FILE}" | wc -l)" -gt 0 ]; then
+					error "Белый список пуст - /opt/etc/mors.list"
+					warning "Добавьте в него хосты командой ${BLUE}mors add имя_домена${NOCL}"
 				else
-					error "Проверьте работу скрипта/opt/apps/kvas/bin/main/adguard"
+					error "Проверьте работу скрипта/opt/apps/mors/bin/main/adguard"
 				fi
 				print_line
 				exit 1
@@ -401,7 +401,7 @@ adblock_dnsmasq_check() {
 			when_bad "ПУСТ"
 			warning "Заполняем список блокировки рекламы принудительно "
 			print_line
-			/opt/apps/kvas/bin/main/adblock
+			/opt/apps/mors/bin/main/adblock
 			ready "Перезапуск службы dnsmasq"
 			/opt/etc/init.d/S56dnsmasq restart &> /dev/null
 			[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
@@ -451,11 +451,11 @@ internet_check() {
 #
 # ------------------------------------------------------------------------------------------
 hosts_list_check(){
-	{ ! [ -f "${KVAS_LIST_FILE}" ] || [ "$(cat < "${KVAS_LIST_FILE}" | wc -l)" = 0 ];} && {
+	{ ! [ -f "${MORS_LIST_FILE}" ] || [ "$(cat < "${MORS_LIST_FILE}" | wc -l)" = 0 ];} && {
 		warning "Файл защищенного списка не существует"
 		warning "Создаем новый, но c одним хостом для проверки: myip2.ru"
 		print_line
-		kvas add myip2.ru
+		mors add myip2.ru
 	}
 }
 # ------------------------------------------------------------------------------------------
@@ -484,13 +484,13 @@ ipset_site_visit_check() {
 	pause
 	
 	#  Проверяем наличие в защищенном списке ifconfig.me
-	grep -q ifconfig.me ${KVAS_LIST_FILE} || {
+	grep -q ifconfig.me ${MORS_LIST_FILE} || {
 		# если домена в списке нет, то добавляем его
 		cmd_add_one_host ifconfig.me no '' &> /dev/null
 	}
 
 
-	/opt/apps/kvas/bin/main/ipset &> /dev/null
+	/opt/apps/mors/bin/main/ipset &> /dev/null
 	print_line
 	ready "Таблица ipset"
 	if ipset list ${IPSET_TABLE_NAME} | grep -vqEi '^[a-z]'; then
@@ -499,21 +499,21 @@ ipset_site_visit_check() {
 		when_bad "ПУСТА"
 		print_line
 		warning "Попробуйте запустить тест снова и/или обратитесь к документации:"
-		warning "https://github.com/qzeleza/kvas/wiki"
+		warning "https://github.com/ivni/mors/wiki"
 	fi
 #	print_line
 
 }
 
 cmd_test_warning() {
-	echo 'Данная команда ещё не обновлена под новую версию Кваса.'
+	echo 'Данная команда ещё не обновлена под новую версию Морса.'
 	echo 'Предыдущая может сообщать не верную информацию или даже что-нибудь не верно обновить.'
-	echo 'Если всё равно хотите ей воспользоваться, вызовите kvas test_old'
+	echo 'Если всё равно хотите ей воспользоваться, вызовите mors test_old'
 }
 
 # ------------------------------------------------------------------------------------------
 #
-#	 Проверяем работу всех сервисов kvas
+#	 Проверяем работу всех сервисов mors
 #
 # ------------------------------------------------------------------------------------------
 cmd_state_checker() {
@@ -557,16 +557,16 @@ cmd_state_checker() {
 	print_line
 #
 #	Проверка наличия ip адресов хостов в таблице ipset - попытка номер раз
-	kvas_list_ipset_check
+	mors_list_ipset_check
 	if [ "${NOT_IN_TABLE}" = true ]; then
 		print_line
 #		если хотя бы один из адресов не находится в таблице, то делаем проверку повторно
-		cmd_kvas_init
+		cmd_mors_init
 		print_line
 		warning "Пробуем запустить повторно."
 		print_line
 #		Проверка наличия ip адресов хостов в таблице ipset
-		kvas_list_ipset_check
+		mors_list_ipset_check
 		NOT_IN_TABLE=false
 	fi
 	print_line
@@ -584,5 +584,5 @@ cmd_state_checker() {
 # ------------------------------------------------------------------------------------------
 ipset_flush() {
 	ipset flush ${IPSET_TABLE_NAME}
-	#  	ipset flush kvas6
+	#  	ipset flush mors6
 }

@@ -2,11 +2,11 @@
 
 #------------------------------------------------------------------------------
 #
-#	ПАКЕТ КВАС
+#	ПАКЕТ МОРС
 #
 #------------------------------------------------------------------------------
 #
-#	Данный файл служит для начального запуска пакета квас при загрузке системы
+#	Данный файл служит для начального запуска пакета морс при загрузке системы
 #	https://github.com/ndmsystems/packages/wiki/Opkg-Component с командой start
 #	основными задачами являются:
 #
@@ -21,8 +21,8 @@
 
 case ${1} in
 	start|restart)
-		. /opt/apps/kvas/bin/libs/vpn
-		cmd_kvas_init no
+		. /opt/apps/mors/bin/libs/vpn
+		cmd_mors_init no
 		if has_ssr_enable; then
 			while /opt/etc/init.d/S22shadowsocks status | grep -q dead
 			do

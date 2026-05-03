@@ -1,3 +1,10 @@
+## Unreleased
+- Пакет и CLI переименованы с `kvas` на `mors`.
+- Runtime-пути, конфигурационные файлы, init/NDM hooks, DNSMasq/AdGuard generated files и internal ipset/iptables-имена переведены на `mors`/`MORS`.
+- Обновление пакета теперь ориентировано на релизы `ivni/mors` и артефакты вида `mors_*_all.ipk`.
+- Совместимость со старой установленной копией `kvas` и старой командой `kvas` не предусмотрена.
+- Обновлены README, шаблон bug report и AGENTS.md под прямое переименование в `mors`.
+
 ## 1.1.9 beta 10
 - [#233](https://github.com/qzeleza/kvas/pull/233) Iptables правила
 

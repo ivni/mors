@@ -1,6 +1,6 @@
 #!/bin/sh
 #------------------------------------------------------------------------------
-#	ПАКЕТ КВАС
+#	ПАКЕТ МОРС
 #------------------------------------------------------------------------------
 #
 #	Данный файл служит библиотекой переменных среды и функций,
@@ -15,7 +15,7 @@
 
 # ------------------------------------------------------------------------------------------
 # Подключаем основные функции
-. /opt/apps/kvas/bin/libs/main
+. /opt/apps/mors/bin/libs/main
 # ------------------------------------------------------------------------------------------
 
 
@@ -24,15 +24,15 @@ RULE_PRIORITY=1778
 MARK_NUM=0xd1000
 DNS_PORT=9753
 
-IPSET_DESTINATION_EXCLUDED=KVAS_DESTINATION_EXCLUDED
+IPSET_DESTINATION_EXCLUDED=MORS_DESTINATION_EXCLUDED
 
-CHAIN_DNS=KVAS_DNS
+CHAIN_DNS=MORS_DNS
 TABLE_DNS=nat
 
-CHAIN_MARK=KVAS_MARK
+CHAIN_MARK=MORS_MARK
 TABLE_MARK=mangle
 
-CHAIN_DNAT_TO_PORT=KVAS_DNAT_TO_PORT
+CHAIN_DNAT_TO_PORT=MORS_DNAT_TO_PORT
 TABLE_DNAT_TO_PORT=nat
 #ToDo: переписать на https://github.com/shadowsocks/shadowsocks-libev?tab=readme-ov-file#transparent-proxy-pure-tproxy
 

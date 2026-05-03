@@ -1,10 +1,10 @@
 #!/bin/sh
 #------------------------------------------------------------------------------
-#	ПАКЕТ КВАС
+#	ПАКЕТ МОРС
 #------------------------------------------------------------------------------
 #
-#	Данный файл служит для запуска AdguardHome соместно с пакетом КВАС
-#	1. Создает новую таблицу ipset под названием kvas
+#	Данный файл служит для запуска AdguardHome соместно с пакетом МОРС
+#	1. Создает новую таблицу ipset под названием mors
 #	2. Обновляет таблицу ipset данными из файла с доменными именами, IP и сетями
 #
 #	Файл содержит основные аргументы запуска AdguardHome,
@@ -35,8 +35,8 @@ DESC=${PROCS}
 PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 case ${1} in
         start|restart)
-                . /opt/apps/kvas/bin/libs/vpn
-                cmd_kvas_init initd
+                . /opt/apps/mors/bin/libs/vpn
+                cmd_mors_init initd
                 ready "Перезапускаем AdGuardHome"
                 . /opt/etc/init.d/rc.func &>/dev/null
                 sleep 1

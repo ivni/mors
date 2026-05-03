@@ -5,7 +5,7 @@
 #
 #--------------------------------------------------------------------------------------------------------------
 
-# по умолчанию включаем режим обновления Кваса
+# по умолчанию включаем режим обновления Морса
 UPDATE_MODE=true
 
 #--------------------------------------------------------------------------------------------------------------
@@ -109,7 +109,7 @@ get_package_name(){
 #--------------------------------------------------------------------------------------------------------------
 rm_tmp_cache(){
 #	Функция удаляет все временные файлы при установке пакета,
-#	чтобы кеш не мешал установке нового пакета Квас
+#	чтобы кеш не мешал установке нового пакета Морс
 
 	# переводим вывод ошибок в стандартный файл err.stdout
 	# в связи с тем, что это единственный способ перенаправить ошибки
@@ -117,14 +117,14 @@ rm_tmp_cache(){
 	# в купе с xargs выводят в терминал
 	exec 2> err.stdout
 	find / | grep '/tmp' \
-		   | grep -v "${package_name}" | grep kvas | xargs rm -rf
+		   | grep -v "${package_name}" | grep mors | xargs rm -rf
 #   Переводим вывод ошибок в терминал
 	rm -f err.stdout; exec 2>&1
 }
 
 #--------------------------------------------------------------------------------------------------------------
 select_release_from_list(){
-#	Функция выводит на экран доступные в репозитории версии пакетов Квас
+#	Функция выводит на экран доступные в репозитории версии пакетов Морс
 # 	и позволяет выбрать один из них в случае использования режима "отката"
 
 	url_list=$(curl -s "${release_url}" | jq -r '.[] | .assets | .[] | .browser_download_url')
@@ -133,7 +133,7 @@ select_release_from_list(){
 
 	if [ -n "${rel_list}" ]; then
 		print_line
-		echo -e "${GREEN}Список доступных релизов пакета Квас:${NOCL}"
+		echo -e "${GREEN}Список доступных релизов пакета Морс:${NOCL}"
 		print_line
 #		читаем данные из переменной со списком доступных релизов
 #		и выводим их на экран, при этом крайняя версия пакета всегда в списке первая
@@ -183,13 +183,13 @@ remove_nano(){
 #--------------------------------------------------------------------------------------------------------------
 
 # Ссылка на репозиторий на GitHub для получения крайней версии пакета
-release_url=https://api.github.com/repos/qzeleza/kvas/releases
+release_url=https://api.github.com/repos/ivni/mors/releases
 # Получаем ссылку на крайний релиз пакета на GitHub
 package_url=$(curl -sH "Accept: application/vnd.github.v3+json" ${release_url}/latest | sed -n 's/.*browser_download_url\": "\(.*\)\"/\1/p;'| tr -d ' ' |  sed '/^$/d')
 # Выделяем имя пакета из ссылки
 package_name=$(get_package_name "${package_url}")
-# путь к файлу конфигурации пакета Квас
-kvas_conf=/opt/etc/kvas.conf
+# путь к файлу конфигурации пакета Морс
+mors_conf=/opt/etc/mors.conf
 # Вычисляем текущую ширину экрана для печати линий определенной ширины
 length=$(stty size 2>/dev/null | cut -d' ' -f2)
 # длина распечатываемой линии символов будет меньше на 12 символов чем ширина экрана
@@ -242,29 +242,29 @@ if echo "${*}" | grep -qv 'force' ; then
 		select_release_from_list package_url
 		package_name=$(get_package_name "${package_url}")
 
-	elif [ -f /opt/bin/kvas ] && [ -f ${kvas_conf} ]; then
+	elif [ -f /opt/bin/mors ] && [ -f ${mors_conf} ]; then
 	#	Если это не форсированная установка и не откат, то
-	#	проверяем - обнаружена ли предыдущая версия Кваса
+	#	проверяем - обнаружена ли предыдущая версия Морса
 	#	и сравниваем ее версию с новой версией
-		prev_ver=$(cat < ${kvas_conf} \
+		prev_ver=$(cat < ${mors_conf} \
 					| grep -E 'VERSION|RELEASE' \
 					| tr -d '\n' | tr '-' '_' \
 					| sed 's/^APP_VERSION=\(.*\)APP_RELEASE=\(.*\)/\1-\2\n/')
-		next_ver=$(echo "${package_name}" |  sed 's/kvas_\(.*\)_all.*/\1/')
+		next_ver=$(echo "${package_name}" |  sed 's/mors_\(.*\)_all.*/\1/')
 		if [ "${prev_ver}" = "${next_ver}" ] ; then
-			print_error "Квас все еще свеж, обновлений пока нет."
+			print_error "Морс все еще свеж, обновлений пока нет."
 			exit 1
 		fi
 	else
-	#	Если НЕ обнаружена предыдущая версия Кваса
-	#	то это значит, что производим новую установку Кваса
+	#	Если НЕ обнаружена предыдущая версия Морса
+	#	то это значит, что производим новую установку Морса
 		UPDATE_MODE=false
 	fi
 fi
 
 #--------------------------------------------------------------------------------------------------------------
 # получаем из имени файла его номер версии
-version=$(echo "${package_name}" | sed 's/kvas_\(.*\)_all.*/\1/; s/-/ /g; s/_/-/' )
+version=$(echo "${package_name}" | sed 's/mors_\(.*\)_all.*/\1/; s/-/ /g; s/_/-/' )
 
 # если в параметрах нет аргумента rollback, то выводим линию
 echo "${*}" | grep -q 'rollback' && CL_VER=${RED} || { 
@@ -272,7 +272,7 @@ echo "${*}" | grep -q 'rollback' && CL_VER=${RED} || {
 	CL_VER=${BLUE}
 }
 # запускаем этап установки пакета
-echo -e "${GREEN}Установка пакета КВАС версии ${CL_VER}[${version}]${NOCL}"
+echo -e "${GREEN}Установка пакета МОРС версии ${CL_VER}[${version}]${NOCL}"
 
 # в случае отсутствия возможности создания новой папки
 cd /opt && mkdir -p /opt/packages || {
@@ -307,16 +307,16 @@ ready 'Загружаем пакет...'
 
 #--------------------------------------------------------------------------------------------------------------
 # если обнаружена предыдущая незавершенная установка пакета
-if [ -f /opt/bin/kvas ] && kvas | grep -q 'Настройка пакета не завершена' ; then
+if [ -f /opt/bin/mors ] && mors | grep -q 'Настройка пакета не завершена' ; then
 	ready 'Удаляем незавершенную ранее установку пакета ...'
-	kvas uninstall "${remove_mode}" yes &>/dev/null && when_ok || when_err
+	mors uninstall "${remove_mode}" yes &>/dev/null && when_ok || when_err
 else
 #	если все хорошо и обнаружена предыдущая версия пакета, то удаляем ее
-	if [ -f /opt/bin/kvas ]; then
-		ver=$(grep "APP_VERSION=" "${kvas_conf}" | cut -d'=' -f2)
-		rel=$(grep "APP_RELEASE=" "${kvas_conf}" | cut -d'=' -f2)
+	if [ -f /opt/bin/mors ]; then
+		ver=$(grep "APP_VERSION=" "${mors_conf}" | cut -d'=' -f2)
+		rel=$(grep "APP_RELEASE=" "${mors_conf}" | cut -d'=' -f2)
 		#ready "Удаляем предыдущую версию пакета  [${ver} ${rel}]..."
-		kvas uninstall "${remove_mode}" yes # && when_ok || when_err
+		mors uninstall "${remove_mode}" yes # && when_ok || when_err
 	fi
 fi
 
@@ -330,14 +330,14 @@ ready "Устанавливаем новую версию пакета [${versio
 
 #--------------------------------------------------------------------------------------------------------------
 connect_home_nets(){
-	# подключаем одну гостевую сеть к Квасу, если она имеется
+	# подключаем одну гостевую сеть к Морсу, если она имеется
 	/opt/sbin/ip a | grep global | grep -v br0 | grep -qE br[1-9] &&  {
 		clear
-		kvas vpn net add
+		mors vpn net add
 	}
 }
 
-if ! [ -f /opt/bin/kvas ] ; then
+if ! [ -f /opt/bin/mors ] ; then
 	print_line
 # 	если файл пакета не найден после установки пакета, значит произошла ошибка
 	print_error "Пакет установлен некорректно - отсутствуют исполняемые файлы!"
@@ -352,19 +352,19 @@ else
 		echo 'Отключаем работу через DNS-провайдера  роутера...'
 		echo "Возможно, что сейчас произойдет выход из сессии..."
 		echo "В этом случае необходимо заново войти в сессию по ssh"
-		echo "и выполнить команду 'kvas setup ${UPDATE_MODE}'"
+		echo "и выполнить команду 'mors setup ${UPDATE_MODE}'"
 		rci_post '[{"opkg": {"dns-override": true}},{"system": {"configuration": {"save": true}}}]' &>/dev/null 
 	}
 		# 	если файл пакета найден после установки пакета,
 	# 	то запускаем установку и затем тестирование пакета
-	kvas setup "${UPDATE_MODE}" && {
+	mors setup "${UPDATE_MODE}" && {
 		# подключаем гостевые сети, если они имется
 		connect_home_nets
 		print_line
 		echo 'Тестируем настройки...'
 #		В данном случае, чтобы не печатать линию после
 #		окончания тестирования дважды передаем параметр upgrade
-		kvas test upgrade
+		mors test upgrade
 	}
 fi
 

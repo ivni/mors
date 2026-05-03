@@ -1,7 +1,7 @@
 #!/bin/sh
 # ------------------------------------------------------------------------------------------
 #
-# 	ПРОЕКТ КВАС
+# 	ПРОЕКТ МОРС
 #
 # 	Данный файл служит для обработки тегов
 #   Реализованы такие функции:
@@ -12,17 +12,17 @@
 #
 # ------------------------------------------------------------------------------------------
 #
-#	Разработчик: kvas@zeleza.ru
+#	Разработчик: mors@zeleza.ru
 #	Дата: 02/08/2024
 #	Лицензия: Apache License 2.0
 #
 # ------------------------------------------------------------------------------------------
 
-# . /opt/apps/kvas/bin/libs/main
+# . /opt/apps/mors/bin/libs/main
 
 # Файл с тегами
-TAGS_FILE=/opt/apps/kvas/etc/conf/tags.list
-KVAS_LIST_FILE=/opt/etc/kvas.list
+TAGS_FILE=/opt/apps/mors/etc/conf/tags.list
+MORS_LIST_FILE=/opt/etc/mors.list
 
 # ------------------------------------------------------------------------------------------
 #
@@ -138,7 +138,7 @@ _get_same_tag_domains_missing_in_protection_list() {
     local _list=""
 
     get_tag_domain_list "$tagname" | while read -r line; do
-        local _host=$(grep "^$line$" "${KVAS_LIST_FILE}")
+        local _host=$(grep "^$line$" "${MORS_LIST_FILE}")
         if [ -n "$_host" ]; then
             _list="${_list} ${line}"
         fi
@@ -201,7 +201,7 @@ cmd_del_domain_from_tag_list() {
 
     # Если задана только секция - удаляем все домены в этой секции
     if [ -z "${domain}" ] ; then
-        read_ynq "Будут удалены все домены с закваской '$section' и само имя закваски.\nВы уверены?" answer
+        read_ynq "Будут удалены все домены из закваски '$section' и само имя закваски.\nВы уверены?" answer
         if [[ "$answer" =~ [qn] ]] ; then return 1; fi
         [ "${answer}" = y ] && {
             sed -i "/\[$section\]/,/\[.*\]/ { /.*$/d }" "${TAGS_FILE}"
@@ -229,7 +229,7 @@ cmd_del_domain_from_tag_list() {
 
 # --------------------------------------------------------------------------------------------
 #
-#   Функция для проверки наличия элементов тега в списке kvas
+#   Функция для проверки наличия элементов тега в списке mors
 #
 # ------------------------------------------------------------------------------------------
 has_section_domains_in_list() {
@@ -243,15 +243,15 @@ has_section_domains_in_list() {
     local partial_present=false
     local missing_elements=""
 
-    [ -f "${KVAS_LIST_FILE}" ] || {
-        # error "Файл '${KVAS_LIST_FILE}' не найден."
+    [ -f "${MORS_LIST_FILE}" ] || {
+        # error "Файл '${MORS_LIST_FILE}' не найден."
         when_bad "ОШИБКА"
         return 1
     }
 
     for domain in $(get_tag_domain_list "$section" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//' ); do
 # echo "$domain"
-        if grep -q "^$domain$" "${KVAS_LIST_FILE}" ; then
+        if grep -q "^$domain$" "${MORS_LIST_FILE}" ; then
             none_present=false
             #[ "$action" = "del" ] && none_present=true
         else
@@ -405,22 +405,22 @@ cmd_update_tags_domain_list() {
     local _force=${1:-no}
     ready "Обновление списка заквасок с ${BLUE}GitHub${NOCL}  прошло" 
 
-    curl -so /opt/tmp/tags.list https://raw.githubusercontent.com/qzeleza/kvas/refs/heads/main/opt/etc/conf/tags.list && when_ok "УСПЕШНО" || {
+    curl -so /opt/tmp/tags.list https://raw.githubusercontent.com/ivni/mors/refs/heads/main/opt/etc/conf/tags.list && when_ok "УСПЕШНО" || {
         error "Не удалось обновить список заквасок с ${BLUE}GitHub${NOCL}."
         error "Пожалуйста, проверьте интернет соединение."
         return 1
     }
     
     if [ "${_force}" = force ] ; then
-        mv -f /opt/tmp/tags.list /opt/apps/kvas/etc/conf/tags.list
+        mv -f /opt/tmp/tags.list /opt/apps/mors/etc/conf/tags.list
     else
-        local _diff=$(diff /opt/apps/kvas/etc/conf/tags.list  /opt/tmp/tags.list  | grep -E '^\+\[' | tr -d +)
+        local _diff=$(diff /opt/apps/mors/etc/conf/tags.list  /opt/tmp/tags.list  | grep -E '^\+\[' | tr -d +)
         if [ -n "${_diff}" ] ; then
             print_line
             echo -e "В список были добавлены следущие закваски:\n${_diff}"
             print_line
             printf "%s" "${_diff}"
-            mv -f /opt/tmp/tags.list /opt/apps/kvas/etc/conf/tags.list
+            mv -f /opt/tmp/tags.list /opt/apps/mors/etc/conf/tags.list
         else
             print_line
             echo -e "В удаленном списке на ${BLUE}GitHub${NOCL} новых заквасок ${RED}не обнаружено${NOCL}."

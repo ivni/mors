@@ -1,8 +1,8 @@
 #!/bin/sh
-source /opt/apps/kvas/bin/libs/main
+source /opt/apps/mors/bin/libs/main
 
 get_config_value(){
-        grep "${1}" "${KVAS_CONF_FILE}" | cut -d'=' -f2
+        grep "${1}" "${MORS_CONF_FILE}" | cut -d'=' -f2
 }
 get_current_entware_vpn_interface() {
         inface_entware=$(get_config_value INFACE_ENT)
@@ -20,7 +20,7 @@ ENTWARE_INTERFACE=$(get_current_entware_vpn_interface)
 CLI_INTERFACE=$(get_current_cli_vpn_interface)
 
 reset_logger(){
-        logger -t "КВАС"  "Осуществляем перезапуск ${CLI_INTERFACE}::${ENTWARE_INTERFACE}"
+        logger -t "МОРС"  "Осуществляем перезапуск ${CLI_INTERFACE}::${ENTWARE_INTERFACE}"
 }
 
 
@@ -50,9 +50,9 @@ get_host_ip(){
                 | grep -E '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
 }
 
-get_ip_from_kvas(){
-        ub_tag=kvas
-        host_list=/opt/etc/kvas.list
+get_ip_from_mors(){
+        ub_tag=mors
+        host_list=/opt/etc/mors.list
         num=0; ip=''
         dns=$(get_config_value DNS_DEFAULT | cut -d'#' -f1)
         while read -r host || [ -n "${host}" ]; do

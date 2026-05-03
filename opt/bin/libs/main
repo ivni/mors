@@ -1,10 +1,10 @@
 #!/bin/sh
 # ------------------------------------------------------------------------------------------
 #
-# 	ПРОЕКТ КВАС
+# 	ПРОЕКТ МОРС
 #
 # ------------------------------------------------------------------------------------------
-# 	Данный файл служит основной библиотекой функций пакета КВАС
+# 	Данный файл служит основной библиотекой функций пакета МОРС
 # ------------------------------------------------------------------------------------------
 #	Разработчик: mail@zeleza.ru
 #	Дата: 21/05/2022
@@ -28,8 +28,8 @@ length=$(stty size 2>/dev/null | cut -d' ' -f2)
 
 PROGRESS_BAR_WIDTH=$((LENGTH-5))  # progress bar length in characters
 
-KVAS_BACKUP_PATH=/opt/etc/.kvas/backup
-IPSET_TABLE_NAME=KVAS_LIST
+MORS_BACKUP_PATH=/opt/etc/.mors/backup
+IPSET_TABLE_NAME=MORS_LIST
 SSR_NAME=ss-redir
 SSR_CMD=/opt/bin/${SSR_NAME}
 # ssr_run()(/opt/bin/sslocal --protocol redir -c /opt/etc/shadowsocks.json ${@}) )
@@ -37,47 +37,47 @@ ssr_run(){ /opt/bin/ss-redir -c /opt/etc/shadowsocks.json ${@} ;}
 
 save_iptables(){ /opt/sbin/iptables-save ${@}; }
 
-KVAS_CONF_FILE=/opt/etc/kvas.conf
-KVAS_LIST_FILE=/opt/etc/kvas.list
+MORS_CONF_FILE=/opt/etc/mors.conf
+MORS_LIST_FILE=/opt/etc/mors.list
 ADGUARDHOME_CONFIG=/opt/etc/AdGuardHome/AdGuardHome.yaml
-ADGUARD_IPSET_FILE=/opt/etc/AdGuardHome/kvas.ipset
+ADGUARD_IPSET_FILE=/opt/etc/AdGuardHome/mors.ipset
 SHADOWSOCKS_CONF=/opt/etc/shadowsocks.json
-DNSMASQ_IPSET_HOSTS=/opt/etc/dnsmasq.d/kvas.dnsmasq
+DNSMASQ_IPSET_HOSTS=/opt/etc/dnsmasq.d/mors.dnsmasq
 DNSMASQ_CONFIG=/opt/etc/dnsmasq.conf
 DNSCRYPT_CONFIG=/opt/etc/dnscrypt-proxy.toml
 ADBLOCK_LIST_EXCEPTION=/opt/etc/adblock/exception.list
-ADBLOCK_HOSTS_FILE=/opt/etc/adblock/ads.kvas.list
+ADBLOCK_HOSTS_FILE=/opt/etc/adblock/ads.mors.list
 ADBLOCK_SOURCES_LIST=/opt/etc/adblock/sources.list
 
-KVAS_CONFIG_BACKUP=${KVAS_BACKUP_PATH}/kvas.conf
-KVAS_LIST_FILE_BACKUP=${KVAS_BACKUP_PATH}/kvas.list
-ADGUARDHOME_CONFIG_BACKUP=${KVAS_BACKUP_PATH}/AdGuardHome.yaml
-ADGUARD_IPSET_FILE_BACKUP=${KVAS_BACKUP_PATH}/kvas.ipset
-SHADOWSOCKS_CONF_BACKUP=${KVAS_BACKUP_PATH}/shadowsocks.json
-DNSMASQ_IPSET_HOSTS_BACKUP=${KVAS_BACKUP_PATH}/kvas.dnsmasq
-DNSMASQ_CONFIG_BACKUP=${KVAS_BACKUP_PATH}/dnsmasq.conf
-DNSCRYPT_CONFIG_BACKUP=${KVAS_BACKUP_PATH}/dnscrypt-proxy.toml
-ADBLOCK_LIST_EXCEPTION_BACKUP=${KVAS_BACKUP_PATH}/exception.list
-ADBLOCK_HOSTS_FILE_BACKUP=${KVAS_BACKUP_PATH}/ads.kvas.list
-ADBLOCK_SOURCES_LIST_BACKUP=${KVAS_BACKUP_PATH}/sources.list
+MORS_CONFIG_BACKUP=${MORS_BACKUP_PATH}/mors.conf
+MORS_LIST_FILE_BACKUP=${MORS_BACKUP_PATH}/mors.list
+ADGUARDHOME_CONFIG_BACKUP=${MORS_BACKUP_PATH}/AdGuardHome.yaml
+ADGUARD_IPSET_FILE_BACKUP=${MORS_BACKUP_PATH}/mors.ipset
+SHADOWSOCKS_CONF_BACKUP=${MORS_BACKUP_PATH}/shadowsocks.json
+DNSMASQ_IPSET_HOSTS_BACKUP=${MORS_BACKUP_PATH}/mors.dnsmasq
+DNSMASQ_CONFIG_BACKUP=${MORS_BACKUP_PATH}/dnsmasq.conf
+DNSCRYPT_CONFIG_BACKUP=${MORS_BACKUP_PATH}/dnscrypt-proxy.toml
+ADBLOCK_LIST_EXCEPTION_BACKUP=${MORS_BACKUP_PATH}/exception.list
+ADBLOCK_HOSTS_FILE_BACKUP=${MORS_BACKUP_PATH}/ads.mors.list
+ADBLOCK_SOURCES_LIST_BACKUP=${MORS_BACKUP_PATH}/sources.list
 
 ADGUARDHOME_LOG=/opt/var/log/AdGuardHome.log
 ADGUARDHOME_DEMON=/opt/etc/init.d/S99adguardhome
 DNSMASQ_DEMON=/opt/etc/init.d/S56dnsmasq
 DNSCRYPT_DEMON=/opt/etc/init.d/S09dnscrypt-proxy2
-HOME_PATH=/opt/apps/kvas
+HOME_PATH=/opt/apps/mors
 
 
 
-ADS_MAIN_SCRIPT=/opt/apps/kvas/bin/main/adblock
-APP_NAME=kvas
-INSTALL_LOG=/opt/tmp/kvas.install.log
+ADS_MAIN_SCRIPT=/opt/apps/mors/bin/main/adblock
+APP_NAME=mors
+INSTALL_LOG=/opt/tmp/mors.install.log
 CRONTAB_FILE=/opt/etc/crontab
-UPDATE_BIN_FILE=/opt/apps/kvas/bin/main/update
+UPDATE_BIN_FILE=/opt/apps/mors/bin/main/update
 DNS_LOCAL_DEMON_FILE=/opt/etc/ndm/netfilter.d/100-dns-local
 IPSET_REDIRECT_DEMON_FILE=/opt/etc/ndm/netfilter.d/100-proxy-redirect
 INFACE_NAMES_FILE=/opt/etc/inface_equals
-KVAS_START_FILE=/opt/etc/init.d/S96kvas
+MORS_START_FILE=/opt/etc/init.d/S96mors
 
 # VLESS over Proxy
 PROXY_INFACE_NUMEBER=21
@@ -86,7 +86,7 @@ PROXY_VLESS_NAME=Proxy${PROXY_INFACE_NUMEBER}
 # Файл с сетями, запросы к которым не должны попадать в тоннель
 # Данный файл постоянен, не доступен пользователям на редактирование
 # https://en.wikipedia.org/wiki/Reserved_IP_addresses
-FILE_RESERVED=/opt/apps/kvas/etc/conf/reserved.ip
+FILE_RESERVED=/opt/apps/mors/etc/conf/reserved.ip
 
 IP_FILTER='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
 IP_DEVICE_FILTER='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[1-9]{1,3}' # на конце любая цифра, кроме 0
@@ -101,8 +101,8 @@ get_regexp_ip_with_or_without_port() {
 	echo "^(${IP_FILTER}|${IP_PORT_FILTER})$"
 }
 
-ERROR_LOG_FILE=/opt/tmp/kvas.err.log
-APP_NAME_DESC=КВАС
+ERROR_LOG_FILE=/opt/tmp/mors.err.log
+APP_NAME_DESC=МОРС
 
 MAIN_DNS_PORT=9753
 LOCALHOST_IP=127.0.0.1
@@ -643,7 +643,7 @@ is_vless_over_proxy_enabled() {
 	local tunnel_keenetic_name
 	tunnel_keenetic_name=$(get_config_value 'INFACE_CLI')
 	if [ -z "${tunnel_keenetic_name}" ] ; then
-		error "[${FUNCNAME}] В конфигурации Квас не найдена информация о тоннеле"
+		error "[${FUNCNAME}] В конфигурации Морс не найдена информация о тоннеле"
 		false
 		return
 	fi
@@ -728,7 +728,7 @@ pause()(read -r pause &> /dev/null)
 # ------------------------------------------------------------------------------------------
 #
 # 		Получаем значение переменной из файла конфигурации
-# 		/opt/apps/kvas/etc/conf/kvas.conf
+# 		/opt/apps/mors/etc/conf/mors.conf
 #
 # 		$1 - имя переменной
 #
@@ -740,12 +740,12 @@ get_config_value() {
 	fi
 	local key="${1}"
 
-	if ! [ -f "${KVAS_CONF_FILE}" ] ; then
-		error "[${FUNCNAME}] Файл конфигурации ${KVAS_CONF_FILE} не найден"
+	if ! [ -f "${MORS_CONF_FILE}" ] ; then
+		error "[${FUNCNAME}] Файл конфигурации ${MORS_CONF_FILE} не найден"
 		return
 	fi
 
-	grep -- "^${key}=" "${KVAS_CONF_FILE}" | head -n 1 | cut -d'=' -f2
+	grep -- "^${key}=" "${MORS_CONF_FILE}" | head -n 1 | cut -d'=' -f2
 }
 
 APP_VERSION=$(get_config_value APP_VERSION)
@@ -760,29 +760,29 @@ version(){
 # ------------------------------------------------------------------------------------------
 #
 # 		Получаем значение переменной из файла конфигурации
-# 		/opt/apps/kvas/etc/conf/kvas.conf
+# 		/opt/apps/mors/etc/conf/mors.conf
 #
 # 		$1 - имя переменной
 # 		$2 - значение переменной
 #
 # ------------------------------------------------------------------------------------------
 set_config_value() {
-	if grep -oq "${1}" "${KVAS_CONF_FILE}"; then
-		sed -i "s/\(${1}=\).*/\1${2}/; s/^,//; s/\,/ /g;" "${KVAS_CONF_FILE}"
+	if grep -oq "${1}" "${MORS_CONF_FILE}"; then
+		sed -i "s/\(${1}=\).*/\1${2}/; s/^,//; s/\,/ /g;" "${MORS_CONF_FILE}"
 	else
-		echo "${1}=${2}" >> "${KVAS_CONF_FILE}"
+		echo "${1}=${2}" >> "${MORS_CONF_FILE}"
 	fi
 }
 # ------------------------------------------------------------------------------------------
 #
 # 		Удаляем значение переменной из файла конфигурации
-# 		/opt/apps/kvas/etc/conf/kvas.conf
+# 		/opt/apps/mors/etc/conf/mors.conf
 #
 # 		$1 - имя переменной
 #
 # ------------------------------------------------------------------------------------------
 del_config_value() {
-	sed -i "/${1}/d" "${KVAS_CONF_FILE}"
+	sed -i "/${1}/d" "${MORS_CONF_FILE}"
 }
 # ------------------------------------------------------------------------------------------
 #

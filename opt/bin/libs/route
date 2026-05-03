@@ -1,6 +1,6 @@
 #!/bin/sh
 
-. /opt/apps/kvas/bin/libs/main
+. /opt/apps/mors/bin/libs/main
 
 # замена Singleton, чтобы скан был лишь при первом вызове
 IPS_KNOWN=''
@@ -52,9 +52,9 @@ nets__filter_for_incoming() {
 	local nets="${1}"
 
 	local net_internet net_tunnel
-	# шлюз в интернет нельзя квасить
+	# шлюз в интернет нельзя морсить
 	net_internet=$(get_external_interface)
-	# защищённый тоннель нельзя квасить
+	# защищённый тоннель нельзя морсить
 	net_tunnel=$(get_config_value 'INFACE_ENT')
 
 	echo "${nets}" \
@@ -183,10 +183,10 @@ cmd_tunnel() {
 	tunnel_keenetic_name=$(get_config_value 'INFACE_CLI')
 	if [ -z "${tunnel_net_name}" ]; then
 		echo 'Не найдено имя сетевого интерфейса.'
-		echo 'Настройте тоннель заново kvas tunnel set'
+		echo 'Настройте тоннель заново mors tunnel set'
 	elif [ -z "${tunnel_keenetic_name}" ]; then
 		echo 'Не найдено Keenetic-имя.'
-		echo 'Настройте тоннель заново kvas tunnel set'
+		echo 'Настройте тоннель заново mors tunnel set'
 	else
 		output=$( nets__get "${nets_dictionary}" "${tunnel_net_name}" 'title' | xargs )
 		ready 'Название' && when_ok "${output}"
@@ -233,7 +233,7 @@ cmd_tunnel() {
 
 	output=$(nets__filter_for_tunnel "${nets_dictionary}")
 	if [ -z "${output}" ] ; then
-		output='Произошла ошибка сбора списка, сообщите об этом https://t.me/kvas_pro'
+		output='Произошла ошибка сбора списка, сообщите об этом https://t.me/mors_pro'
 	else
 		output=$(echo "${output}" | tr '|' ' ' | xargs -n4 printf '%-10s | %-15s | %-30s | %s\n')
 	fi
@@ -277,9 +277,9 @@ route__show_block() {
 
 		#ToDo: сделать команды
 		content=$(printf '%s\n' \
-			"Отсутствуют. Можете указать строчку в ${KVAS_CONF_FILE}" \
+			"Отсутствуют. Можете указать строчку в ${MORS_CONF_FILE}" \
 			"${empty_example}" \
-			'и вызвать после этого kvas route refresh' \
+			'и вызвать после этого mors route refresh' \
 		)
 	fi
 
@@ -394,7 +394,7 @@ cmd_route() {
 	nets__set_common
 	output=$(nets__filter_for_incoming "${NETS_INCOMING}${NETS_COMMON}")
 	if [ -z "${output}" ] ; then
-		output='Произошла ошибка сбора списка, сообщите об этом https://t.me/kvas_pro'
+		output='Произошла ошибка сбора списка, сообщите об этом https://t.me/mors_pro'
 	else
 		output=$(echo "${output}" | tr '|' ' ' | xargs -n4 printf '%-10s | %-15s | %-30s | %s\n')
 	fi

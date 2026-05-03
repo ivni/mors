@@ -1,6 +1,6 @@
 #!/bin/sh
 #------------------------------------------------------------------------------
-#	ПАКЕТ КВАС
+#	ПАКЕТ МОРС
 #------------------------------------------------------------------------------
 #
 #	Данный файл содержит функции для обработки списков блокировки рекламы
@@ -11,7 +11,7 @@
 #	Лицензия: Apache License 2.0
 # ------------------------------------------------------------------------------------------
 
-. /opt/apps/kvas/bin/libs/main
+. /opt/apps/mors/bin/libs/main
 FLASHED_HOST_FILE=$(echo "${ADBLOCK_HOSTS_FILE}" | sed 's/\//\\\//g')
 # ------------------------------------------------------------------------------------------
 #
@@ -35,8 +35,8 @@ cmd_ads_edit() {
 cmd_ads_protect_off() {
 	exit_when_adguard_on status; [ "${status}" = 0 ] && {
 #		if ! [ -f "${ADS_MAIN_SCRIPT}" ]; then
-#			cp -f '/opt/apps/kvas/bin/main/adblock' '/opt/apps/kvas/bin/main/adblock'
-#			chmod +x '/opt/apps/kvas/bin/main/adblock'
+#			cp -f '/opt/apps/mors/bin/main/adblock' '/opt/apps/mors/bin/main/adblock'
+#			chmod +x '/opt/apps/mors/bin/main/adblock'
 #		fi
 		ready "Блокировка рекламы"
 
@@ -57,9 +57,9 @@ cmd_ads_protect_off() {
 cmd_ads_protect_on() {
 	exit_when_adguard_on status; [ "${status}" = 0 ] && {
 		perform_to_aks="${1}"
-#		if ! [ -f '/opt/apps/kvas/bin/main/adblock' ]; then
-#			cp -f '/opt/apps/kvas/bin/main/adblock' '/opt/apps/kvas/bin/main/adblock'
-#			chmod +x '/opt/apps/kvas/bin/main/adblock'
+#		if ! [ -f '/opt/apps/mors/bin/main/adblock' ]; then
+#			cp -f '/opt/apps/mors/bin/main/adblock' '/opt/apps/mors/bin/main/adblock'
+#			chmod +x '/opt/apps/mors/bin/main/adblock'
 #		fi
 
 		if cat < '/opt/etc/dnsmasq.conf' | sed 's/^\(.*\)\(#.*\)/\2/; /^#/d; /^$/d' | grep -q "${ADBLOCK_HOSTS_FILE}" ; then
@@ -68,7 +68,7 @@ cmd_ads_protect_on() {
 		else
 			ready "Блокировка рекламы"
 			sed -i '/addn-hosts='"${FLASHED_HOST_FILE}"'/d' "${DNSMASQ_CONFIG}"
-#			sed -i 's/\(^ADS_BLOCKER_ON=.*\)/\11/' '/opt/apps/kvas/bin/main/update'
+#			sed -i 's/\(^ADS_BLOCKER_ON=.*\)/\11/' '/opt/apps/mors/bin/main/update'
 			echo "addn-hosts=${ADBLOCK_HOSTS_FILE}" >> '/opt/etc/dnsmasq.conf'
 			OFF="ОТКЛЮЧЕНА.\nПроизошла непредвиденная ошибка."
 			[ $? = 0 ] && when_ok "ВКЛЮЧЕНА" || when_bad "${OFF}"
@@ -97,7 +97,7 @@ cmd_ads_status() {
 		fi
 	else
 		error 'Скрипт обработки рекламы отсутствует'
-		error 'Переустановите пакет КВАС заново!'
+		error 'Переустановите пакет МОРС заново!'
 	fi
 }
 # ------------------------------------------------------------------------------------------
@@ -113,7 +113,7 @@ ads_request_to_upload() {
 	sources_name_file=adblock.sources
 	if ! [ -f "${ADBLOCK_SOURCES_LIST}" ]; then
 	# 	ready "Загрузка источников рекламы по умолчанию"
-	# 	cp -f "/opt/apps/kvas/etc/conf/${sources_name_file}" "${ADBLOCK_SOURCES_LIST}"
+	# 	cp -f "/opt/apps/mors/etc/conf/${sources_name_file}" "${ADBLOCK_SOURCES_LIST}"
 	# 	[ $? = 0 ] && when_ok "УДАЧНО" || when_bad "С ОШИБКОЙ"
 	# else
 		if [ -f "${ADBLOCK_SOURCES_LIST_BACKUP}" ]; then
@@ -126,20 +126,20 @@ ads_request_to_upload() {
 				[ $? = 0 ] && when_ok "УДАЧНО" || when_bad "С ОШИБКОЙ"
 			else
 				ready "Загрузка источников рекламы по умолчанию"
-				cp -f "/opt/apps/kvas/etc/conf/${sources_name_file}" "${ADBLOCK_SOURCES_LIST}"
+				cp -f "/opt/apps/mors/etc/conf/${sources_name_file}" "${ADBLOCK_SOURCES_LIST}"
 				[ $? = 0 ] && when_ok "УДАЧНО" || when_bad "С ОШИБКОЙ"
 			fi
 		else
 			mkdir -p "$(echo "${ADBLOCK_SOURCES_LIST}" | sed 's/^\(.*\)\/.*.list/\1/')"
-			cp -f /opt/apps/kvas/etc/conf/adblock.sources "${ADBLOCK_SOURCES_LIST}"
+			cp -f /opt/apps/mors/etc/conf/adblock.sources "${ADBLOCK_SOURCES_LIST}"
 		fi
 	fi
 	if [ -f "${ADBLOCK_HOSTS_FILE}" ]; then
 		[ "${answer}" = ask ] && read_ynq_timer "Обновить списки блокировки рекламы" answer N 6
 		if [ "${answer}" = q ] ; then exit_q; print_line; exit 1; fi
-		echo "${answer}" | grep -qi y && /opt/apps/kvas/bin/main/adblock
+		echo "${answer}" | grep -qi y && /opt/apps/mors/bin/main/adblock
 	else
-		/opt/apps/kvas/bin/main/adblock
+		/opt/apps/mors/bin/main/adblock
 	fi
 }
 
@@ -214,7 +214,7 @@ cmd_ads_del_from_skip_list(){
 			restart_dns_service
 		else
 			warning "Списка исключений еще не существует. "
-			warning "Добавьте в него домен командой 'kvas adblock add <host>'"
+			warning "Добавьте в него домен командой 'mors adblock add <host>'"
 		fi
 	}
 }
@@ -228,8 +228,8 @@ cmd_ads_del_from_skip_list(){
 #--------------------------------------------------------------
 ads_remove_white_hosts(){
 
-	if [ -f "${KVAS_LIST_FILE}" ] && [ "$(cat < "${KVAS_LIST_FILE}" | wc -l )" -ge 1 ]; then
-		exclude_com=".*.$(cat < "${KVAS_LIST_FILE}" | tr -d '*' | sed ':a;N;$!ba;s/\n/$|.*./g')$"
+	if [ -f "${MORS_LIST_FILE}" ] && [ "$(cat < "${MORS_LIST_FILE}" | wc -l )" -ge 1 ]; then
+		exclude_com=".*.$(cat < "${MORS_LIST_FILE}" | tr -d '*' | sed ':a;N;$!ba;s/\n/$|.*./g')$"
 		ready "Удаляем хосты, находящиеся в защищенном списке"
 		TMP_FILE="/opt/tmp/hosts.tmp"
 		cat < "${ADBLOCK_HOSTS_FILE}" | grep -vE "${exclude_com}" > "${TMP_FILE}"

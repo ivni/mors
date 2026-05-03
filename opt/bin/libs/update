@@ -1,6 +1,6 @@
 #!/bin/sh
-. /opt/apps/kvas/bin/libs/main
-. /opt/apps/kvas/bin/libs/vpn
+. /opt/apps/mors/bin/libs/main
+. /opt/apps/mors/bin/libs/vpn
 #
 # Извлекаем ссылку на скачивание пакета с github
 #
@@ -51,7 +51,7 @@ cmd_adguard_update(){
 			error "Для Вашей архитектуры процессора '${arch}' обновления не найдены." nl
 		fi
 	else
-		error "Сервис AdGuard Home ОТКЛЮЧЕН. Для продолжения необходимо\nзапустить команду kvas adguard on"
+		error "Сервис AdGuard Home ОТКЛЮЧЕН. Для продолжения необходимо\nзапустить команду mors adguard on"
 	fi
 
 }

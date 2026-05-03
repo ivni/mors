@@ -15,7 +15,7 @@ pipeline {
         ENTWARE_REPO_URL = 'https://github.com/Entware/Entware.git'
         DOCKER_IMAGE = 'entware-build-env'
         USER_NAME = 'master'
-        GITHUB_REPO = 'git@github.com:qzeleza/kvas.git'
+        GITHUB_REPO = 'git@github.com:ivni/mors.git'
         ROUTER_IP = credentials('ssh-github-key')
         ROUTER_PORT = '1221'
         BUILD_PATH = '/build/entware'

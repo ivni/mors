@@ -1,7 +1,7 @@
 #!/bin/sh
 # ------------------------------------------------------------------------------------------
 #
-# 	ПРОЕКТ КВАС
+# 	ПРОЕКТ МОРС
 #
 # 	Данный файл служит для поддержки vless протокола
 #   Реализованы такие функции:
@@ -12,22 +12,22 @@
 #
 # ------------------------------------------------------------------------------------------
 #
-#	Разработчик: kvas@zeleza.ru
+#	Разработчик: mors@zeleza.ru
 #	Дата: 09/09/2024
 #	Лицензия: Apache License 2.0
 #
 # ------------------------------------------------------------------------------------------
 
-. /opt/apps/kvas/bin/libs/main
+. /opt/apps/mors/bin/libs/main
 
 XRAY=/opt/sbin/xray
 XRAY_INIT=/opt/etc/init.d/S24xray
 
-VLESS_CONFIG_FILE=/opt/etc/xray/kvas.json
-VLESS_CONFIG_ORIGINAL_FILE=/opt/apps/kvas/etc/conf/kvas.vless
-VLESS_CONFIG_FILE_BACKUP=${KVAS_BACKUP_PATH}/kvas.json
+VLESS_CONFIG_FILE=/opt/etc/xray/mors.json
+VLESS_CONFIG_ORIGINAL_FILE=/opt/apps/mors/etc/conf/mors.vless
+VLESS_CONFIG_FILE_BACKUP=${MORS_BACKUP_PATH}/mors.json
 
-PROXY_VLESS_DESC="Kvas-proxy-vless"
+PROXY_VLESS_DESC="Mors-proxy-vless"
 PROXY_LOCAL_IP="127.0.0.1"
 PROXY_VLESS_PORT=1097
 PROXY_VLESS_PROTO=socks5
@@ -65,7 +65,7 @@ has_xray_enable(){
 has_proxy_inface_selected(){
 #-------------------------------------------------------------------------------
 #
-#	Функция проверяет, является ли интерфейс Proxy Vless Kvas
+#	Функция проверяет, является ли интерфейс Proxy Vless Mors
 #   выбранным соединением или нет
 #
 #-------------------------------------------------------------------------------
@@ -220,7 +220,7 @@ cmd_install_proxy_package() {
 
         # Создаем запись в файле /opt/etc/profile для продолжения установки Proxy клиента
         # DEBUG - восстановить после отладки
-        echo "kvas vless" >> /opt/etc/profile
+        echo "mors vless" >> /opt/etc/profile
         # echo "/opt/root/vless.dev" >> /opt/etc/profile
 
         #  Ставим пакет proxy в очередь на установку
@@ -275,7 +275,7 @@ create_proxy_interface(){
 
     # удаляем запись в файле /opt/etc/profile, чтобы прекратить повторную установку Proxy клиента
     # DEBUG - восстановить после отладки
-    sed -i '/kvas vless/d' /opt/etc/profile
+    sed -i '/mors vless/d' /opt/etc/profile
     # sed -i '/\/opt\/root\/vless.dev/d' /opt/etc/profile
 
 }
@@ -459,9 +459,9 @@ _cmd_install_vless_proxy(){
 
     # DEBUG - восстановить после отладки
     # cp "${VLESS_CONFIG_ORIGINAL_FILE}" "${VLESS_CONFIG_FILE}"
-    cp ~/kvas.vless "${VLESS_CONFIG_FILE}"
+    cp ~/mors.vless "${VLESS_CONFIG_FILE}"
 
-    . /opt/apps/kvas/.env
+    . /opt/apps/mors/.env
     vless_ln="${VLESS_LINK}"
 
     vless_link_parse "${vless_ln}" "${VLESS_CONFIG_FILE}"
@@ -472,7 +472,7 @@ _cmd_install_vless_proxy(){
 
     if echo "${check_xray_config}" | grep -q "Configuration OK." ; then
         # Запуск xray в случае, если конфигурация xray не содержит ошибок
-        ${XRAY_INIT} restart && kvas vpn set
+        ${XRAY_INIT} restart && mors vpn set
     else
         # В случае если есть ошибки выводим их в консоль
         echo -e "${BLUE}В файле ${VLESS_CONFIG_FILE} обнаружены следующие ошибки:${NOCL}"
@@ -487,7 +487,7 @@ _cmd_remove_vless_proxy(){
 #-------------------------------------------------------------------------------
 #
 #	Функция удаляет Proxy Vless пакеты и конфигурацию,
-#   чтоб привести Квас к базовому состоянию для отладки пакета
+#   чтоб привести Морс к базовому состоянию для отладки пакета
 #
 #-------------------------------------------------------------------------------
     # Удаляем пакет xray
