@@ -5,6 +5,7 @@
 .env
 .builded
 .devices
+.qa/
 packages/
 .molot/
 
