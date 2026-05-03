@@ -2,6 +2,8 @@
 
 ---
 
+Форк оригинального продукта - [github.com/qzeleza/kvas](https://github.com/qzeleza/kvas)
+
 ### VPN и SHADOWSOCKS клиент для [роутеров Keenetic](https://keenetic.ru/ru/)
 
 #### Пакет представляет собой обвязку или интерфейс командной строки для защиты Вашего соединения при обращении к определенным доменам.
@@ -31,9 +33,6 @@
 
 ## Используемые в проекте продукты
 - Для проведения тестов, в проекте используется пакет [BATS](https://github.com/bats-core/bats-core/blob/master/LICENSE.md) от нескольких [АВТОРОВ](https://github.com/bats-core/bats-core/blob/master/AUTHORS).
-
-## Помощь проекту
-Помочь можно переводом средств на [этот кошелек ЮМани](https://yoomoney.ru/to/4100117756734493).
 
 ## Документация по проекту
 - [Перейти по ссылке](https://github.com/ivni/mors/wiki).
