@@ -11,8 +11,8 @@ include $(INCLUDE_DIR)/package.mk
 define Package/mors
 	SECTION:=utils
 	CATEGORY:=Keendev
-	# DEPENDS:=+jq +curl +knot-dig +libpcre +nano-full +cron +bind-dig +dnsmasq-full +ipset +dnscrypt-proxy2 +iptables +libopenssl +shadowsocks-rust   
-	DEPENDS:=+libpcre +jq +curl +knot-dig +nano-full +cron +bind-dig +dnsmasq-full +ipset +dnscrypt-proxy2 +iptables +shadowsocks-libev-ss-redir +shadowsocks-libev-config +libmbedtls
+	# DEPENDS:=+jq +curl +knot-dig +libpcre +nano-full +cron +bind-dig +dnsmasq-full +ipset +dnscrypt-proxy2 +iptables +libopenssl +shadowsocks-rust +xray
+	DEPENDS:=+libpcre +jq +curl +knot-dig +nano-full +cron +bind-dig +dnsmasq-full +ipset +dnscrypt-proxy2 +iptables +shadowsocks-libev-ss-redir +shadowsocks-libev-config +libmbedtls +xray
 	URL:=no
 	TITLE:=VPN клиент для обработки запросов по внесению хостов в белый список.
 	PKGARCH:=all
@@ -21,7 +21,7 @@ endef
 define Package/mors/description
 	Данный пакет позволяет осуществлять контроль и поддерживать в актуальном состоянии
 	защищенный список хостов или "Белый список". При обращении к любому хосту из
-	этого списка, весь трафик будет идти через любое VPN или через Shadowsocks соединение,
+	этого списка, весь трафик будет идти через любое VPN, Shadowsocks или VLESS соединение,
 	заранее настроенное на роутере.
 endef
 

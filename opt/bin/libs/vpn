@@ -2316,7 +2316,7 @@ start_vless(){
 
 		# Запуск xray в случае, если конфигурация xray не содержит ошибок
 		ready "Запускаем xray сервис..."
-		service_action S97xray start && when_ok "УСПЕШНО"
+		"${XRAY_INIT}" start && when_ok "УСПЕШНО"
 		vpn_on "${_inface_entware}" &> /dev/null
 		# Тестируем работу proxy vless
 		test_vless_proxy "${_inface_entware}"
