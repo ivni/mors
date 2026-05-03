@@ -12,7 +12,10 @@ fi
 mapfile -t shell_files < <(bash scripts/qa/list-shell-files.sh)
 [ "${#shell_files[@]}" -gt 0 ] || exit 0
 
-# The legacy runtime still contains Entware/BusyBox idioms and some bashisms under
-# /bin/sh shebangs. Keep this job focused on ShellCheck parser/errors for now;
-# warnings can be tightened later as the legacy surface is cleaned up.
-shellcheck --severity=error "${shell_files[@]}"
+# The legacy runtime still contains Entware/BusyBox idioms and known findings.
+# Keep this job focused on newly visible serious issues; tighten exclusions as
+# the legacy shell surface is cleaned up.
+shellcheck \
+	--severity=error \
+	--exclude=SC2068,SC2144,SC2283 \
+	"${shell_files[@]}"

@@ -12,7 +12,7 @@ Mors использует многоуровневый QA pipeline: быстры
 - поиск типовых токенов и приватных ключей;
 - CRLF в tracked text-файлах;
 - `bash -n` для runtime-скриптов;
-- ShellCheck на уровне error;
+- ShellCheck на уровне error с allowlist для текущих legacy-находок;
 - BATS-тесты из `tests/`.
 
 Локальный запуск на Linux:
