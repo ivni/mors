@@ -19,4 +19,5 @@ setup() {
 	grep -q '^dnsmasq ' "${HELP_FILE}"
 	grep -q '^debug ' "${HELP_FILE}"
 	grep -q '^ver|version' "${HELP_FILE}"
+	grep -q '^vless version|ver' "${HELP_FILE}"
 }

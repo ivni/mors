@@ -19,8 +19,8 @@
 # ------------------------------------------------------------------------------------------
 
 . /opt/apps/mors/bin/libs/main
+. /opt/apps/mors/bin/libs/xray
 
-XRAY=/opt/sbin/xray
 XRAY_INIT=/opt/etc/init.d/S24xray
 
 VLESS_CONFIG_FILE=/opt/etc/xray/mors.json
@@ -60,6 +60,67 @@ has_xray_enable(){
 #-------------------------------------------------------------------------------
     # [ -x "${XRAY}" ] && [ -f "${XRAY_INIT}" ] && [ "$("${XRAY_INIT}" status)" = 'alive' ]
     [ -f "${XRAY_INIT}" ] && [ "$("${XRAY_INIT}" status)" = 'alive' ]
+}
+
+xray_version_check() {
+#-------------------------------------------------------------------------------
+#
+#	Проверяет установленную версию Xray относительно политики Mors.
+#
+#-------------------------------------------------------------------------------
+	local actual
+	local status
+
+	ready "Проверяем версию Xray"
+	if ! has_xray_installed; then
+		when_bad "НЕ УСТАНОВЛЕН"
+		error "Пакет Xray не установлен. Выполните 'opkg update && opkg install xray'."
+		return 1
+	fi
+
+	actual=$(xray__get_version) || actual=''
+	status=$(xray__compatibility_status "${actual}") || true
+	case "${status}" in
+		supported)
+			when_ok "${actual}"
+			return 0
+			;;
+		newer)
+			when_alert "${actual}"
+			warning "Версия Xray ${actual} новее протестированной ${XRAY_TESTED_VERSION}. Продолжаем с обязательной проверкой конфигурации."
+			return 0
+			;;
+		unsupported)
+			when_bad "${actual}"
+			error "Для VLESS требуется Xray ${XRAY_MIN_VERSION} или новее. Обновите пакет командой 'opkg update && opkg install xray'."
+			return 1
+			;;
+		*)
+			when_bad "НЕ ОПРЕДЕЛЕНА"
+			error "Не удалось определить версию Xray. Проверьте команду '${XRAY} version'."
+			return 1
+			;;
+	esac
+}
+
+xray_install_and_check() {
+#-------------------------------------------------------------------------------
+#
+#	Устанавливает Xray при необходимости и проверяет его версию.
+#
+#-------------------------------------------------------------------------------
+	if ! has_xray_installed; then
+		ready "Устанавливаем пакет Xray"
+		if opkg install xray &> /dev/null && has_xray_installed; then
+			when_ok "УСПЕШНО"
+		else
+			when_bad "ОШИБКА"
+			error "Не удалось установить Xray из активного репозитория Entware."
+			return 1
+		fi
+	fi
+
+	xray_version_check
 }
 
 has_proxy_inface_selected(){
@@ -279,18 +340,6 @@ create_proxy_interface(){
     # sed -i '/\/opt\/root\/vless.dev/d' /opt/etc/profile
 
 }
-
-has_xray_installed(){
-#-------------------------------------------------------------------------------
-#
-#	Функция проверяет установлен ли пакет xray
-#
-#-------------------------------------------------------------------------------
-	# ! opkg files xray | grep -q 'xray not installed'
-    [ -f "${XRAY}" ]
-}
-
-
 
 proxy_package_progress(){
 #-------------------------------------------------------------------------------

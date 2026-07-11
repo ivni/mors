@@ -9,6 +9,7 @@ required_paths=(
 	opt/bin/mors
 	opt/bin/libs/main
 	opt/bin/libs/vpn
+	opt/bin/libs/xray
 	opt/bin/libs/check
 	opt/bin/main/setup
 	opt/bin/main/upgrade

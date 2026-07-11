@@ -102,7 +102,9 @@ case "${1}" in
 			new) 	rm -f "${VLESS_CONFIG_FILE}" 
 					start_vless "$(cat ${INFACE_NAMES_FILE} | grep vless | cut -d'|' -f2)"
 				;;
-			*) 		cmd_install_proxy_package 
+			version | ver)	xray_version_check
+				;;
+			*) 		xray_install_and_check && cmd_install_proxy_package
 				;;
 		esac	
 			;;

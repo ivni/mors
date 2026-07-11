@@ -2304,6 +2304,7 @@ create_vless_config(){
 
 start_vless(){
 	local _inface_entware=${1}
+	xray_version_check || return 1
 	# Если нет файла конфигурации proxy vless
 	# то запросим ссылку и создаем его
 	[ -f ${VLESS_CONFIG_FILE} ] || create_vless_config

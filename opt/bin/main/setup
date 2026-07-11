@@ -553,8 +553,9 @@ cmd_install(){
 	[ -f "${MORS_START_FILE}" ] || cp -f /opt/apps/mors/etc/init.d/S96mors "${MORS_START_FILE}"
 	chmod +x "${MORS_START_FILE}"
 
-	# Если не установлен xray - устанавливаем его
-	has_xray_installed || opkg install xray &> /dev/null
+	# Xray нужен только для VLESS: проблемы с ним не должны блокировать
+	# настройку Mors для OpenVPN/WireGuard и других интерфейсов.
+	xray_install_and_check || warning "VLESS будет недоступен до установки совместимой версии Xray."
 	# Создаем ссылку на наш скрипт для запуска xray в /opt/etc/init.d
 	[ -f "${XRAY_INIT}" ] || ln -s /opt/apps/mors/etc/init.d/S97xray ${XRAY_INIT}
 

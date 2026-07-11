@@ -30,3 +30,34 @@ jobs:
 
       - name: BATS tests
         run: bats tests
+
+  xray:
+    name: Xray ${{ matrix.version }} compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 1.8.24
+          - 26.2.6
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Xray
+        env:
+          XRAY_VERSION: ${{ matrix.version }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/xray"
+          curl --fail --location --retry 3 \
+            "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" \
+            --output "${RUNNER_TEMP}/xray.zip"
+          unzip -q "${RUNNER_TEMP}/xray.zip" -d "${RUNNER_TEMP}/xray"
+          chmod +x "${RUNNER_TEMP}/xray/xray"
+
+      - name: Validate Mors VLESS template
+        env:
+          XRAY_VERSION: ${{ matrix.version }}
+        run: bash scripts/qa/xray-compatibility.sh "${RUNNER_TEMP}/xray/xray" "${XRAY_VERSION}"

@@ -1,0 +1,86 @@
+#!/bin/sh
+
+# Минимальная версия, с которой Mors поддерживает VLESS Reality.
+# XRAY_TESTED_VERSION обновляется только после проверки шаблона mors.vless.
+XRAY=${XRAY:-/opt/sbin/xray}
+XRAY_MIN_VERSION=${XRAY_MIN_VERSION:-1.8.24}
+XRAY_TESTED_VERSION=${XRAY_TESTED_VERSION:-26.2.6}
+
+version__is_valid() {
+	echo "${1}" | grep -Eq '^[0-9]+(\.[0-9]+)*$'
+}
+
+version__at_least() {
+	local actual="${1}"
+	local minimum="${2}"
+
+	version__is_valid "${actual}" || return 2
+	version__is_valid "${minimum}" || return 2
+
+	awk -v actual="${actual}" -v minimum="${minimum}" '
+		BEGIN {
+			actual_count = split(actual, actual_parts, ".")
+			minimum_count = split(minimum, minimum_parts, ".")
+			count = actual_count > minimum_count ? actual_count : minimum_count
+
+			for (i = 1; i <= count; i++) {
+				actual_part = actual_parts[i] + 0
+				minimum_part = minimum_parts[i] + 0
+
+				if (actual_part > minimum_part) exit 0
+				if (actual_part < minimum_part) exit 1
+			}
+
+			exit 0
+		}
+	'
+}
+
+has_xray_installed() {
+	[ -x "${XRAY}" ]
+}
+
+xray__parse_version() {
+	awk '
+		NR == 1 {
+			for (i = 1; i <= NF; i++) {
+				if ($i ~ /^v?[0-9]+(\.[0-9]+)+([+~-].*)?$/) {
+					version = $i
+					sub(/^v/, "", version)
+					sub(/[+~-].*$/, "", version)
+					print version
+					exit
+				}
+			}
+		}
+	'
+}
+
+xray__get_version() {
+	local actual
+
+	has_xray_installed || return 1
+	actual=$("${XRAY}" version 2>/dev/null | xray__parse_version)
+	version__is_valid "${actual}" || return 1
+	echo "${actual}"
+}
+
+xray__compatibility_status() {
+	local actual="${1}"
+
+	if ! version__is_valid "${actual}"; then
+		echo invalid
+		return 2
+	fi
+
+	if ! version__at_least "${actual}" "${XRAY_MIN_VERSION}"; then
+		echo unsupported
+		return 1
+	fi
+
+	if version__at_least "${XRAY_TESTED_VERSION}" "${actual}"; then
+		echo supported
+	else
+		echo newer
+	fi
+}
