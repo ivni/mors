@@ -38,6 +38,15 @@ secret_json() {
 	[ "${VLESS_PARSED_NAME}" = "Финляндия" ]
 }
 
+@test "URI decoder is locale independent for UTF-8 names" {
+	run env LC_ALL=C MORS_LIB_DIR="${MORS_LIB_DIR}" sh -c '
+		. "${MORS_LIB_DIR}/vless_config"
+		vless_uri__decode "%D0%A4%D0%B8%D0%BD%D0%BB%D1%8F%D0%BD%D0%B4%D0%B8%D1%8F"
+	'
+	[ "${status}" -eq 0 ]
+	[ "${output}" = "Финляндия" ]
+}
+
 @test "parser supports a bracketed IPv6 server" {
 	local link='vless://00000000-0000-4000-8000-000000000000@[2001:db8::10]:8443?type=tcp&security=reality&pbk=ioE61VC3V30U7IdRmQ3bjhOq2ij9tPhVIgAD4JZ4YRY&fp=chrome&sni=example.com&sid=0123456789abcdef'
 

@@ -13,7 +13,8 @@ VLESS_XRAY_ACCESS_LOG=${VLESS_XRAY_ACCESS_LOG:-/tmp/log/xray-access.log}
 VLESS_XRAY_ERROR_LOG=${VLESS_XRAY_ERROR_LOG:-/tmp/log/xray-errors.log}
 
 vless_uri__decode() {
-	printf '%s\n' "${1}" | awk '
+	local escaped
+	escaped=$(printf '%s\n' "${1}" | awk '
 		function hex(c) {
 			c = tolower(c)
 			return index("0123456789abcdef", c) - 1
@@ -25,19 +26,18 @@ vless_uri__decode() {
 					a = substr($0, i + 1, 1)
 					b = substr($0, i + 2, 1)
 					if (a ~ /^[0-9A-Fa-f]$/ && b ~ /^[0-9A-Fa-f]$/) {
-						printf "%c", hex(a) * 16 + hex(b)
+						printf "\\%03o", hex(a) * 16 + hex(b)
 						i += 2
-						next_char = 1
+						continue
 					}
 				}
-				if (next_char == 1) {
-					next_char = 0
-					continue
-				}
-				if (c == "+") printf " "; else printf "%s", c
+				if (c == "+") printf " "
+				else if (c == "\\") printf "\\134"
+				else printf "%s", c
 			}
-			printf "\n"
-		}'
+		}') || return 1
+	# %b turns octal escapes into raw bytes, independently of awk locale.
+	printf '%b\n' "${escaped}"
 }
 
 vless_uri__query_param() {
