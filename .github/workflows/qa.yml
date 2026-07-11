@@ -23,7 +23,7 @@ jobs:
       - name: Install QA tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y bats shellcheck
+          sudo apt-get install -y bats shellcheck jq
 
       - name: Static checks
         run: bash scripts/qa/static.sh

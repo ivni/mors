@@ -1,0 +1,333 @@
+#!/bin/sh
+
+# Parsing and deterministic Xray config generation for managed VLESS entries.
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+# shellcheck source=./vless_store
+. "${MORS_LIB_DIR}/vless_store"
+
+VLESS_MAIN_PORT=${VLESS_MAIN_PORT:-1097}
+VLESS_API_PORT=${VLESS_API_PORT:-10085}
+VLESS_XRAY_CONFIG_FILE=${VLESS_XRAY_CONFIG_FILE:-/opt/etc/xray/mors.json}
+VLESS_XRAY_CONFIG_TEMPLATE=${VLESS_XRAY_CONFIG_TEMPLATE:-/opt/apps/mors/etc/conf/mors.vless}
+VLESS_XRAY_ACCESS_LOG=${VLESS_XRAY_ACCESS_LOG:-/tmp/log/xray-access.log}
+VLESS_XRAY_ERROR_LOG=${VLESS_XRAY_ERROR_LOG:-/tmp/log/xray-errors.log}
+
+vless_uri__decode() {
+	printf '%s\n' "${1}" | awk '
+		function hex(c) {
+			c = tolower(c)
+			return index("0123456789abcdef", c) - 1
+		}
+		{
+			for (i = 1; i <= length($0); i++) {
+				c = substr($0, i, 1)
+				if (c == "%" && i + 2 <= length($0)) {
+					a = substr($0, i + 1, 1)
+					b = substr($0, i + 2, 1)
+					if (a ~ /^[0-9A-Fa-f]$/ && b ~ /^[0-9A-Fa-f]$/) {
+						printf "%c", hex(a) * 16 + hex(b)
+						i += 2
+						next_char = 1
+					}
+				}
+				if (next_char == 1) {
+					next_char = 0
+					continue
+				}
+				if (c == "+") printf " "; else printf "%s", c
+			}
+			printf "\n"
+		}'
+}
+
+vless_uri__query_param() {
+	local query="${1}"
+	local wanted="${2}"
+	printf '%s\n' "${query}" | awk -v wanted="${wanted}" '
+		BEGIN { RS = "&" }
+		{
+			key = $0
+			sub(/=.*/, "", key)
+			if (key == wanted) {
+				value = $0
+				sub(/^[^=]*=/, "", value)
+				print value
+				exit
+			}
+		}'
+}
+
+vless_uri__safe_value() {
+	[ -n "${1}" ] || return 1
+	! printf '%s' "${1}" | grep -q '[[:cntrl:]]'
+}
+
+vless_uri__parse() {
+	local link="${1}"
+	local rest fragment query authority userinfo hostport
+	local address port network security public_key fingerprint server_name short_id flow spider_x encryption
+
+	VLESS_PARSED_NAME=''
+	VLESS_PARSED_JSON=''
+
+	case "${link}" in
+		vless://*) rest=${link#vless://} ;;
+		*) printf '%s\n' 'Ссылка должна начинаться с vless://.' >&2; return 1 ;;
+	esac
+
+	case "${rest}" in
+		*'#'*) fragment=${rest#*#}; rest=${rest%%#*} ;;
+		*) fragment='' ;;
+	esac
+	case "${rest}" in
+		*'?'*) query=${rest#*\?}; authority=${rest%%\?*} ;;
+		*) query=''; authority=${rest} ;;
+	esac
+
+	case "${authority}" in
+		*@*) userinfo=${authority%%@*}; hostport=${authority#*@} ;;
+		*) printf '%s\n' 'В VLESS-ссылке отсутствует идентификатор пользователя или адрес сервера.' >&2; return 1 ;;
+	esac
+
+	case "${hostport}" in
+		'['*']:'*)
+			address=${hostport#'['}
+			address=${address%%']:'*}
+			port=${hostport##*:}
+			;;
+		*:* )
+			address=${hostport%:*}
+			port=${hostport##*:}
+			;;
+		*) printf '%s\n' 'В VLESS-ссылке отсутствует порт сервера.' >&2; return 1 ;;
+	esac
+
+	userinfo=$(vless_uri__decode "${userinfo}")
+	address=$(vless_uri__decode "${address}")
+	network=$(vless_uri__decode "$(vless_uri__query_param "${query}" type)")
+	security=$(vless_uri__decode "$(vless_uri__query_param "${query}" security)")
+	public_key=$(vless_uri__decode "$(vless_uri__query_param "${query}" pbk)")
+	fingerprint=$(vless_uri__decode "$(vless_uri__query_param "${query}" fp)")
+	server_name=$(vless_uri__decode "$(vless_uri__query_param "${query}" sni)")
+	short_id=$(vless_uri__decode "$(vless_uri__query_param "${query}" sid)")
+	flow=$(vless_uri__decode "$(vless_uri__query_param "${query}" flow)")
+	spider_x=$(vless_uri__decode "$(vless_uri__query_param "${query}" spx)")
+	encryption=$(vless_uri__decode "$(vless_uri__query_param "${query}" encryption)")
+	VLESS_PARSED_NAME=$(vless_uri__decode "${fragment}")
+
+	[ -n "${network}" ] || network='tcp'
+	[ -n "${flow}" ] || flow='xtls-rprx-vision'
+	[ -n "${spider_x}" ] || spider_x='/'
+	[ -n "${encryption}" ] || encryption='none'
+
+	[ "${security}" = 'reality' ] || {
+		printf 'Поддерживается только VLESS Reality, получено: %s.\n' "${security:-не указано}" >&2
+		return 1
+	}
+	[ "${network}" = 'tcp' ] || {
+		printf 'Пока поддерживается только транспорт tcp, получено: %s.\n' "${network}" >&2
+		return 1
+	}
+	[ "${encryption}" = 'none' ] || {
+		printf 'Поддерживается encryption=none, получено: %s.\n' "${encryption}" >&2
+		return 1
+	}
+	case "${port}" in
+		''|*[!0-9]*) printf '%s\n' 'Порт VLESS должен быть числом.' >&2; return 1 ;;
+	esac
+	[ "${port}" -ge 1 ] 2>/dev/null && [ "${port}" -le 65535 ] 2>/dev/null || {
+		printf '%s\n' 'Порт VLESS должен находиться в диапазоне 1-65535.' >&2
+		return 1
+	}
+
+	for required in "${userinfo}" "${address}" "${public_key}" "${fingerprint}" "${server_name}" "${short_id}"; do
+		vless_uri__safe_value "${required}" || {
+			printf '%s\n' 'В VLESS-ссылке отсутствует обязательный параметр или присутствуют управляющие символы.' >&2
+			return 1
+		}
+	done
+
+	VLESS_PARSED_JSON=$(jq -n \
+		--arg user_id "${userinfo}" \
+		--arg address "${address}" \
+		--argjson port "${port}" \
+		--arg network "${network}" \
+		--arg security "${security}" \
+		--arg public_key "${public_key}" \
+		--arg fingerprint "${fingerprint}" \
+		--arg server_name "${server_name}" \
+		--arg short_id "${short_id}" \
+		--arg flow "${flow}" \
+		--arg spider_x "${spider_x}" \
+		--arg encryption "${encryption}" '
+		{
+			user_id: $user_id,
+			address: $address,
+			port: $port,
+			network: $network,
+			security: $security,
+			public_key: $public_key,
+			fingerprint: $fingerprint,
+			server_name: $server_name,
+			short_id: $short_id,
+			flow: $flow,
+			spider_x: $spider_x,
+			encryption: $encryption
+		}') || return 1
+
+	printf '%s\n' "${VLESS_PARSED_JSON}"
+}
+
+vless_config__collect_enabled() {
+	local output="${1}"
+	local row id name probe_port secret_file
+
+	umask 077
+	: >"${output}" || return 1
+	[ "$(vless_store__is_paused)" = true ] && return 0
+	while IFS= read -r row; do
+		[ -n "${row}" ] || continue
+		id=$(printf '%s\n' "${row}" | jq -r '.id')
+		name=$(printf '%s\n' "${row}" | jq -r '.name')
+		probe_port=$(printf '%s\n' "${row}" | jq -r '.probe_port')
+		secret_file=$(vless_store__secret_file "${id}")
+		[ -f "${secret_file}" ] || {
+			printf 'Не найден файл параметров соединения %s.\n' "${id}" >&2
+			return 1
+		}
+		jq -c \
+			--arg id "${id}" \
+			--arg name "${name}" \
+			--argjson probe_port "${probe_port}" \
+			'. + {id: $id, name: $name, probe_port: $probe_port}' \
+			"${secret_file}" >>"${output}" || return 1
+	done <<EOF
+$(vless_store__list_enabled)
+EOF
+}
+
+vless_config__generate() {
+	local output="${1:-${VLESS_XRAY_CONFIG_FILE}}"
+	local active_id="${2:-}"
+	local collected="${VLESS_STORE_ROOT}/.enabled.$$"
+	local temporary="${output}.tmp.$$"
+	local policy primary_probe_url fallback_tag enabled_count
+
+	vless_store__ensure || return 1
+	mkdir -p "$(dirname "${output}")" || return 1
+	policy=$(vless_store__policy) || return 1
+	primary_probe_url=$(printf '%s\n' "${policy}" | jq -r '.primary_probe_url')
+	vless_config__collect_enabled "${collected}" || {
+		rm -f "${collected}"
+		return 1
+	}
+	enabled_count=$(wc -l <"${collected}" | tr -d ' ')
+
+	if [ "${enabled_count}" -eq 0 ]; then
+		fallback_tag='mors-block'
+	elif [ -n "${active_id}" ] && jq -e --arg id "${active_id}" 'select(.id == $id)' "${collected}" >/dev/null 2>&1; then
+		fallback_tag="mors-vless-${active_id}"
+	else
+		fallback_tag="mors-vless-$(head -n 1 "${collected}" | jq -r '.id')"
+	fi
+
+	umask 077
+	if [ "${enabled_count}" -eq 0 ]; then
+		jq -n \
+			--argjson main_port "${VLESS_MAIN_PORT}" \
+			--argjson api_port "${VLESS_API_PORT}" \
+			--arg access_log "${VLESS_XRAY_ACCESS_LOG}" \
+			--arg error_log "${VLESS_XRAY_ERROR_LOG}" '
+			{
+				log: {access: $access_log, error: $error_log, loglevel: "warning"},
+				api: {tag: "mors-api", listen: ("127.0.0.1:" + ($api_port | tostring)), services: ["RoutingService"]},
+				routing: {
+					domainStrategy: "AsIs",
+					rules: [{inboundTag: ["mors-vless-in"], outboundTag: "mors-block"}]
+				},
+				inbounds: [{tag: "mors-vless-in", listen: "127.0.0.1", port: $main_port, protocol: "socks", settings: {udp: true}}],
+				outbounds: [
+					{tag: "mors-direct", protocol: "freedom"},
+					{tag: "mors-block", protocol: "blackhole"}
+				]
+			}' >"${temporary}"
+	else
+		jq -s \
+			--argjson main_port "${VLESS_MAIN_PORT}" \
+			--argjson api_port "${VLESS_API_PORT}" \
+			--arg fallback_tag "${fallback_tag}" \
+			--arg primary_probe_url "${primary_probe_url}" \
+			--arg access_log "${VLESS_XRAY_ACCESS_LOG}" \
+			--arg error_log "${VLESS_XRAY_ERROR_LOG}" '
+			def outbound($c): {
+				tag: ("mors-vless-" + $c.id),
+				protocol: "vless",
+				settings: {
+					vnext: [{
+						address: $c.address,
+						port: $c.port,
+						users: [{id: $c.user_id, flow: $c.flow, encryption: $c.encryption}]
+					}]
+				},
+				streamSettings: {
+					network: $c.network,
+					security: $c.security,
+					realitySettings: {
+						publicKey: $c.public_key,
+						fingerprint: $c.fingerprint,
+						serverName: $c.server_name,
+						shortId: $c.short_id,
+						spiderX: $c.spider_x
+					},
+					tcpSettings: {header: {type: "none"}}
+				}
+			};
+			def probe_inbound($c): {
+				tag: ("mors-vless-probe-" + $c.id),
+				listen: "127.0.0.1",
+				port: $c.probe_port,
+				protocol: "socks",
+				settings: {udp: false}
+			};
+			def probe_rule($c): {
+				inboundTag: [("mors-vless-probe-" + $c.id)],
+				outboundTag: ("mors-vless-" + $c.id)
+			};
+			{
+				log: {access: $access_log, error: $error_log, loglevel: "warning"},
+				api: {tag: "mors-api", listen: ("127.0.0.1:" + ($api_port | tostring)), services: ["RoutingService"]},
+				routing: {
+					domainStrategy: "AsIs",
+					rules: ((map(probe_rule(.))) + [{inboundTag: ["mors-vless-in"], balancerTag: "mors-vless"}]),
+					balancers: [{
+						tag: "mors-vless",
+						selector: ["mors-vless-"],
+						fallbackTag: $fallback_tag,
+						strategy: {type: "leastPing"}
+					}]
+				},
+				inbounds: ([{tag: "mors-vless-in", listen: "127.0.0.1", port: $main_port, protocol: "socks", settings: {udp: true}}] + map(probe_inbound(.))),
+				outbounds: (map(outbound(.)) + [
+					{tag: "mors-direct", protocol: "freedom"},
+					{tag: "mors-block", protocol: "blackhole"}
+				]),
+				observatory: {
+					subjectSelector: ["mors-vless-"],
+					probeUrl: $primary_probe_url,
+					probeInterval: "30s",
+					enableConcurrency: true
+				}
+			}' "${collected}" >"${temporary}"
+	fi
+
+	rm -f "${collected}"
+	jq -e . "${temporary}" >/dev/null || {
+		rm -f "${temporary}"
+		return 1
+	}
+	chmod 600 "${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	mv -f "${temporary}" "${output}"
+}

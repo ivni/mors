@@ -1,0 +1,23 @@
+#!/bin/sh
+
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+# shellcheck source=../libs/vless_store
+. "${MORS_LIB_DIR}/vless_store"
+
+VLESS_SUPERVISOR_INIT=${VLESS_SUPERVISOR_INIT:-/opt/etc/init.d/S25mors-vless}
+MORS_CONF_FILE=${MORS_CONF_FILE:-/opt/etc/mors.conf}
+INFACE_NAMES_FILE=${INFACE_NAMES_FILE:-/opt/etc/inface_equals}
+PROXY_VLESS_NAME=${PROXY_VLESS_NAME:-Proxy21}
+
+configured_interface=$(sed -n 's/^INFACE_ENT=//p' "${MORS_CONF_FILE}" 2>/dev/null | head -n 1)
+cli_interface=$(awk -F'|' -v configured="${configured_interface}" '$2 == configured {print $1; exit}' "${INFACE_NAMES_FILE}" 2>/dev/null)
+[ "${cli_interface}" = "${PROXY_VLESS_NAME}" ] || exit 0
+
+vless_store__ensure >/dev/null 2>&1 || exit 0
+[ "$(vless_store__is_paused)" = false ] || exit 0
+[ "$(vless_store__enabled_count)" -gt 0 ] || exit 0
+
+if ! "${VLESS_SUPERVISOR_INIT}" status 2>/dev/null | grep -qF alive; then
+	logger -t 'МОРС' 'VLESS supervisor не работает, выполняется перезапуск.'
+	"${VLESS_SUPERVISOR_INIT}" restart >/dev/null 2>&1
+fi

@@ -10,7 +10,13 @@ required_paths=(
 	opt/bin/libs/main
 	opt/bin/libs/vpn
 	opt/bin/libs/xray
+	opt/bin/libs/vless_store
+	opt/bin/libs/vless_config
+	opt/bin/libs/vless_runtime
+	opt/bin/libs/lifecycle
 	opt/bin/libs/check
+	opt/bin/main/vless-supervisor
+	opt/bin/main/vless-watchdog
 	opt/bin/main/setup
 	opt/bin/main/upgrade
 	opt/etc/conf/mors.conf
@@ -21,6 +27,7 @@ required_paths=(
 	opt/etc/conf/shadowsocks.json
 	opt/etc/conf/mors.vless
 	opt/etc/init.d/S96mors
+	opt/etc/init.d/S25mors-vless
 	opt/etc/ndm/fs.d/15-mors-start.sh
 	opt/etc/ndm/iflayerchanged.d/100-mors-vpn
 	opt/etc/ndm/netfilter.d/100-dns-local

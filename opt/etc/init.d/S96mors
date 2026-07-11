@@ -29,6 +29,10 @@ case ${1} in
 				/opt/etc/init.d/S22shadowsocks restart
 				sleep 2
 			done
+		elif is_vless_over_proxy_enabled; then
+			if [ "$(vless_store__is_paused)" = false ] && [ "$(vless_store__enabled_count)" -gt 0 ]; then
+				/opt/etc/init.d/S25mors-vless restart >/dev/null 2>&1
+			fi
 		fi
 	;;
 esac

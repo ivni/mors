@@ -1,0 +1,305 @@
+#!/bin/sh
+
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+# shellcheck source=../libs/vless_runtime
+. "${MORS_LIB_DIR}/vless_runtime"
+
+VLESS_SUPERVISOR_INTERVAL=${VLESS_SUPERVISOR_INTERVAL:-30}
+VLESS_CONFIRM_DELAY=${VLESS_CONFIRM_DELAY:-5}
+
+vless_supervisor__set_probe_result() {
+	local id="${1}"
+	local desired_status="${2}"
+	local success="${3}"
+	local previous_recent previous_consecutive recent consecutive
+	previous_recent=$(jq -r --arg id "${id}" '.connections[$id].recent_failures // 0' "${VLESS_STATE_FILE}")
+	previous_consecutive=$(jq -r --arg id "${id}" '.connections[$id].consecutive_failures // 0' "${VLESS_STATE_FILE}")
+
+	if [ "${success}" = true ]; then
+		recent=${previous_recent}
+		[ "${recent}" -gt 0 ] && recent=$((recent - 1))
+		vless_runtime__set_connection "${id}" "${desired_status}" "${VLESS_PROBE_LATENCY_MS}" 0 "${recent}" '' true
+	else
+		recent=$((previous_recent + 1))
+		consecutive=$((previous_consecutive + 1))
+		vless_runtime__set_connection "${id}" "${desired_status}" null "${consecutive}" "${recent}" "${VLESS_PROBE_ERROR}" false
+	fi
+}
+
+vless_supervisor__confirm_active_failure() {
+	local id="${1}"
+	local probe_port="${2}"
+	local secondary_url="${3}"
+	local attempt=1
+
+	while [ "${attempt}" -le 2 ]; do
+		[ "${VLESS_CONFIRM_DELAY}" -gt 0 ] && sleep "${VLESS_CONFIRM_DELAY}"
+		if vless_runtime__probe_connection "${probe_port}" "${secondary_url}"; then
+			vless_supervisor__set_probe_result "${id}" active true
+			return 0
+		fi
+		attempt=$((attempt + 1))
+	done
+	return 1
+}
+
+vless_supervisor__xray_ready() {
+	"${VLESS_XRAY}" api bi \
+		--server="${VLESS_API_ADDRESS}" \
+		"${VLESS_BALANCER_TAG}" >/dev/null 2>&1
+}
+
+vless_supervisor__mark_xray_unavailable() {
+	local row id recent consecutive
+	while IFS= read -r row; do
+		[ -n "${row}" ] || continue
+		id=$(printf '%s\n' "${row}" | jq -r '.id')
+		recent=$(jq -r --arg id "${id}" '.connections[$id].recent_failures // 0' "${VLESS_STATE_FILE}")
+		consecutive=$(jq -r --arg id "${id}" '.connections[$id].consecutive_failures // 0' "${VLESS_STATE_FILE}")
+		VLESS_PROBE_ERROR='xray_unavailable'
+		vless_runtime__set_connection "${id}" unavailable null "$((consecutive + 1))" "$((recent + 1))" "${VLESS_PROBE_ERROR}" false
+	done <<EOF
+$(vless_store__list_enabled)
+EOF
+	vless_runtime__set_overall unavailable unknown "$(vless_runtime__active_id)"
+}
+
+vless_supervisor__initial_active() {
+	local active_id metadata
+	active_id=$(vless_runtime__active_id)
+	if [ -n "${active_id}" ]; then
+		metadata=$(vless_store__get "${active_id}")
+		if [ -n "${metadata}" ] && [ "$(printf '%s\n' "${metadata}" | jq -r '.enabled')" = true ]; then
+			printf '%s\n' "${active_id}"
+			return
+		fi
+	fi
+	vless_store__list_enabled | head -n 1 | jq -r '.id // empty'
+}
+
+vless_supervisor__once_locked() {
+	local enabled_count active_id policy primary_url secondary_url direct_url
+	local row id probe_port previous_status failures upstream_down active_status standby_count
+	local candidate direct_fallback previous_overall start_revision start_active
+
+	vless_runtime__ensure || return 1
+	start_revision=$(jq -r '.revision' "${VLESS_REGISTRY_FILE}")
+	if [ "$(vless_store__is_paused)" = true ]; then
+		vless_runtime__set_overall paused unknown "$(vless_runtime__active_id)"
+		return 0
+	fi
+	enabled_count=$(vless_store__enabled_count)
+	if [ "${enabled_count}" -eq 0 ]; then
+		vless_runtime__clear_active_id
+		if [ "$(vless_store__connection_count)" -eq 0 ]; then
+			vless_runtime__set_overall unconfigured unknown ''
+		else
+			vless_runtime__set_overall paused unknown ''
+		fi
+		return 0
+	fi
+
+	active_id=$(vless_supervisor__initial_active)
+	[ -n "${active_id}" ] || {
+		vless_runtime__set_overall unconfigured unknown ''
+		return 1
+	}
+	vless_runtime__set_active_id "${active_id}" || return 1
+
+	if ! vless_supervisor__xray_ready; then
+		vless_supervisor__mark_xray_unavailable
+		return 1
+	fi
+	if ! vless_runtime__override "mors-vless-${active_id}"; then
+		vless_runtime__event switch "${active_id}" "${active_id}" sticky_restore_failed error
+		vless_runtime__set_overall unavailable unknown "${active_id}"
+		return 1
+	fi
+
+	policy=$(vless_store__policy)
+	primary_url=$(printf '%s\n' "${policy}" | jq -r '.primary_probe_url')
+	secondary_url=$(printf '%s\n' "${policy}" | jq -r '.secondary_probe_url')
+	direct_url=$(printf '%s\n' "${policy}" | jq -r '.direct_probe_url')
+	direct_fallback=$(printf '%s\n' "${policy}" | jq -r '.direct_fallback')
+	upstream_down=false
+
+	while IFS= read -r row; do
+		[ -n "${row}" ] || continue
+		id=$(printf '%s\n' "${row}" | jq -r '.id')
+		probe_port=$(printf '%s\n' "${row}" | jq -r '.probe_port')
+		previous_status=$(jq -r --arg id "${id}" '.connections[$id].status // "checking"' "${VLESS_STATE_FILE}")
+
+		if vless_runtime__probe_connection "${probe_port}" "${primary_url}"; then
+			if [ "${id}" = "${active_id}" ]; then
+				vless_supervisor__set_probe_result "${id}" active true
+			else
+				vless_supervisor__set_probe_result "${id}" standby true
+			fi
+			continue
+		fi
+
+		if [ "${id}" = "${active_id}" ]; then
+			vless_supervisor__set_probe_result "${id}" unstable false
+			if vless_supervisor__confirm_active_failure "${id}" "${probe_port}" "${secondary_url}"; then
+				continue
+			fi
+
+			if ! vless_runtime__probe "${direct_url}" ''; then
+				upstream_down=true
+				VLESS_PROBE_ERROR='upstream_unavailable'
+				failures=$(jq -r --arg id "${id}" '.connections[$id].recent_failures // 0' "${VLESS_STATE_FILE}")
+				vless_runtime__set_connection "${id}" unstable null 1 "${failures}" "${VLESS_PROBE_ERROR}" false
+			else
+				failures=$(jq -r --arg id "${id}" '.connections[$id].recent_failures // 0' "${VLESS_STATE_FILE}")
+				VLESS_PROBE_ERROR='vless_unavailable'
+				vless_runtime__set_connection "${id}" unavailable null 3 "${failures}" "${VLESS_PROBE_ERROR}" false
+			fi
+		else
+			failures=$(jq -r --arg id "${id}" '.connections[$id].consecutive_failures // 0' "${VLESS_STATE_FILE}")
+			if [ "${previous_status}" = unstable ] || [ "${previous_status}" = unavailable ] || [ "${failures}" -ge 1 ]; then
+				vless_supervisor__set_probe_result "${id}" unavailable false
+			else
+				vless_supervisor__set_probe_result "${id}" unstable false
+			fi
+		fi
+	done <<EOF
+$(vless_store__list_enabled)
+EOF
+	start_active=$(vless_runtime__active_id)
+	if [ "$(jq -r '.revision' "${VLESS_REGISTRY_FILE}")" != "${start_revision}" ] || [ "${start_active}" != "${active_id}" ]; then
+		vless_runtime__event cycle "${active_id}" "${start_active}" concurrent_change aborted
+		return 1
+	fi
+
+	if [ "${upstream_down}" = true ]; then
+		vless_runtime__set_overall unavailable down "${active_id}"
+		return 1
+	fi
+
+	active_status=$(jq -r --arg id "${active_id}" '.connections[$id].status // "unavailable"' "${VLESS_STATE_FILE}")
+	if [ "${active_status}" = unavailable ]; then
+		candidate=$(vless_runtime__best_standby)
+		if [ -n "${candidate}" ]; then
+			if vless_runtime__override "mors-vless-${candidate}"; then
+				vless_runtime__set_active_id "${candidate}"
+				vless_runtime__set_connection "${candidate}" active \
+					"$(jq -r --arg id "${candidate}" '.connections[$id].latency_ms // "null"' "${VLESS_STATE_FILE}")" \
+					0 \
+					"$(jq -r --arg id "${candidate}" '.connections[$id].recent_failures // 0' "${VLESS_STATE_FILE}")" \
+					'' true
+				vless_runtime__record_switch "${active_id}" "${candidate}" health_failure
+				vless_runtime__event switch "${active_id}" "${candidate}" health_failure ok
+				active_id=${candidate}
+			else
+				vless_runtime__event switch "${active_id}" "${candidate}" api_override_failed error
+				vless_runtime__set_overall unavailable up "${active_id}"
+				return 1
+			fi
+		else
+			previous_overall=$(jq -r '.overall_state' "${VLESS_STATE_FILE}")
+			if [ "${direct_fallback}" = true ]; then
+				if ! vless_runtime__override mors-direct; then
+					vless_runtime__event all_unavailable "${active_id}" mors-direct api_override_failed error
+					vless_runtime__set_overall unavailable up "${active_id}"
+					return 1
+				fi
+				vless_runtime__set_overall direct_fallback up ''
+				[ "${previous_overall}" = direct_fallback ] || vless_runtime__event all_unavailable "${active_id}" mors-direct direct_fallback ok
+			else
+				if ! vless_runtime__override mors-block; then
+					vless_runtime__event all_unavailable "${active_id}" mors-block api_override_failed error
+					vless_runtime__set_overall unavailable up "${active_id}"
+					return 1
+				fi
+				vless_runtime__set_overall unavailable up ''
+				[ "${previous_overall}" = unavailable ] || vless_runtime__event all_unavailable "${active_id}" mors-block fail_closed ok
+			fi
+			return 1
+		fi
+	else
+		vless_runtime__override "mors-vless-${active_id}" || {
+			vless_runtime__set_overall unavailable up "${active_id}"
+			return 1
+		}
+	fi
+
+	standby_count=$(jq -r '[.connections[] | select(.status == "standby")] | length' "${VLESS_STATE_FILE}")
+	if [ "${standby_count}" -gt 0 ]; then
+		vless_runtime__set_overall healthy up "${active_id}"
+	else
+		vless_runtime__set_overall degraded up "${active_id}"
+	fi
+	return 0
+}
+
+vless_supervisor__once() {
+	vless_runtime__with_decision_lock vless_supervisor__cycle_and_mark
+}
+
+vless_supervisor__cycle_and_mark() {
+	local result
+	vless_supervisor__once_locked
+	result=$?
+	vless_runtime__mark_cycle || return 1
+	return "${result}"
+}
+
+vless_supervisor__acquire_lock() {
+	local existing_pid
+	mkdir -p "${VLESS_RUNTIME_ROOT}" || return 1
+	if ! mkdir "${VLESS_SUPERVISOR_LOCK_DIR}" 2>/dev/null; then
+		existing_pid=''
+		[ -s "${VLESS_SUPERVISOR_PID_FILE}" ] && existing_pid=$(tr -d '\r\n' <"${VLESS_SUPERVISOR_PID_FILE}")
+		if [ -z "${existing_pid}" ]; then
+			sleep 1
+			[ -s "${VLESS_SUPERVISOR_PID_FILE}" ] && existing_pid=$(tr -d '\r\n' <"${VLESS_SUPERVISOR_PID_FILE}")
+		fi
+		if [ -n "${existing_pid}" ] && kill -0 "${existing_pid}" 2>/dev/null; then
+			printf '%s\n' 'VLESS supervisor уже запущен.' >&2
+			return 1
+		fi
+		rm -f "${VLESS_SUPERVISOR_PID_FILE}"
+		rmdir "${VLESS_SUPERVISOR_LOCK_DIR}" 2>/dev/null || return 1
+		mkdir "${VLESS_SUPERVISOR_LOCK_DIR}" 2>/dev/null || return 1
+	fi
+	printf '%s\n' "$$" >"${VLESS_SUPERVISOR_PID_FILE}"
+	trap 'vless_supervisor__cleanup' EXIT
+	trap 'exit 0' INT TERM
+}
+
+vless_supervisor__cleanup() {
+	local owner=''
+	vless_runtime__release_decision_lock >/dev/null 2>&1 || true
+	[ -s "${VLESS_SUPERVISOR_PID_FILE}" ] && owner=$(tr -d '\r\n' <"${VLESS_SUPERVISOR_PID_FILE}")
+	[ "${owner}" = "$$" ] || return 0
+	rm -f "${VLESS_SUPERVISOR_PID_FILE}"
+	rmdir "${VLESS_SUPERVISOR_LOCK_DIR}" 2>/dev/null || true
+}
+
+vless_supervisor__run() {
+	vless_store__ensure || return 1
+	[ "$(vless_store__is_paused)" = false ] || return 0
+	[ "$(vless_store__enabled_count)" -gt 0 ] || return 0
+	vless_supervisor__acquire_lock || return 1
+	trap ':' USR1
+	while true; do
+		vless_supervisor__once || true
+		sleep "${VLESS_SUPERVISOR_INTERVAL}"
+	done
+}
+
+vless_supervisor__run_once() {
+	local result
+	vless_supervisor__acquire_lock || return 1
+	vless_supervisor__once
+	result=$?
+	return "${result}"
+}
+
+if [ "${VLESS_SUPERVISOR_LIBRARY_ONLY:-false}" != true ]; then
+	case "${1:-run}" in
+		once) vless_supervisor__run_once ;;
+		run) vless_supervisor__run ;;
+		*) printf 'Использование: %s [run|once]\n' "$0" >&2; exit 64 ;;
+	esac
+fi

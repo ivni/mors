@@ -2,6 +2,7 @@
 . /opt/apps/mors/bin/libs/main
 . /opt/apps/mors/bin/libs/vpn
 . /opt/apps/mors/bin/libs/vless
+. /opt/apps/mors/bin/libs/lifecycle
 
 # В случае проблем с инсталляцией пакета ставим в значение true
 ANSWER_AGH=n
@@ -284,6 +285,46 @@ restore_backups(){
 	restore_backup "${DNSMASQ_IPSET_HOSTS_BACKUP}" "${DNSMASQ_IPSET_HOSTS}" "списка ipset для dnsmasq"
 
 	restore_backup "${VLESS_CONFIG_FILE_BACKUP}" "${VLESS_CONFIG_FILE}" "конфигурации xray vless"
+	if [ -d "${MORS_BACKUP_PATH}/vless-store" ]; then
+		ready "Хранилище управляемых VLESS-соединений восстановлено"
+		local restore_candidate="${VLESS_STORE_ROOT}.restore-candidate"
+		local previous_store="${VLESS_STORE_ROOT}.previous"
+		local had_live_store=false
+		if [ -d "${previous_store}" ]; then
+			if [ ! -d "${VLESS_STORE_ROOT}" ]; then
+				mv -f "${previous_store}" "${VLESS_STORE_ROOT}" || return 1
+			else
+				rm -rf "${previous_store}"
+			fi
+		fi
+		rm -rf "${restore_candidate}"
+		mkdir -p "$(dirname "${VLESS_STORE_ROOT}")" "${restore_candidate}"
+		if cp -pR "${MORS_BACKUP_PATH}/vless-store/." "${restore_candidate}/" && \
+			vless_store__validate_tree "${restore_candidate}"; then
+			if [ -d "${VLESS_STORE_ROOT}" ]; then
+				mv -f "${VLESS_STORE_ROOT}" "${previous_store}" || { rm -rf "${restore_candidate}"; return 1; }
+				had_live_store=true
+			fi
+			if [ -e "${VLESS_STORE_ROOT}" ] || \
+				! mv -f "${restore_candidate}" "${VLESS_STORE_ROOT}" || \
+				! vless_store__validate_tree "${VLESS_STORE_ROOT}"; then
+				rm -rf "${VLESS_STORE_ROOT}" "${restore_candidate}"
+				if [ "${had_live_store}" = true ] && ! mv -f "${previous_store}" "${VLESS_STORE_ROOT}"; then
+					error "Критическая ошибка: не удалось вернуть прежнее VLESS-хранилище."
+				fi
+				when_bad "ОШИБКА"
+				return 1
+			fi
+			rm -rf "${previous_store}"
+			chmod 700 "${VLESS_STORE_ROOT}" "${VLESS_CONNECTIONS_DIR}" 2>/dev/null || true
+			find "${VLESS_STORE_ROOT}" -type f -exec chmod 600 {} \;
+			when_ok "УСПЕШНО"
+		else
+			rm -rf "${restore_candidate}"
+			when_bad "ОШИБКА"
+			return 1
+		fi
+	fi
 
 	restore_backup "${DNSCRYPT_CONFIG_BACKUP}" "${DNSCRYPT_CONFIG}" "конфигурации dnscrypt_proxy2"
 	restore_backup "${ADBLOCK_LIST_EXCEPTION_BACKUP}" "${ADBLOCK_LIST_EXCEPTION}" "списка хостов-исключений для блокировки рекламы"
@@ -308,6 +349,40 @@ save_backups(){
 	backup_copy "${DNSMASQ_IPSET_HOSTS}" "${DNSMASQ_IPSET_HOSTS_BACKUP}"
 
 	backup_copy "${VLESS_CONFIG_FILE}" "${VLESS_CONFIG_FILE_BACKUP}"
+	if [ -d "${VLESS_STORE_ROOT}" ]; then
+		local backup_candidate="${MORS_BACKUP_PATH}/vless-store.candidate"
+		local previous_backup="${MORS_BACKUP_PATH}/vless-store.previous"
+		local had_previous_backup=false
+		if [ -d "${previous_backup}" ]; then
+			if [ ! -d "${MORS_BACKUP_PATH}/vless-store" ]; then
+				mv -f "${previous_backup}" "${MORS_BACKUP_PATH}/vless-store" || return 1
+			else
+				rm -rf "${previous_backup}"
+			fi
+		fi
+		rm -rf "${backup_candidate}"
+		mkdir -p "${backup_candidate}"
+		if ! cp -pR "${VLESS_STORE_ROOT}/." "${backup_candidate}/" || \
+			! vless_store__validate_tree "${backup_candidate}"; then
+			rm -rf "${backup_candidate}"
+			error "Не удалось создать проверенную резервную копию VLESS. Обновление остановлено."
+			return 1
+		fi
+		if [ -d "${MORS_BACKUP_PATH}/vless-store" ]; then
+			mv -f "${MORS_BACKUP_PATH}/vless-store" "${previous_backup}" || { rm -rf "${backup_candidate}"; return 1; }
+			had_previous_backup=true
+		fi
+		if [ -e "${MORS_BACKUP_PATH}/vless-store" ] || \
+			! mv -f "${backup_candidate}" "${MORS_BACKUP_PATH}/vless-store" || \
+			! vless_store__validate_tree "${MORS_BACKUP_PATH}/vless-store"; then
+			rm -rf "${MORS_BACKUP_PATH}/vless-store" "${backup_candidate}"
+			if [ "${had_previous_backup}" = true ] && ! mv -f "${previous_backup}" "${MORS_BACKUP_PATH}/vless-store"; then
+				error "Критическая ошибка: прежняя VLESS-копия осталась в ${previous_backup}."
+			fi
+			return 1
+		fi
+		rm -rf "${previous_backup}"
+	fi
 
 	backup_copy "${DNSCRYPT_CONFIG}" "${DNSCRYPT_CONFIG_BACKUP}"
 
@@ -371,7 +446,9 @@ rm_package_files() {
 
 	if [ "${full}" = full ] ; then
 		ready 'Удаляем архивные копии пакета Морс' && {
+			# Активный lifecycle-lock удаляет только owner-checked release.
 			find /opt ! -path '/opt/packages/*' ! -path '/opt/lib/opkg/*' ! -path "${HOME}/*" \
+			  ! -path "${MORS_LIFECYCLE_LOCK_DIR}" ! -path "${MORS_LIFECYCLE_LOCK_DIR}/*" \
 			  -name '*mors*' ! -regex '.*/mors[a-zA-Z].*' \
 			  -exec rm -rf {} +
 
@@ -399,6 +476,9 @@ rm_package_files() {
 
 		rm_file /opt/etc/ndm/fs.d/15-mors-start.sh
 		rm_file /opt/etc/cron.5mins/check_vpn
+		rm_file /opt/etc/cron.5mins/vless-watchdog
+		rm_file /opt/etc/init.d/S25mors-vless
+		rm_dir /opt/var/run/mors/vless
 
 		rm_file /opt/etc/dnsmasq.d/mors.dnsmasq
 		rm_dir /opt/etc/adblock
@@ -431,6 +511,7 @@ rm_previous_version_files() {
 
 	# текущий, создастся при включении соединения
 	rm_file /opt/etc/cron.5mins/check_vpn
+	rm_file /opt/etc/cron.5mins/vless-watchdog
 	# исторический
 	rm_file /opt/etc/cron.5mins/ipset.mors
 	# оптимизированные
@@ -511,7 +592,7 @@ clear_previous_version_net_rules() {
 	ip4__ipset__destroy 'unblock'
 }
 
-cmd_install(){
+setup__cmd_install_unlocked(){
 
 #	Если режим обновления, то не спрашиваем про выбор соединения,
 #	а просто берем его из файла конфигурации Морса
@@ -562,6 +643,10 @@ cmd_install(){
 	xray_install_and_check || warning "VLESS будет недоступен до установки совместимой версии Xray."
 	# Создаем ссылку на наш скрипт для запуска xray в /opt/etc/init.d
 	[ -f "${XRAY_INIT}" ] || ln -s /opt/apps/mors/etc/init.d/S97xray ${XRAY_INIT}
+	ln -sf /opt/apps/mors/etc/init.d/S25mors-vless "${VLESS_SUPERVISOR_INIT}"
+	chmod +x "${VLESS_SUPERVISOR_INIT}"
+	mkdir -p /opt/etc/cron.5mins
+	ln -sf /opt/apps/mors/bin/main/vless-watchdog /opt/etc/cron.5mins/vless-watchdog
 
 	# Код отключения IPv6 не помогает
 	#if [ "$(ipv6_status)" = 0 ]; then
@@ -589,7 +674,16 @@ cmd_install(){
 		#------------------------------------------------------
 		# ВОССТАНАВЛИВАЕМ ФАЙЛ СО СПИСКОМ РАЗБЛОКИРОВКИ
 		#------------------------------------------------------
-		restore_backups
+		restore_backups || return 1
+		if [ -f "${VLESS_REGISTRY_FILE}" ]; then
+			vless_store__ensure && \
+				vless_domain__apply_generated "$(vless_runtime__active_id)" || \
+				warning "Не удалось восстановить runtime-конфигурацию VLESS. Выполните 'mors vless status'."
+		elif [ -f "${VLESS_CONFIG_FILE}" ]; then
+			mv -f "${VLESS_CONFIG_FILE}" "${VLESS_CONFIG_FILE}.legacy-1.1.9" || return 1
+			warning "Прежняя одиночная VLESS-конфигурация сохранена как ${VLESS_CONFIG_FILE}.legacy-1.1.9, но не активирована. Настройте VLESS заново через 'mors vless'."
+			vless_store__ensure && vless_domain__apply_generated '' || return 1
+		fi
 
 		set_config_value APP_VERSION "${new_ver}"
 		set_config_value APP_RELEASE "${new_rel}"
@@ -782,7 +876,7 @@ all_services_rm_develop_mode() {
 #	 		если иное - то пропускаем запрос на удаление пакета
 #
 # ------------------------------------------------------------------------------------------
-cmd_uninstall() {
+setup__cmd_uninstall_unlocked() {
 
 	rm_type=${1}; sure="${2}";
 	answer_yes='y|Y|Yes|yes|YES|да|Да|ДА'
@@ -807,7 +901,10 @@ cmd_uninstall() {
 			all_services_rm_develop_mode
 		else
 #			Сохраняем значимые файлы конфигурации
-			save_backups
+			save_backups || {
+				error "Удаление отменено: резервная копия не создана."
+				return 1
+			}
 			mess="Удаляем все архивные данные, зависимые пакеты оставляем."
 		fi
 		[ -z "${sure}" ] && print_line
@@ -833,6 +930,8 @@ cmd_uninstall() {
 			${DNSCRYPT_DEMON} stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
 			config__restore_from_opkg "${DNSCRYPT_CONFIG}"
 		fi
+		[ -f "${VLESS_SUPERVISOR_INIT}" ] && "${VLESS_SUPERVISOR_INIT}" stop &>/dev/null || true
+		[ -f "${XRAY_INIT}" ] && "${XRAY_INIT}" stop &>/dev/null || true
 
 		# Подключаем библиотеку keen_api
 		#source /opt/apps/mors/bin/libs/keen_api
@@ -885,5 +984,13 @@ cmd_uninstall() {
 		print_line
 		echo "Удаление МОРСа завершено."
 	fi
+}
+
+cmd_install() {
+	lifecycle__run_locked setup__cmd_install_unlocked "$@"
+}
+
+cmd_uninstall() {
+	lifecycle__run_locked setup__cmd_uninstall_unlocked "$@"
 }
 

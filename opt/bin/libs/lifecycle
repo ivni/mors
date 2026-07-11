@@ -1,0 +1,105 @@
+#!/bin/sh
+
+# Serializes install, update, uninstall, backup, and restore operations.
+# The exported token lets child `mors` processes join an updater transaction.
+
+MORS_LIFECYCLE_LOCK_DIR=${MORS_LIFECYCLE_LOCK_DIR:-/opt/var/lock/mors-lifecycle.lock}
+MORS_LIFECYCLE_LOCK_OWNED=false
+
+lifecycle__read_file() {
+	local file="${1}"
+	[ -s "${file}" ] || return 1
+	tr -d '\r\n' <"${file}"
+}
+
+lifecycle__acquire() {
+	local parent owner stored_token token
+	parent=$(dirname "${MORS_LIFECYCLE_LOCK_DIR}")
+	mkdir -p "${parent}" || return 1
+
+	while ! mkdir "${MORS_LIFECYCLE_LOCK_DIR}" 2>/dev/null; do
+		stored_token=$(lifecycle__read_file "${MORS_LIFECYCLE_LOCK_DIR}/token" 2>/dev/null || true)
+		if [ -n "${MORS_LIFECYCLE_LOCK_TOKEN:-}" ] && \
+			[ "${stored_token}" = "${MORS_LIFECYCLE_LOCK_TOKEN}" ]; then
+			MORS_LIFECYCLE_LOCK_OWNED=false
+			return 0
+		fi
+
+		owner=$(lifecycle__read_file "${MORS_LIFECYCLE_LOCK_DIR}/pid" 2>/dev/null || true)
+		if [ -z "${owner}" ]; then
+			# Give the process that won mkdir time to publish its metadata.
+			sleep 1
+			[ -s "${MORS_LIFECYCLE_LOCK_DIR}/pid" ] && continue
+			rmdir "${MORS_LIFECYCLE_LOCK_DIR}" 2>/dev/null || {
+				printf '%s\n' 'Другая операция установки или обновления Mors уже выполняется.' >&2
+				return 1
+			}
+			continue
+		fi
+
+		if kill -0 "${owner}" 2>/dev/null; then
+			printf '%s\n' 'Другая операция установки, обновления или удаления Mors уже выполняется.' >&2
+			return 1
+		fi
+
+		rm -f "${MORS_LIFECYCLE_LOCK_DIR}/pid" "${MORS_LIFECYCLE_LOCK_DIR}/token"
+		rmdir "${MORS_LIFECYCLE_LOCK_DIR}" 2>/dev/null || return 1
+	done
+
+	token="${MORS_LIFECYCLE_LOCK_TOKEN:-$$-$(date +%s)}"
+	if ! printf '%s\n' "$$" >"${MORS_LIFECYCLE_LOCK_DIR}/pid" || \
+		! printf '%s\n' "${token}" >"${MORS_LIFECYCLE_LOCK_DIR}/token"; then
+		rm -f "${MORS_LIFECYCLE_LOCK_DIR}/pid" "${MORS_LIFECYCLE_LOCK_DIR}/token"
+		rmdir "${MORS_LIFECYCLE_LOCK_DIR}" 2>/dev/null || true
+		return 1
+	fi
+
+	MORS_LIFECYCLE_LOCK_TOKEN=${token}
+	export MORS_LIFECYCLE_LOCK_TOKEN
+	MORS_LIFECYCLE_LOCK_OWNED=true
+}
+
+lifecycle__release() {
+	local owner stored_token
+	[ "${MORS_LIFECYCLE_LOCK_OWNED}" = true ] || return 0
+	owner=$(lifecycle__read_file "${MORS_LIFECYCLE_LOCK_DIR}/pid" 2>/dev/null || true)
+	stored_token=$(lifecycle__read_file "${MORS_LIFECYCLE_LOCK_DIR}/token" 2>/dev/null || true)
+	[ "${owner}" = "$$" ] && [ "${stored_token}" = "${MORS_LIFECYCLE_LOCK_TOKEN:-}" ] || return 1
+	rm -f "${MORS_LIFECYCLE_LOCK_DIR}/pid" "${MORS_LIFECYCLE_LOCK_DIR}/token"
+	rmdir "${MORS_LIFECYCLE_LOCK_DIR}" 2>/dev/null || return 1
+	MORS_LIFECYCLE_LOCK_OWNED=false
+	unset MORS_LIFECYCLE_LOCK_TOKEN
+}
+
+lifecycle__run_locked() {
+	local result owns_lock
+	lifecycle__acquire || return 1
+	owns_lock=${MORS_LIFECYCLE_LOCK_OWNED}
+	if [ "${owns_lock}" = true ]; then
+		trap 'lifecycle__release >/dev/null 2>&1 || true' 0
+		trap 'exit 130' HUP INT TERM
+	fi
+
+	"$@"
+	result=$?
+	if [ "${owns_lock}" = true ]; then
+		lifecycle__release || result=1
+		trap - 0 HUP INT TERM
+	fi
+	return "${result}"
+}
+
+lifecycle__guard_shell() {
+	lifecycle__acquire || return 1
+	if [ "${MORS_LIFECYCLE_LOCK_OWNED}" = true ]; then
+		trap 'lifecycle__release >/dev/null 2>&1 || true' 0
+		trap 'exit 130' HUP INT TERM
+	fi
+}
+
+lifecycle__unguard_shell() {
+	if [ "${MORS_LIFECYCLE_LOCK_OWNED}" = true ]; then
+		lifecycle__release || return 1
+		trap - 0 HUP INT TERM
+	fi
+}

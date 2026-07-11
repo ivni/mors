@@ -11,6 +11,11 @@ Primary project references:
 - Repository: `https://github.com/ivni/mors`
 - Local Git remote should normally point at `ivni/mors`.
 
+Normative design and architecture references:
+
+- `docs/cli-design-system.md` - required CLI terminology, state vocabulary, interaction, error, JSON, and safety contracts.
+- `docs/vless-architecture.md` - source-of-truth boundaries, VLESS storage, health state machine, supervisor, failover, and release gates.
+
 Historical upstream references:
 
 - Original repository: `https://github.com/qzeleza/kvas`
@@ -89,6 +94,7 @@ Use the original Kvas repository and wiki only as historical/reference material 
 - Prefer sound architecture, correctness, testability, and long-term quality over the fastest possible closure of the immediate task. If the proper solution materially expands the requested scope, present the recommended design and tradeoffs and obtain direction before making that broader change.
 - Keep changes narrowly scoped. This package touches DNS, firewall, routing, and VPN state on user routers.
 - When adding or changing a CLI command:
+  - follow `docs/cli-design-system.md`; update the design-system document first when introducing a new interaction or status pattern;
   - update `opt/bin/mors` dispatch logic;
   - update `opt/etc/conf/mors.help`;
   - compare the change with Mors documentation first, then the historical Kvas wiki command taxonomy in `Описание команд` if Mors docs do not cover it;
@@ -98,6 +104,7 @@ Use the original Kvas repository and wiki only as historical/reference material 
 - When preparing a commit that changes packaged files or runtime behavior, increment `PKG_RELEASE` once for that release batch. Change `PKG_VERSION` only as part of a deliberate version transition.
 - When changing default configuration, update templates in `opt/etc/conf/` and verify the install/setup paths that copy or transform them.
 - When changing VLESS/Xray behavior or `opt/etc/conf/mors.vless`, inspect `opt/bin/libs/xray` and keep the compatibility policy, README, CLI help, changelog, and CI matrix synchronized. Update `XRAY_TESTED_VERSION` only after the compatibility CI validates that version.
+- Changes to managed VLESS connections must preserve the component boundaries and release gates in `docs/vless-architecture.md`. Do not add a separate Xray process or Keenetic Proxy interface per connection.
 - When changing NDM hooks, inspect `opt/etc/ndm/ndm`, `opt/bin/libs/ndm_d`, and all matching hook directories because similar logic is duplicated across interface and netfilter events.
 - When editing install, uninstall, update, or rollback behavior, inspect `opt/bin/main/setup`, `opt/bin/main/upgrade`, and `Makefile` post-install logic together.
 - Do not rewrite large legacy shell sections just for style. Prefer targeted fixes with clear behavior.

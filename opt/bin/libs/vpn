@@ -2289,31 +2289,29 @@ cmd_interface_change() {
 }
 
 
-create_vless_config(){
-	local vless_link=''
-	read_value "Ведите ссылку в формате 'vless://[данные]' :" vless_link
-	[ -f "${VLESS_CONFIG_FILE}" ] || cp "${VLESS_CONFIG_ORIGINAL_FILE}" "${VLESS_CONFIG_FILE}"
-	# Считываем данные из ссылки в файл proxy vless конфигурации
-	vless_link_parse "${vless_link}" "${VLESS_CONFIG_FILE}"
-	print_line
-}
-
 start_vless(){
 	local _inface_entware=${1}
 	xray_version_check || return 1
-	# Если нет файла конфигурации proxy vless
-	# то запросим ссылку и создаем его
-	[ -f ${VLESS_CONFIG_FILE} ] || create_vless_config
-	grep -q @ ${VLESS_CONFIG_FILE} && create_vless_config
+	vless_store__ensure || return 1
+	if [ "$(vless_store__enabled_count)" -eq 0 ]; then
+		error "Нет включённых VLESS-соединений. Выполните 'mors vless add'."
+		return 1
+	fi
+	if [ "$(vless_store__is_paused)" = true ]; then
+		error "VLESS приостановлен. Выполните 'mors vless resume'."
+		return 1
+	fi
+	vless_domain__apply_generated "$(vless_runtime__active_id)" false || return 1
 
 	# Проверка конфигурации xray
-	check_xray_config=$(${XRAY} run -test -c ${VLESS_CONFIG_FILE})
+	check_xray_config=$(${XRAY} run -test -c "${VLESS_CONFIG_FILE}" 2>&1)
 
 	if echo "${check_xray_config}" | grep -q "Configuration OK" ; then
 
 		# Запуск xray в случае, если конфигурация xray не содержит ошибок
 		ready "Запускаем xray сервис..."
-		"${XRAY_INIT}" start && when_ok "УСПЕШНО"
+		"${XRAY_INIT}" restart && when_ok "УСПЕШНО"
+		[ -f "${VLESS_SUPERVISOR_INIT}" ] && "${VLESS_SUPERVISOR_INIT}" restart &> /dev/null
 		vpn_on "${_inface_entware}" &> /dev/null
 		# Тестируем работу proxy vless
 		test_vless_proxy
@@ -2337,6 +2335,7 @@ switch_vpn_on(){
 
 	# Останавливаем xray, если запушен
 	${XRAY_INIT} stop &> /dev/null
+	[ -f "${VLESS_SUPERVISOR_INIT}" ] && "${VLESS_SUPERVISOR_INIT}" stop &> /dev/null
 
 	if [[ "${inface_entware}" =~ ${SSR_ENTWARE_TEMPL} ]]; then
 		vpn_off &> /dev/null
@@ -2369,10 +2368,16 @@ switch_vpn_on(){
 		done
 	}
 
-	[ -f /opt/etc/cron.5mins/check_vpn ] || {
-		ready "Устанавливаем проверку зависания VPN соединения в cron."
-		ln -s /opt/apps/mors/bin/main/check_vpn /opt/etc/cron.5mins/check_vpn && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
-	}
+	if [ "${cli_inface}" = "${PROXY_VLESS_NAME}" ]; then
+		rm -f /opt/etc/cron.5mins/check_vpn
+		[ -f /opt/etc/cron.5mins/vless-watchdog ] || \
+			ln -s /opt/apps/mors/bin/main/vless-watchdog /opt/etc/cron.5mins/vless-watchdog
+	else
+		[ -f /opt/etc/cron.5mins/check_vpn ] || {
+			ready "Устанавливаем проверку зависания VPN соединения в cron."
+			ln -s /opt/apps/mors/bin/main/check_vpn /opt/etc/cron.5mins/check_vpn && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+		}
+	fi
 
 
 }

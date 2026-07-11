@@ -20,4 +20,8 @@ setup() {
 	grep -q '^debug ' "${HELP_FILE}"
 	grep -q '^ver|version' "${HELP_FILE}"
 	grep -q '^vless version|ver' "${HELP_FILE}"
+	grep -q '^vless add' "${HELP_FILE}"
+	grep -q '^vless status' "${HELP_FILE}"
+	grep -q '^vless check' "${HELP_FILE}"
+	grep -q '^vless events' "${HELP_FILE}"
 }

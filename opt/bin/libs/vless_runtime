@@ -1,0 +1,354 @@
+#!/bin/sh
+
+# Runtime state, health probes, Xray balancer control, and event history.
+
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+# shellcheck source=./vless_store
+. "${MORS_LIB_DIR}/vless_store"
+
+VLESS_STATE_ROOT=${VLESS_STATE_ROOT:-/opt/var/lib/mors/vless}
+VLESS_RUNTIME_ROOT=${VLESS_RUNTIME_ROOT:-/opt/var/run/mors/vless}
+VLESS_STATE_FILE=${VLESS_STATE_FILE:-${VLESS_STATE_ROOT}/state.json}
+VLESS_ACTIVE_FILE=${VLESS_ACTIVE_FILE:-${VLESS_STATE_ROOT}/active}
+VLESS_EVENTS_FILE=${VLESS_EVENTS_FILE:-${VLESS_STATE_ROOT}/events.jsonl}
+VLESS_SUPERVISOR_PID_FILE=${VLESS_SUPERVISOR_PID_FILE:-${VLESS_RUNTIME_ROOT}/supervisor.pid}
+VLESS_SUPERVISOR_LOCK_DIR=${VLESS_SUPERVISOR_LOCK_DIR:-${VLESS_RUNTIME_ROOT}/supervisor.lock}
+VLESS_DECISION_LOCK_DIR=${VLESS_DECISION_LOCK_DIR:-${VLESS_RUNTIME_ROOT}/decision.lock}
+VLESS_DECISION_PID_FILE=${VLESS_DECISION_PID_FILE:-${VLESS_DECISION_LOCK_DIR}/pid}
+VLESS_EVENT_LIMIT=${VLESS_EVENT_LIMIT:-200}
+VLESS_API_ADDRESS=${VLESS_API_ADDRESS:-127.0.0.1:10085}
+VLESS_BALANCER_TAG=${VLESS_BALANCER_TAG:-mors-vless}
+VLESS_CURL=${VLESS_CURL:-curl}
+VLESS_XRAY=${VLESS_XRAY:-${XRAY:-/opt/sbin/xray}}
+
+vless_runtime__ensure() {
+	local now
+	vless_store__ensure || return 1
+	mkdir -p "${VLESS_STATE_ROOT}" "${VLESS_RUNTIME_ROOT}" || return 1
+	chmod 700 "${VLESS_STATE_ROOT}" "${VLESS_RUNTIME_ROOT}" 2>/dev/null || return 1
+
+	if [ ! -f "${VLESS_STATE_FILE}" ]; then
+		now=$(vless_store__now)
+		jq -n --arg now "${now}" '{
+			schema_version: 1,
+			cycle: 0,
+			last_cycle_at: null,
+			overall_state: "unconfigured",
+			upstream_state: "unknown",
+			active_id: null,
+			last_updated: $now,
+			last_switch: null,
+			connections: {}
+		}' | vless_store__write_json "${VLESS_STATE_FILE}" || return 1
+	fi
+	vless_runtime__reconcile
+}
+
+vless_runtime__mark_cycle() {
+	local now
+	now=$(vless_store__now)
+	jq --arg now "${now}" '
+		.cycle = ((.cycle // 0) + 1) |
+		.last_cycle_at = $now |
+		.last_updated = $now
+	' "${VLESS_STATE_FILE}" | vless_store__write_json "${VLESS_STATE_FILE}"
+}
+
+vless_runtime__reconcile() {
+	local now active_id
+	now=$(vless_store__now)
+	active_id=$(vless_runtime__active_id)
+	jq \
+		--slurpfile registry "${VLESS_REGISTRY_FILE}" \
+		--arg active_id "${active_id}" \
+		--arg now "${now}" '
+		.connections as $old |
+		.connections = reduce $registry[0].connections[] as $c ({};
+			.[$c.id] = (($old[$c.id] // {
+				status: "checking",
+				latency_ms: null,
+				consecutive_failures: 0,
+				recent_failures: 0,
+				last_checked: null,
+				last_success: null,
+				last_error: null
+			}) + {
+				name: $c.name,
+				enabled: $c.enabled,
+				probe_port: $c.probe_port,
+				status: (if $c.enabled then (($old[$c.id].status // "checking") | if . == "disabled" then "checking" else . end) else "disabled" end)
+			})
+		) |
+		.active_id = (if $active_id == "" then null else $active_id end) |
+		.last_updated = $now
+	' "${VLESS_STATE_FILE}" | vless_store__write_json "${VLESS_STATE_FILE}"
+}
+
+vless_runtime__active_id() {
+	if [ -s "${VLESS_ACTIVE_FILE}" ]; then
+		tr -d '\r\n' <"${VLESS_ACTIVE_FILE}"
+	fi
+}
+
+vless_runtime__set_active_id() {
+	local id="${1}"
+	local temporary="${VLESS_ACTIVE_FILE}.tmp.$$"
+	umask 077
+	printf '%s\n' "${id}" >"${temporary}" || return 1
+	chmod 600 "${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	mv -f "${temporary}" "${VLESS_ACTIVE_FILE}"
+}
+
+vless_runtime__clear_active_id() {
+	rm -f "${VLESS_ACTIVE_FILE}"
+}
+
+vless_runtime__set_connection() {
+	local id="${1}"
+	local status="${2}"
+	local latency_ms="${3:-null}"
+	local consecutive_failures="${4:-0}"
+	local recent_failures="${5:-0}"
+	local error="${6:-}"
+	local success="${7:-false}"
+	local now
+	now=$(vless_store__now)
+
+	[ -n "${latency_ms}" ] || latency_ms=null
+	jq \
+		--arg id "${id}" \
+		--arg status "${status}" \
+		--arg now "${now}" \
+		--arg error "${error}" \
+		--argjson latency_ms "${latency_ms}" \
+		--argjson consecutive_failures "${consecutive_failures}" \
+		--argjson recent_failures "${recent_failures}" \
+		--argjson success "${success}" '
+		(.connections[$id]) |= (
+			.status = $status |
+			.latency_ms = $latency_ms |
+			.consecutive_failures = $consecutive_failures |
+			.recent_failures = $recent_failures |
+			.last_checked = $now |
+			.last_error = (if $error == "" then null else $error end) |
+			.last_success = (if $success then $now else .last_success end)
+		) |
+		.last_updated = $now
+	' "${VLESS_STATE_FILE}" | vless_store__write_json "${VLESS_STATE_FILE}"
+}
+
+vless_runtime__set_overall() {
+	local overall="${1}"
+	local upstream="${2:-up}"
+	local active_id="${3:-}"
+	local now
+	now=$(vless_store__now)
+	jq \
+		--arg overall "${overall}" \
+		--arg upstream "${upstream}" \
+		--arg active_id "${active_id}" \
+		--arg now "${now}" '
+		.overall_state = $overall |
+		.upstream_state = $upstream |
+		.active_id = (if $active_id == "" then null else $active_id end) |
+		.last_updated = $now
+	' "${VLESS_STATE_FILE}" | vless_store__write_json "${VLESS_STATE_FILE}"
+}
+
+vless_runtime__record_switch() {
+	local from_id="${1:-}"
+	local to_id="${2:-}"
+	local reason="${3:-health_failure}"
+	local now
+	now=$(vless_store__now)
+	jq \
+		--arg now "${now}" \
+		--arg from_id "${from_id}" \
+		--arg to_id "${to_id}" \
+		--arg reason "${reason}" '
+		.last_switch = {
+			at: $now,
+			from_id: (if $from_id == "" then null else $from_id end),
+			to_id: (if $to_id == "" then null else $to_id end),
+			reason: $reason
+		} |
+		.last_updated = $now
+	' "${VLESS_STATE_FILE}" | vless_store__write_json "${VLESS_STATE_FILE}"
+}
+
+vless_runtime__event() {
+	local type="${1}"
+	local from_id="${2:-}"
+	local to_id="${3:-}"
+	local reason="${4:-}"
+	local result="${5:-ok}"
+	local now temporary
+	now=$(vless_store__now)
+	temporary="${VLESS_EVENTS_FILE}.tmp.$$"
+
+	umask 077
+	jq -nc \
+		--arg now "${now}" \
+		--arg type "${type}" \
+		--arg from_id "${from_id}" \
+		--arg to_id "${to_id}" \
+		--arg reason "${reason}" \
+		--arg result "${result}" '{
+			at: $now,
+			type: $type,
+			from_id: (if $from_id == "" then null else $from_id end),
+			to_id: (if $to_id == "" then null else $to_id end),
+			reason: (if $reason == "" then null else $reason end),
+			result: $result
+		}' >>"${VLESS_EVENTS_FILE}" || return 1
+	chmod 600 "${VLESS_EVENTS_FILE}" 2>/dev/null || return 1
+	tail -n "${VLESS_EVENT_LIMIT}" "${VLESS_EVENTS_FILE}" >"${temporary}" || return 1
+	chmod 600 "${temporary}" || return 1
+	mv -f "${temporary}" "${VLESS_EVENTS_FILE}"
+	command -v logger >/dev/null 2>&1 && logger -t 'МОРС' "VLESS ${type}: ${from_id:-none} -> ${to_id:-none}, ${reason:-no_reason}, ${result}" || true
+}
+
+vless_runtime__events_json() {
+	if [ ! -s "${VLESS_EVENTS_FILE}" ]; then
+		printf '%s\n' '[]'
+		return
+	fi
+	jq -s 'reverse' "${VLESS_EVENTS_FILE}"
+}
+
+vless_runtime__override() {
+	local outbound_tag="${1}"
+	"${VLESS_XRAY}" api bo \
+		--server="${VLESS_API_ADDRESS}" \
+		-b "${VLESS_BALANCER_TAG}" \
+		"${outbound_tag}" >/dev/null 2>&1
+}
+
+vless_runtime__remove_override() {
+	"${VLESS_XRAY}" api bo \
+		--server="${VLESS_API_ADDRESS}" \
+		-b "${VLESS_BALANCER_TAG}" \
+		-r >/dev/null 2>&1
+}
+
+vless_runtime__wake_supervisor() {
+	local pid
+	[ -s "${VLESS_SUPERVISOR_PID_FILE}" ] || return 1
+	pid=$(tr -d '\r\n' <"${VLESS_SUPERVISOR_PID_FILE}")
+	[ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null || return 1
+	kill -USR1 "${pid}" 2>/dev/null
+}
+
+vless_runtime__acquire_decision_lock() {
+	local waited=0 owner=''
+	mkdir -p "${VLESS_RUNTIME_ROOT}" || return 1
+	while ! mkdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null; do
+		owner=''
+		[ -s "${VLESS_DECISION_PID_FILE}" ] && owner=$(tr -d '\r\n' <"${VLESS_DECISION_PID_FILE}")
+		if [ -z "${owner}" ]; then
+			sleep 1
+			waited=$((waited + 1))
+			[ -s "${VLESS_DECISION_PID_FILE}" ] && continue
+			rmdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null || return 1
+			continue
+		fi
+		if ! kill -0 "${owner}" 2>/dev/null; then
+			rm -f "${VLESS_DECISION_PID_FILE}"
+			rmdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null || return 1
+			continue
+		fi
+		[ "${waited}" -lt "${VLESS_DECISION_LOCK_WAIT:-120}" ] || {
+			printf '%s\n' 'Другая операция VLESS не завершилась вовремя.' >&2
+			return 1
+		}
+		sleep 1
+		waited=$((waited + 1))
+	done
+	printf '%s\n' "$$" >"${VLESS_DECISION_PID_FILE}" || {
+		rmdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null || true
+		return 1
+	}
+}
+
+vless_runtime__release_decision_lock() {
+	local owner=''
+	[ -s "${VLESS_DECISION_PID_FILE}" ] && owner=$(tr -d '\r\n' <"${VLESS_DECISION_PID_FILE}")
+	[ "${owner}" = "$$" ] || return 1
+	rm -f "${VLESS_DECISION_PID_FILE}"
+	rmdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null
+}
+
+vless_runtime__with_decision_lock() {
+	local result
+	vless_runtime__acquire_decision_lock || return 1
+	"$@"
+	result=$?
+	vless_runtime__release_decision_lock || true
+	return "${result}"
+}
+
+vless_runtime__probe() {
+	local url="${1}"
+	local proxy="${2:-}"
+	local output status http_code total_time
+
+	if [ -n "${proxy}" ]; then
+		output=$("${VLESS_CURL}" -fLsS \
+			--connect-timeout "${VLESS_PROBE_CONNECT_TIMEOUT:-5}" \
+			--max-time "${VLESS_PROBE_MAX_TIME:-10}" \
+			--noproxy '' \
+			--proxy "${proxy}" \
+			-o /dev/null \
+			-w '%{http_code}|%{time_total}' \
+			"${url}" 2>&1)
+	else
+		output=$("${VLESS_CURL}" -fLsS \
+			--connect-timeout "${VLESS_PROBE_CONNECT_TIMEOUT:-5}" \
+			--max-time "${VLESS_PROBE_MAX_TIME:-10}" \
+			-o /dev/null \
+			-w '%{http_code}|%{time_total}' \
+			"${url}" 2>&1)
+	fi
+	status=$?
+	if [ "${status}" -ne 0 ]; then
+		VLESS_PROBE_ERROR="curl_${status}"
+		VLESS_PROBE_LATENCY_MS=null
+		return 1
+	fi
+
+	http_code=${output%%|*}
+	total_time=${output##*|}
+	[ "${http_code}" = 204 ] || {
+		VLESS_PROBE_ERROR="http_${http_code}"
+		VLESS_PROBE_LATENCY_MS=null
+		return 1
+	}
+	VLESS_PROBE_LATENCY_MS=$(awk -v seconds="${total_time}" 'BEGIN {printf "%d", seconds * 1000}')
+	VLESS_PROBE_ERROR=''
+	return 0
+}
+
+vless_runtime__probe_connection() {
+	local probe_port="${1}"
+	local url="${2}"
+	vless_runtime__probe "${url}" "socks5h://127.0.0.1:${probe_port}"
+}
+
+vless_runtime__best_standby() {
+	jq -r '
+		[
+			.connections | to_entries[] |
+			select(.value.enabled == true and .value.status == "standby") |
+			{
+				id: .key,
+				recent_failures: (.value.recent_failures // 0),
+				latency_ms: (.value.latency_ms // 2147483647)
+			}
+		] |
+		sort_by(.recent_failures, .latency_ms, .id) |
+		.[0].id // empty
+	' "${VLESS_STATE_FILE}"
+}

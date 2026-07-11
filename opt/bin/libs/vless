@@ -20,6 +20,9 @@
 
 . /opt/apps/mors/bin/libs/main
 . /opt/apps/mors/bin/libs/xray
+. /opt/apps/mors/bin/libs/vless_store
+. /opt/apps/mors/bin/libs/vless_config
+. /opt/apps/mors/bin/libs/vless_runtime
 
 XRAY_INIT=/opt/etc/init.d/S24xray
 
@@ -32,6 +35,7 @@ PROXY_LOCAL_IP="127.0.0.1"
 PROXY_VLESS_PORT=1097
 PROXY_VLESS_PROTO=socks5
 DOMAIN_FOR_CHECK="https://ifconfig.me/ip"
+VLESS_SUPERVISOR_INIT=/opt/etc/init.d/S25mors-vless
 
 
 has_package_installed() {
@@ -167,87 +171,6 @@ api_get_query(){
     curl -s "localhost:79/rci/${_query}"
 
 }
-
-vless_link_parse() {
-#-------------------------------------------------------------------------------
-#
-#	Функция парсит параметры из ссылки
-#
-#-------------------------------------------------------------------------------
-
-    local link="$1"
-    local tag="${link/vless://}"
-    local _vless_file=${2:-$VLESS_CONFIG_FILE}
-
-    # парсим параметры из ссылки vless://
-
-    local vless_id=$(echo "${tag}" | sed 's/.*\/\/\(.*\)@.*/\1/' )
-    local vless_address=$(echo "${tag}" | sed 's/.*@\(.*\):.*/\1/')
-    local vless_port=$(echo "${tag}" | sed 's/.*@.*:\(.*\)?.*/\1/')
-    local vless_network=$(echo "${tag}" | sed 's/.*type=\(.*\)&.*/\1/' | cut -d'&' -f1)
-    local vless_sni=$(echo "${tag}" | sed 's/.*\?.*sni=\(.*\)/\1/' | cut -d'&' -f1)
-    local vless_short_id=$(echo "${tag}" | sed 's/.*\?.*sid=\(.*\)/\1/' | cut -d'&' -f1)
-    local vless_browser_fp=$(echo "${tag}" | sed 's/.*\?.*fp=\(.*\)/\1/' | cut -d'&' -f1)
-    local vless_pub_key=$(echo "${tag}" | sed 's/.*\?.*pbk=\(.*\)/\1/' | cut -d'&' -f1)
-    local vless_security=$(echo "${tag}" | sed 's/.*\?.*security=\(.*\)/\1/' | cut -d'&' -f1)
-
-    # Проверка наличия обязательных параметров
-
-    [ "${vless_security}" = "reality" ] || {
-        error "Тип протокола ${vless_security} не поддерживается"; exit 1
-    }
-    [ -z "${vless_id}" ] && {
-        vless_id=$(echo "${tag}" | sed 's/\(.*\)@.*:.*/\1/')
-        [ -z "${vless_id}" ] && {
-                error "Не задан идентификатор пользователя"; exit 1
-        }
-    }
-    [ -z "${vless_address}" ] && {
-        error "Не задан адрес сервера"; exit 1
-    }
-    [ -z "${vless_port}" ] && {
-        error "Не задан порт сервера"; exit 1
-    }
-    [ -z "${vless_network}" ] && {
-        error "Не задан тип сетевого соединения"; exit 1
-    }
-    [ -z "${vless_sni}" ] && {
-        error "Не задано имя сервера"; exit 1
-    }
-    [ -z "${vless_short_id}" ] && {
-        error "Не задан сокращенный id "; exit 1
-    }
-    [ -z "${vless_browser_fp}" ] && {
-        error "Не задан тип браузера"; exit 1
-    }
-    [ -z "${vless_pub_key}" ] && {
-        error "Не задан публичный ключ сервера"; exit 1
-    }
-
-    # Меняем значения в конфигурационном файле
-    sed -i "\
-        /inbounds/,/outbounds/ {\
-            s/\(.*listen\": \).*\(\,\)/\1\"${PROXY_LOCAL_IP}\"\2/; \
-            s/\(.*port\": \).*\(\,\)/\1\"${PROXY_VLESS_PORT}\"\2/; \
-	    }; \
-        /outbounds/,/realitySettings/ {\
-            s/\(.*address\": \).*\(\,\)/\1\"${vless_address}\"\2/; \
-	        s/\(.*port\": \).*\(\,\)/\1${vless_port}\2/; \
-	        s/\(.*id\": \).*\(\,\)/\1\"${vless_id}\"\2/; \
-	    };  \
-        /streamSettings/,/tag/ {\
-            s/\(.*network\": \).*\(\,\)/\1\"${vless_network}\"\2/;  \
-            s/\(.*publicKey\": \).*\(\,\)/\1\"${vless_pub_key}\"\2/; \
-            s/\(.*fingerprint\": \).*\(\,\)/\1\"${vless_browser_fp}\"\2/; \
-            s/\(.*serverName\": \).*\(\,\)/\1\"${vless_sni}\"\2/;
-            s/\(.*shortId\": \).*\(\,\)/\1\"${vless_short_id}\"\2/;
-	    };"  \
-   "${_vless_file}"
-
-    return 0
-}
-
-
 
 set_cursor_to_line_above() {
 #-------------------------------------------------------------------------------
@@ -515,77 +438,1314 @@ test_vless_proxy() {
     return 1
 }
 
-_cmd_install_vless_proxy(){
-#-------------------------------------------------------------------------------
-#
-#	Системная функция, которая запускает установку Proxy Vless
-#
-#-------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------
+# Managed VLESS CLI and transactional domain operations.
+# ------------------------------------------------------------------------------------------
 
-    cmd_install_proxy_package
-
-    vless_ln=''
-    has_xray_installed || opkg install xray &> /dev/null
-    #read_value "Введите vless ссылку: " vless_ln string
-
-    # DEBUG - восстановить после отладки
-    # cp "${VLESS_CONFIG_ORIGINAL_FILE}" "${VLESS_CONFIG_FILE}"
-    cp ~/mors.vless "${VLESS_CONFIG_FILE}"
-
-    . /opt/apps/mors/.env
-    vless_ln="${VLESS_LINK}"
-
-    vless_link_parse "${vless_ln}" "${VLESS_CONFIG_FILE}"
-    #cat "${VLESS_CONFIG_FILE}"
-
-    # Проверка конфигурации xray
-    check_xray_config=$(${XRAY} run -test -c ${VLESS_CONFIG_FILE})
-
-    if echo "${check_xray_config}" | grep -q "Configuration OK." ; then
-        # Запуск xray в случае, если конфигурация xray не содержит ошибок
-        ${XRAY_INIT} restart && mors vpn set
-    else
-        # В случае если есть ошибки выводим их в консоль
-        echo -e "${BLUE}В файле ${VLESS_CONFIG_FILE} обнаружены следующие ошибки:${NOCL}"
-        print_line
-        echo -e "${RED}${check_xray_config}${NOCL}"
-    fi
-
-
+vless_cli__is_interactive() {
+	[ -t 0 ] && [ -t 1 ]
 }
 
-_cmd_remove_vless_proxy(){
-#-------------------------------------------------------------------------------
-#
-#	Функция удаляет Proxy Vless пакеты и конфигурацию,
-#   чтоб привести Морс к базовому состоянию для отладки пакета
-#
-#-------------------------------------------------------------------------------
-    # Удаляем пакет xray
-    has_package_installed 'Proxy client' && {
+vless_cli__prompt() {
+	local prompt="${1}"
+	local default_value="${2:-}"
+	local value
 
-        # Останавливаем службу xray
-        ${XRAY_INIT} stop &> /dev/null
-
-        # Удаляем пакет xray
-        opkg remove xray &> /dev/null
-
-        # Удаляем конфигурациюs
-        rm -f "${VLESS_CONFIG_FILE}"
-
-        # Удаляем конфигурацию профиля Proxy
-        delete_proxy_interface
-
-        #  Ставим пакет proxy в очередь на удаление
-        system_packages_action remove proxy
-
-    }
-
+	if [ -n "${default_value}" ]; then
+		printf '%s [%s]: ' "${prompt}" "${default_value}"
+	else
+		printf '%s: ' "${prompt}"
+	fi
+	IFS= read -r value || return 1
+	[ -n "${value}" ] || value=${default_value}
+	printf '%s\n' "${value}"
 }
 
+vless_cli__confirm() {
+	local prompt="${1}"
+	local answer
+	printf '%s [y/N]: ' "${prompt}"
+	IFS= read -r answer || return 1
+	case "${answer}" in
+		y|Y|yes|YES|да|Да|ДА) return 0 ;;
+		*) return 1 ;;
+	esac
+}
 
-#system_packages_action remove proxy opkg-kmod-netfilter opkg-kmod-netfilter-addons
-# system_packages_action install proxy opkg-kmod-netfilter opkg-kmod-netfilter-addons
-# cmd_install_vless_proxy
-# ifs=$(ip a | grep global | grep t2s_ | sed 's/.*\(t2s_.*\)/\1/g')
-# curl -v -i ${ifs} ifconfig.me && echo
+vless_cli__require_confirmation() {
+	local prompt="${1}"
+	local confirmed="${2:-false}"
+	[ "${confirmed}" = true ] && return 0
+	if vless_cli__is_interactive; then
+		vless_cli__confirm "${prompt}"
+		return $?
+	fi
+	printf '%s\n' "Операция не выполнена. Для подтверждения добавьте --yes: ${prompt}" >&2
+	return 64
+}
+
+vless_cli__state_label() {
+	case "${1}" in
+		unconfigured) printf '%s' 'НЕ НАСТРОЕНО' ;;
+		starting) printf '%s' 'ЗАПУСК' ;;
+		healthy) printf '%s' 'РАБОТАЕТ' ;;
+		degraded) printf '%s' 'БЕЗ ГОТОВОГО РЕЗЕРВА' ;;
+		switching) printf '%s' 'ПЕРЕКЛЮЧЕНИЕ' ;;
+		unavailable) printf '%s' 'НЕДОСТУПНО' ;;
+		direct_fallback) printf '%s' 'ПРЯМОЙ РЕЗЕРВ' ;;
+		paused) printf '%s' 'ПРИОСТАНОВЛЕНО' ;;
+		active) printf '%s' 'АКТИВНО' ;;
+		standby) printf '%s' 'РЕЗЕРВ ГОТОВ' ;;
+		checking) printf '%s' 'ПРОВЕРЯЕТСЯ' ;;
+		unstable) printf '%s' 'НЕСТАБИЛЬНО' ;;
+		draining) printf '%s' 'ВЫВОДИТСЯ ИЗ РАБОТЫ' ;;
+		disabled) printf '%s' 'ВЫКЛЮЧЕНО' ;;
+		invalid) printf '%s' 'ОШИБКА КОНФИГУРАЦИИ' ;;
+		*) printf '%s' "${1:-НЕИЗВЕСТНО}" ;;
+	esac
+}
+
+vless_cli__reason_label() {
+	case "${1}" in
+		health_failure) printf '%s' 'подтверждённый сбой' ;;
+		manual) printf '%s' 'выбрано вручную' ;;
+		manual_disable) printf '%s' 'ручное выключение' ;;
+		manual_remove) printf '%s' 'удаление соединения' ;;
+		pause|resume) printf '%s' 'действие пользователя' ;;
+		direct_fallback) printf '%s' 'разрешён прямой резерв' ;;
+		fail_closed) printf '%s' 'безопасная блокировка' ;;
+		api_override_failed) printf '%s' 'ошибка Routing API' ;;
+		'') printf '%s' 'без причины' ;;
+		*) printf '%s' "${1}" ;;
+	esac
+}
+
+vless_cli__error_label() {
+	case "${1}" in
+		'') printf '%s' 'нет' ;;
+		curl_28) printf '%s' 'тайм-аут проверки (curl 28)' ;;
+		curl_*) printf '%s' "ошибка сетевой проверки (${1})" ;;
+		http_*) printf '%s' "неожиданный HTTP-ответ (${1#http_})" ;;
+		xray_unavailable) printf '%s' 'Routing API Xray недоступен' ;;
+		upstream_unavailable) printf '%s' 'общий доступ в интернет не подтверждён' ;;
+		vless_unavailable) printf '%s' 'VLESS-маршрут недоступен' ;;
+		*) printf '%s' "${1}" ;;
+	esac
+}
+
+vless_cli__name_by_id() {
+	local id="${1:-}"
+	[ -n "${id}" ] || return 0
+	vless_store__get "${id}" | jq -r '.name // empty'
+}
+
+vless_cli__status_json() {
+	local state_json active_id now
+	active_id=$(vless_runtime__active_id)
+	now=$(vless_store__now)
+	if [ -f "${VLESS_STATE_FILE}" ] && state_json=$(jq -c . "${VLESS_STATE_FILE}" 2>/dev/null); then
+		state_json=$(printf '%s\n' "${state_json}" | jq -c --arg active_id "${active_id}" '
+			.active_id = (if $active_id == "" then null else $active_id end)')
+	else
+		state_json=$(jq -nc --arg now "${now}" --arg active_id "${active_id}" '{
+			schema_version: 1, cycle: 0, last_cycle_at: null,
+			overall_state: "unconfigured", upstream_state: "unknown",
+			active_id: (if $active_id == "" then null else $active_id end),
+			last_updated: $now, last_switch: null, connections: {}
+		}')
+	fi
+	jq -n \
+		--slurpfile registry "${VLESS_REGISTRY_FILE}" \
+		--argjson state "${state_json}" '
+		{
+			schema_version: 1,
+			status: $state.overall_state,
+			upstream_status: $state.upstream_state,
+			active_id: $state.active_id,
+			policy: $registry[0].policy,
+			last_updated: $state.last_updated,
+			last_cycle_at: $state.last_cycle_at,
+			last_switch: $state.last_switch,
+			connections: [
+				$registry[0].connections[] as $metadata |
+				($state.connections[$metadata.id] // {}) as $runtime |
+				{
+					id: $metadata.id,
+					name: $metadata.name,
+					enabled: $metadata.enabled,
+					status: ($runtime.status // (if $metadata.enabled then "checking" else "disabled" end)),
+					latency_ms: ($runtime.latency_ms // null),
+					consecutive_failures: ($runtime.consecutive_failures // 0),
+					recent_failures: ($runtime.recent_failures // 0),
+					last_checked: ($runtime.last_checked // null),
+					last_success: ($runtime.last_success // null),
+					last_error: ($runtime.last_error // null)
+				}
+			]
+		}'
+}
+
+cmd_vless_status() {
+	local json=false status_json overall active_id active_name enabled_count standby_count direct_fallback last_switch last_cycle_at
+	local row name state latency checked failures error switch_at switch_from switch_to switch_reason
+
+	case "$#" in
+		0) ;;
+		1) [ "${1}" = '--json' ] || { printf '%s\n' 'Использование: mors vless status [--json]' >&2; return 64; }; json=true ;;
+		*) printf '%s\n' 'Использование: mors vless status [--json]' >&2; return 64 ;;
+	esac
+	status_json=$(vless_cli__status_json) || return 1
+	if [ "${json}" = true ]; then
+		printf '%s\n' "${status_json}"
+		return 0
+	fi
+
+	overall=$(printf '%s\n' "${status_json}" | jq -r '.status')
+	active_id=$(printf '%s\n' "${status_json}" | jq -r '.active_id // empty')
+	active_name=$(printf '%s\n' "${status_json}" | jq -r --arg id "${active_id}" '.connections[] | select(.id == $id) | .name')
+	enabled_count=$(printf '%s\n' "${status_json}" | jq -r '[.connections[] | select(.enabled)] | length')
+	standby_count=$(printf '%s\n' "${status_json}" | jq -r '[.connections[] | select(.status == "standby")] | length')
+	direct_fallback=$(printf '%s\n' "${status_json}" | jq -r '.policy.direct_fallback')
+	last_cycle_at=$(printf '%s\n' "${status_json}" | jq -r '.last_cycle_at // "ещё не выполнялась"')
+	if [ "$(printf '%s\n' "${status_json}" | jq -r '.last_switch == null')" = true ]; then
+		last_switch='не выполнялось'
+	else
+		switch_at=$(printf '%s\n' "${status_json}" | jq -r '.last_switch.at')
+		switch_from=$(vless_cli__name_by_id "$(printf '%s\n' "${status_json}" | jq -r '.last_switch.from_id // empty')")
+		switch_to=$(vless_cli__name_by_id "$(printf '%s\n' "${status_json}" | jq -r '.last_switch.to_id // empty')")
+		switch_reason=$(printf '%s\n' "${status_json}" | jq -r '.last_switch.reason // empty')
+		last_switch="${switch_at}, ${switch_from:-нет} -> ${switch_to:-нет}, $(vless_cli__reason_label "${switch_reason}")"
+	fi
+
+	printf 'VLESS: %s\n' "$(vless_cli__state_label "${overall}")"
+	printf 'Активное соединение: %s\n' "${active_name:-нет}"
+	printf 'Включено соединений: %s\n' "${enabled_count}"
+	printf 'Готово резервов: %s\n' "${standby_count}"
+	if [ "${direct_fallback}" = true ]; then
+		printf '%s\n' 'Прямой резерв: разрешён'
+	else
+		printf '%s\n' 'Прямой резерв: запрещён'
+	fi
+	printf 'Последняя полная проверка: %s\n' "${last_cycle_at}"
+	printf 'Последнее переключение: %s\n' "${last_switch}"
+	print_line
+
+	printf '%s\n' "${status_json}" | jq -c '.connections[]' |
+	while IFS= read -r row; do
+		name=$(printf '%s\n' "${row}" | jq -r '.name')
+		state=$(printf '%s\n' "${row}" | jq -r '.status')
+		latency=$(printf '%s\n' "${row}" | jq -r 'if .latency_ms == null then "нет" else (.latency_ms | tostring) + " мс" end')
+		checked=$(printf '%s\n' "${row}" | jq -r '.last_checked // "ещё не проверялось"')
+		failures=$(printf '%s\n' "${row}" | jq -r '.consecutive_failures')
+		error=$(printf '%s\n' "${row}" | jq -r '.last_error // empty')
+		printf '%s\n' "${name}"
+		printf '  Состояние: %s\n' "$(vless_cli__state_label "${state}")"
+		printf '  Задержка: %s\n' "${latency}"
+		printf '  Последняя проверка: %s\n' "${checked}"
+		printf '  Ошибок подряд: %s\n' "${failures}"
+		printf '  Последняя ошибка: %s\n' "$(vless_cli__error_label "${error}")"
+	done
+}
+
+cmd_vless_list() {
+	local json=false
+	case "$#" in
+		0) ;;
+		1) [ "${1}" = '--json' ] || return 64; json=true ;;
+		*) return 64 ;;
+	esac
+	if [ "${json}" = true ]; then
+		vless_cli__status_json | jq '{schema_version, connections}'
+	else
+		cmd_vless_status
+	fi
+}
+
+cmd_vless_events() {
+	local json=false data row from_name to_name
+	case "$#" in
+		0) ;;
+		1) [ "${1}" = '--json' ] || return 64; json=true ;;
+		*) return 64 ;;
+	esac
+	data=$(vless_runtime__events_json) || return 1
+	if [ "${json}" = true ]; then
+		jq -n --argjson events "${data}" '{schema_version: 1, events: $events}'
+		return
+	fi
+	if [ "$(printf '%s\n' "${data}" | jq 'length')" -eq 0 ]; then
+		printf '%s\n' 'Событий VLESS пока нет.'
+		return
+	fi
+	printf '%s\n' "${data}" | jq -c '.[]' |
+	while IFS= read -r row; do
+		from_name=$(vless_cli__name_by_id "$(printf '%s\n' "${row}" | jq -r '.from_id // empty')")
+		to_name=$(vless_cli__name_by_id "$(printf '%s\n' "${row}" | jq -r '.to_id // empty')")
+		printf '%s: %s -> %s, %s, %s\n' \
+			"$(printf '%s\n' "${row}" | jq -r '.at')" \
+			"${from_name:-нет}" \
+			"${to_name:-нет}" \
+			"$(vless_cli__reason_label "$(printf '%s\n' "${row}" | jq -r '.reason // empty')")" \
+			"$(printf '%s\n' "${row}" | jq -r '.result')"
+	done
+}
+
+vless_domain__restore_file() {
+	local backup="${1}"
+	local destination="${2}"
+	if [ -f "${backup}" ]; then
+		mv -f "${backup}" "${destination}"
+	else
+		rm -f "${destination}"
+	fi
+}
+
+VLESS_ENDPOINTS_FILE=${VLESS_ENDPOINTS_FILE:-/opt/var/lib/mors/vless/endpoints.list}
+VLESS_IPSET_COMMAND=${VLESS_IPSET_COMMAND:-/opt/sbin/ipset}
+VLESS_DESTINATION_IPSET=${VLESS_DESTINATION_IPSET:-MORS_DESTINATION_EXCLUDED}
+
+vless_domain__sync_endpoint_exclusions() {
+	local config_file="${1:-${VLESS_CONFIG_FILE}}" remove_stale="${2:-true}" temporary address resolved old_ip
+	local ip_filter
+	if [ -n "${IP_FILTER:-}" ]; then
+		ip_filter=${IP_FILTER}
+	else
+		ip_filter='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
+	fi
+	temporary="${VLESS_ENDPOINTS_FILE}.tmp.$$"
+	mkdir -p "$(dirname "${VLESS_ENDPOINTS_FILE}")" || return 1
+	: >"${temporary}" || return 1
+	while IFS= read -r address; do
+		[ -n "${address}" ] || continue
+		if printf '%s\n' "${address}" | grep -qE "^${ip_filter}$"; then
+			printf '%s\n' "${address}" >>"${temporary}"
+		else
+			resolved=$(dns__get_ips_by_domain "${address}" | grep -E "^${ip_filter}$" || true)
+			[ -n "${resolved}" ] || { rm -f "${temporary}"; return 1; }
+			printf '%s\n' "${resolved}" >>"${temporary}"
+		fi
+	done <<EOF
+$(jq -r '.outbounds[]? | select(.protocol == "vless") | .settings.vnext[]?.address' "${config_file}" | sort -u)
+EOF
+	sort -u "${temporary}" -o "${temporary}"
+	if [ "${remove_stale}" = false ] && [ -f "${VLESS_ENDPOINTS_FILE}" ]; then
+		cat "${VLESS_ENDPOINTS_FILE}" >>"${temporary}"
+		sort -u "${temporary}" -o "${temporary}"
+	fi
+	if [ -x "${VLESS_IPSET_COMMAND}" ] && "${VLESS_IPSET_COMMAND}" list "${VLESS_DESTINATION_IPSET}" >/dev/null 2>&1; then
+		while IFS= read -r address; do
+			[ -n "${address}" ] || continue
+			"${VLESS_IPSET_COMMAND}" -exist add "${VLESS_DESTINATION_IPSET}" "${address}" || return 1
+		done <"${temporary}"
+		if [ "${remove_stale}" = true ] && [ -f "${VLESS_ENDPOINTS_FILE}" ]; then
+			while IFS= read -r old_ip; do
+				[ -n "${old_ip}" ] || continue
+				grep -Fxq "${old_ip}" "${temporary}" || "${VLESS_IPSET_COMMAND}" -exist del "${VLESS_DESTINATION_IPSET}" "${old_ip}" || return 1
+			done <"${VLESS_ENDPOINTS_FILE}"
+		fi
+	fi
+	chmod 600 "${temporary}" || { rm -f "${temporary}"; return 1; }
+	mv -f "${temporary}" "${VLESS_ENDPOINTS_FILE}"
+}
+
+vless_domain__apply_generated() {
+	local active_id="${1:-}"
+	local restart_runtime="${2:-true}"
+	local candidate="${VLESS_CONFIG_FILE}.candidate.$$"
+	local backup="${VLESS_CONFIG_FILE}.backup.$$"
+
+	vless_config__generate "${candidate}" "${active_id}" || return 1
+	if ! "${XRAY}" run -test -c "${candidate}" >/dev/null 2>&1; then
+		rm -f "${candidate}"
+		printf '%s\n' 'Xray отклонил кандидатную конфигурацию.' >&2
+		return 1
+	fi
+	[ -f "${VLESS_CONFIG_FILE}" ] && cp -p "${VLESS_CONFIG_FILE}" "${backup}"
+	mv -f "${candidate}" "${VLESS_CONFIG_FILE}" || return 1
+	if ! vless_domain__sync_endpoint_exclusions "${VLESS_CONFIG_FILE}" "${restart_runtime}"; then
+		vless_domain__restore_file "${backup}" "${VLESS_CONFIG_FILE}"
+		if [ -f "${VLESS_CONFIG_FILE}" ] && ! vless_domain__sync_endpoint_exclusions "${VLESS_CONFIG_FILE}" true >/dev/null 2>&1; then
+			[ -f "${XRAY_INIT}" ] && "${XRAY_INIT}" stop >/dev/null 2>&1 || true
+			vless_runtime__set_overall unavailable unknown "$(vless_runtime__active_id)" >/dev/null 2>&1 || true
+			return 3
+		fi
+		printf '%s\n' 'Не удалось безопасно обновить IP-исключения VLESS-endpoint.' >&2
+		return 1
+	fi
+
+	if [ "${restart_runtime}" = true ] && [ -f "${XRAY_INIT}" ]; then
+		if ! "${XRAY_INIT}" restart >/dev/null 2>&1; then
+			vless_domain__restore_file "${backup}" "${VLESS_CONFIG_FILE}"
+			if [ -f "${VLESS_CONFIG_FILE}" ] && ! vless_domain__sync_endpoint_exclusions "${VLESS_CONFIG_FILE}" true >/dev/null 2>&1; then
+				"${XRAY_INIT}" stop >/dev/null 2>&1 || true
+				vless_runtime__set_overall unavailable unknown "$(vless_runtime__active_id)" >/dev/null 2>&1 || true
+				return 3
+			fi
+			if ! "${XRAY_INIT}" restart >/dev/null 2>&1; then
+				"${XRAY_INIT}" stop >/dev/null 2>&1 || true
+				vless_runtime__ensure >/dev/null 2>&1 || true
+				vless_runtime__set_overall unavailable unknown "$(vless_runtime__active_id)" >/dev/null 2>&1 || true
+				printf '%s\n' 'Критическая ошибка: Xray не запустился и со старой конфигурацией; runtime остановлен.' >&2
+				return 3
+			fi
+			printf '%s\n' 'Не удалось запустить Xray с новой конфигурацией. Прежняя версия восстановлена и запущена.' >&2
+			return 1
+		fi
+	fi
+	rm -f "${backup}"
+	if [ -f "${VLESS_SUPERVISOR_INIT}" ]; then
+		if [ "$(vless_store__enabled_count)" -gt 0 ] && [ "$(vless_store__is_paused)" = false ]; then
+			[ "${restart_runtime}" = true ] && "${VLESS_SUPERVISOR_INIT}" restart >/dev/null 2>&1 || true
+		else
+			"${VLESS_SUPERVISOR_INIT}" stop >/dev/null 2>&1 || true
+		fi
+	fi
+	if vless_runtime__ensure >/dev/null 2>&1; then
+		if [ "$(vless_store__connection_count)" -eq 0 ]; then
+			vless_runtime__set_overall unconfigured unknown '' >/dev/null 2>&1 || true
+		elif [ "$(vless_store__is_paused)" = true ] || [ "$(vless_store__enabled_count)" -eq 0 ]; then
+			vless_runtime__set_overall paused unknown "${active_id}" >/dev/null 2>&1 || true
+		elif [ "${restart_runtime}" = true ]; then
+			vless_runtime__set_overall starting unknown "${active_id}" >/dev/null 2>&1 || true
+		fi
+	fi
+}
+
+vless_domain__restore_declared_runtime() {
+	local active_id="${1:-}" restart_runtime="${2:-true}" rollback_config
+	rollback_config="${VLESS_CONFIG_FILE}.rollback.$$"
+	if ! vless_config__generate "${rollback_config}" "${active_id}" || \
+		! "${XRAY}" run -test -c "${rollback_config}" >/dev/null 2>&1; then
+		rm -f "${rollback_config}"
+		[ -f "${XRAY_INIT}" ] && "${XRAY_INIT}" stop >/dev/null 2>&1 || true
+		vless_runtime__set_overall unavailable unknown "${active_id}" >/dev/null 2>&1 || true
+		return 3
+	fi
+	if ! mv -f "${rollback_config}" "${VLESS_CONFIG_FILE}" || \
+		! vless_domain__sync_endpoint_exclusions "${VLESS_CONFIG_FILE}" true; then
+		[ -f "${XRAY_INIT}" ] && "${XRAY_INIT}" stop >/dev/null 2>&1 || true
+		vless_runtime__set_overall unavailable unknown "${active_id}" >/dev/null 2>&1 || true
+		return 3
+	fi
+	if [ "${restart_runtime}" = true ] && [ -f "${XRAY_INIT}" ]; then
+		if ! "${XRAY_INIT}" restart >/dev/null 2>&1; then
+			"${XRAY_INIT}" stop >/dev/null 2>&1 || true
+			vless_runtime__set_overall unavailable unknown "${active_id}" >/dev/null 2>&1 || true
+			return 3
+		fi
+	fi
+	if [ -f "${VLESS_SUPERVISOR_INIT}" ]; then
+		if [ "$(vless_store__is_paused)" = false ] && [ "$(vless_store__enabled_count)" -gt 0 ]; then
+			[ "${restart_runtime}" = true ] && "${VLESS_SUPERVISOR_INIT}" restart >/dev/null 2>&1 || true
+		else
+			"${VLESS_SUPERVISOR_INIT}" stop >/dev/null 2>&1 || true
+		fi
+	fi
+}
+
+vless_domain__ensure_platform() {
+	[ "${VLESS_SKIP_PLATFORM_CHECK:-false}" = true ] && return 0
+	xray_install_and_check || return 1
+	if has_package_installed 'Proxy client' && \
+		curl -s "${INFACE_REQUEST}" | jq -e --arg id "${PROXY_VLESS_NAME}" '.[] | select(.id == $id)' >/dev/null 2>&1; then
+		return 0
+	fi
+	cmd_install_proxy_package
+}
+
+vless_domain__probe_id() {
+	local id="${1}"
+	local metadata probe_port policy primary_url secondary_url
+	metadata=$(vless_store__get "${id}")
+	[ -n "${metadata}" ] || return 1
+	probe_port=$(printf '%s\n' "${metadata}" | jq -r '.probe_port')
+	policy=$(vless_store__policy)
+	primary_url=$(printf '%s\n' "${policy}" | jq -r '.primary_probe_url')
+	secondary_url=$(printf '%s\n' "${policy}" | jq -r '.secondary_probe_url')
+	sleep 1
+	vless_runtime__probe_connection "${probe_port}" "${primary_url}" && return 0
+	vless_runtime__probe_connection "${probe_port}" "${secondary_url}"
+}
+
+vless_domain__add_locked() {
+	local name="${1}"
+	local link="${2}"
+	local enabled="${3:-true}"
+	local id probe_port registry_backup secret_file active_id old_active paused restart_runtime=true
+
+	vless_store__ensure || return 1
+	[ "$(vless_store__connection_count)" -lt "${VLESS_MAX_CONNECTIONS}" ] || {
+		printf 'Можно сохранить не более %s VLESS-соединений.\n' "${VLESS_MAX_CONNECTIONS}" >&2
+		return 1
+	}
+	vless_uri__parse "${link}" >/dev/null || return 1
+	[ -n "${name}" ] || name=${VLESS_PARSED_NAME}
+	[ -n "${name}" ] || return 1
+	vless_store__validate_name "${name}" || {
+		printf '%s\n' 'Имя должно содержать 1-64 символа без управляющих символов.' >&2
+		return 1
+	}
+	vless_store__name_available "${name}" || {
+		printf 'Соединение с именем «%s» уже существует.\n' "${name}" >&2
+		return 1
+	}
+	vless_domain__ensure_platform || return 1
+	id=$(vless_store__new_id) || return 1
+	probe_port=$(vless_store__allocate_probe_port) || return 1
+	registry_backup="${VLESS_REGISTRY_FILE}.backup.$$"
+	cp -p "${VLESS_REGISTRY_FILE}" "${registry_backup}" || return 1
+	secret_file=$(vless_store__secret_file "${id}")
+	if ! printf '%s\n' "${VLESS_PARSED_JSON}" | vless_store__write_secret "${id}"; then
+		rm -f "${secret_file}" "${registry_backup}"
+		return 1
+	fi
+	if ! vless_store__add_metadata "${id}" "${name}" "${enabled}" "${probe_port}"; then
+		rm -f "${secret_file}"
+		mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+		return 1
+	fi
+	old_active=$(vless_runtime__active_id)
+	active_id=${old_active}
+	[ -n "${active_id}" ] || [ "${enabled}" != true ] || active_id=${id}
+	paused=$(vless_store__is_paused)
+	[ "${paused}" = false ] && [ "${enabled}" = true ] || restart_runtime=false
+	if ! vless_domain__apply_generated "${active_id}" "${restart_runtime}"; then
+		rm -f "${secret_file}"
+		mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+		[ -n "${old_active}" ] && vless_runtime__set_active_id "${old_active}" || vless_runtime__clear_active_id
+		return 1
+	fi
+	if [ "${enabled}" = true ] && [ "${paused}" = false ]; then
+		if [ -n "${old_active}" ]; then
+			if ! vless_runtime__override "mors-vless-${old_active}"; then
+				rm -f "${secret_file}"
+				mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+				vless_domain__restore_declared_runtime "${old_active}" true >/dev/null 2>&1 || return 3
+				return 1
+			fi
+		else
+			if ! vless_runtime__override mors-block; then
+				rm -f "${secret_file}"
+				mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+				vless_domain__restore_declared_runtime '' true >/dev/null 2>&1 || return 3
+				return 1
+			fi
+		fi
+	fi
+	if [ "${enabled}" = true ] && [ "$(vless_store__is_paused)" = false ] && ! vless_domain__probe_id "${id}"; then
+		rm -f "${secret_file}"
+		mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+		[ -n "${old_active}" ] && vless_runtime__set_active_id "${old_active}" || vless_runtime__clear_active_id
+		if ! vless_domain__restore_declared_runtime "${old_active}" true >/dev/null 2>&1; then
+			printf '%s\n' 'Критическая ошибка: не удалось восстановить прежнюю runtime-конфигурацию.' >&2
+			return 3
+		fi
+		printf '%s\n' 'Конфигурация корректна, но сервер не прошёл сетевую проверку. Соединение не сохранено.' >&2
+		return 2
+	fi
+	if [ -z "${old_active}" ] && [ "${enabled}" = true ] && [ "${paused}" = false ]; then
+		vless_runtime__set_active_id "${id}"
+		if ! vless_runtime__override "mors-vless-${id}"; then
+			rm -f "${secret_file}"
+			mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+			vless_runtime__clear_active_id
+			vless_domain__restore_declared_runtime '' true >/dev/null 2>&1 || return 3
+			return 1
+		fi
+	fi
+	rm -f "${registry_backup}"
+	if [ -z "$(vless_runtime__active_id)" ] && [ "${enabled}" = true ]; then
+		vless_runtime__set_active_id "${id}"
+	fi
+	vless_runtime__ensure >/dev/null 2>&1 || true
+	printf 'Соединение «%s» добавлено.\n' "${name}"
+}
+
+vless_domain__update_locked() {
+	local selector="${1}"
+	local link="${2}"
+	local id secret_file backup active_id enabled paused restart_runtime=true
+	vless_store__ensure || return 1
+	id=$(vless_store__resolve "${selector}") || {
+		printf 'Соединение «%s» не найдено.\n' "${selector}" >&2
+		return 1
+	}
+	vless_uri__parse "${link}" >/dev/null || return 1
+	vless_domain__ensure_platform || return 1
+	secret_file=$(vless_store__secret_file "${id}")
+	backup="${secret_file}.backup.$$"
+	cp -p "${secret_file}" "${backup}" || return 1
+	if ! printf '%s\n' "${VLESS_PARSED_JSON}" | vless_store__write_secret "${id}"; then
+		mv -f "${backup}" "${secret_file}"
+		return 1
+	fi
+	enabled=$(vless_store__get "${id}" | jq -r '.enabled')
+	active_id=$(vless_runtime__active_id)
+	paused=$(vless_store__is_paused)
+	[ "${paused}" = false ] && [ "${enabled}" = true ] || restart_runtime=false
+	if ! vless_domain__apply_generated "${active_id}" "${restart_runtime}"; then
+		mv -f "${backup}" "${secret_file}"
+		return 1
+	fi
+	if [ "${enabled}" = true ] && [ "${paused}" = false ] && [ -n "${active_id}" ]; then
+		if ! vless_runtime__override "mors-vless-${active_id}"; then
+			mv -f "${backup}" "${secret_file}"
+			vless_domain__restore_declared_runtime "${active_id}" true >/dev/null 2>&1 || return 3
+			return 1
+		fi
+	fi
+	if [ "${enabled}" = true ] && [ "$(vless_store__is_paused)" = false ] && ! vless_domain__probe_id "${id}"; then
+		mv -f "${backup}" "${secret_file}"
+		vless_domain__restore_declared_runtime "${active_id}" true >/dev/null 2>&1 || {
+			printf '%s\n' 'Критическая ошибка: прежняя runtime-конфигурация не восстановлена.' >&2
+			return 3
+		}
+		printf '%s\n' 'Новые параметры не прошли сетевую проверку. Предыдущая рабочая версия восстановлена.' >&2
+		return 2
+	fi
+	rm -f "${backup}"
+	printf 'Соединение «%s» обновлено.\n' "$(vless_cli__name_by_id "${id}")"
+}
+
+vless_domain__rename_locked() {
+	local selector="${1}" name="${2}" id
+	vless_store__ensure || return 1
+	id=$(vless_store__resolve "${selector}") || return 1
+	vless_store__validate_name "${name}" || return 1
+	vless_store__name_available "${name}" "${id}" || return 1
+	vless_store__set_name "${id}" "${name}" || return 1
+	vless_runtime__reconcile >/dev/null 2>&1 || true
+	printf 'Соединение переименовано в «%s».\n' "${name}"
+}
+
+vless_domain__set_enabled_locked() {
+	local selector="${1}" enabled="${2}" force="${3:-false}" id registry_backup active_id old_active candidate
+	local current_enabled paused restart_runtime=false switched=false
+	vless_store__ensure || return 1
+	id=$(vless_store__resolve "${selector}") || return 1
+	current_enabled=$(vless_store__get "${id}" | jq -r '.enabled')
+	if [ "${current_enabled}" = "${enabled}" ]; then
+		printf 'Соединение «%s» уже %s.\n' \
+			"$(vless_cli__name_by_id "${id}")" \
+			"$([ "${enabled}" = true ] && printf 'включено' || printf 'выключено')"
+		return 0
+	fi
+	[ "${enabled}" = false ] || vless_domain__ensure_platform || return 1
+	vless_runtime__ensure >/dev/null 2>&1 || true
+	registry_backup="${VLESS_REGISTRY_FILE}.backup.$$"
+	cp -p "${VLESS_REGISTRY_FILE}" "${registry_backup}" || return 1
+	old_active=$(vless_runtime__active_id)
+	active_id=${old_active}
+	paused=$(vless_store__is_paused)
+
+	if [ "${paused}" = true ]; then
+		vless_store__set_enabled "${id}" "${enabled}" || {
+			rm -f "${registry_backup}"
+			return 1
+		}
+		if [ "${enabled}" = false ] && [ "${old_active}" = "${id}" ]; then
+			candidate=$(vless_store__list_enabled | head -n 1 | jq -r '.id // empty')
+			[ -n "${candidate}" ] && vless_runtime__set_active_id "${candidate}" || vless_runtime__clear_active_id
+			active_id=${candidate}
+		fi
+		if ! vless_domain__apply_generated "${active_id}" false; then
+			mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+			[ -n "${old_active}" ] && vless_runtime__set_active_id "${old_active}" || vless_runtime__clear_active_id
+			return 1
+		fi
+		rm -f "${registry_backup}"
+		printf 'Соединение «%s» %s; VLESS остаётся на паузе.\n' \
+			"$(vless_cli__name_by_id "${id}")" \
+			"$([ "${enabled}" = true ] && printf 'включено' || printf 'выключено')"
+		return 0
+	fi
+
+	if [ "${enabled}" = false ]; then
+		restart_runtime=${force}
+		if [ "${old_active}" = "${id}" ]; then
+			candidate=$(vless_runtime__best_standby)
+			if [ -z "${candidate}" ] && [ "$(vless_store__enabled_count)" -gt 1 ]; then
+				rm -f "${registry_backup}"
+				printf '%s\n' 'Нет исправного резерва. Дождитесь успешной проверки или сначала выключите неисправные соединения.' >&2
+				return 1
+			fi
+			if [ "${force}" = false ]; then
+				if [ -n "${candidate}" ]; then
+					vless_runtime__override "mors-vless-${candidate}" || {
+						rm -f "${registry_backup}"
+						printf '%s\n' 'Не удалось плавно переключить Xray. Повторите с --force --yes.' >&2
+						return 1
+					}
+				else
+					vless_runtime__override mors-block || {
+						rm -f "${registry_backup}"
+						printf '%s\n' 'Не удалось безопасно закрыть VLESS-маршрут. Повторите с --force --yes.' >&2
+						return 1
+					}
+				fi
+			fi
+			if [ -n "${candidate}" ]; then
+				vless_runtime__set_connection "${id}" draining null 0 0 '' false 2>/dev/null || true
+				vless_runtime__set_active_id "${candidate}"
+				active_id=${candidate}
+			else
+				vless_runtime__clear_active_id
+				active_id=''
+			fi
+			switched=true
+		elif [ "${force}" = false ] && [ -n "${old_active}" ]; then
+			vless_runtime__override "mors-vless-${old_active}" || {
+				rm -f "${registry_backup}"
+				printf '%s\n' 'Не удалось зафиксировать активный outbound. Повторите с --force --yes.' >&2
+				return 1
+			}
+		fi
+	else
+		restart_runtime=true
+	fi
+
+	if ! vless_store__set_enabled "${id}" "${enabled}"; then
+		rm -f "${registry_backup}"
+		[ -n "${old_active}" ] && vless_runtime__set_active_id "${old_active}" || vless_runtime__clear_active_id
+		[ -n "${old_active}" ] && vless_runtime__override "mors-vless-${old_active}" >/dev/null 2>&1 || true
+		return 1
+	fi
+	if ! vless_domain__apply_generated "${active_id}" "${restart_runtime}"; then
+		mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+		if [ -n "${old_active}" ]; then
+			vless_runtime__set_active_id "${old_active}"
+			vless_runtime__override "mors-vless-${old_active}" || true
+		else
+			vless_runtime__clear_active_id
+			vless_runtime__override mors-block >/dev/null 2>&1 || true
+		fi
+		return 1
+	fi
+	if [ "${enabled}" = true ] && [ "${paused}" = false ]; then
+		if [ -n "${old_active}" ]; then
+			if ! vless_runtime__override "mors-vless-${old_active}"; then
+				mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+				vless_domain__restore_declared_runtime "${old_active}" true >/dev/null 2>&1 || return 3
+				return 1
+			fi
+		else
+			if ! vless_runtime__override mors-block; then
+				mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+				vless_domain__restore_declared_runtime '' true >/dev/null 2>&1 || return 3
+				return 1
+			fi
+		fi
+		if ! vless_domain__probe_id "${id}"; then
+			mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+			[ -n "${old_active}" ] && vless_runtime__set_active_id "${old_active}" || vless_runtime__clear_active_id
+			if ! vless_domain__restore_declared_runtime "${old_active}" true >/dev/null 2>&1; then
+				printf '%s\n' 'Критическая ошибка: не удалось откатить неудачное включение.' >&2
+				return 3
+			fi
+			printf '%s\n' 'Соединение не прошло сетевую проверку и осталось выключенным.' >&2
+			return 2
+		fi
+		if [ -z "${old_active}" ]; then
+			vless_runtime__set_active_id "${id}"
+			if ! vless_runtime__override "mors-vless-${id}"; then
+				mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+				vless_runtime__clear_active_id
+				vless_domain__restore_declared_runtime '' true >/dev/null 2>&1 || return 3
+				return 1
+			fi
+			active_id=${id}
+		fi
+	fi
+	rm -f "${registry_backup}"
+	if [ "${switched}" = true ]; then
+		vless_runtime__record_switch "${id}" "${active_id}" manual_disable
+		vless_runtime__event switch "${id}" "${active_id}" manual_disable ok
+	fi
+	if [ "${enabled}" = false ] && [ "$(vless_store__enabled_count)" -eq 0 ]; then
+		vless_runtime__set_overall paused unknown '' >/dev/null 2>&1 || true
+	fi
+	vless_runtime__ensure >/dev/null 2>&1 || true
+	printf 'Соединение «%s» %s.\n' \
+		"$(vless_cli__name_by_id "${id}")" \
+		"$([ "${enabled}" = true ] && printf 'включено' || printf 'выключено')"
+}
+
+vless_domain__activate_locked() {
+	local selector="${1}" force="${2:-false}" id metadata old_id
+	vless_runtime__ensure || return 1
+	[ "$(vless_store__is_paused)" = false ] || {
+		printf '%s\n' 'VLESS на паузе. Сначала выполните mors vless resume.' >&2
+		return 1
+	}
+	vless_domain__ensure_platform || return 1
+	id=$(vless_store__resolve "${selector}") || return 1
+	metadata=$(vless_store__get "${id}")
+	[ "$(printf '%s\n' "${metadata}" | jq -r '.enabled')" = true ] || {
+		printf '%s\n' 'Сначала включите соединение.' >&2
+		return 1
+	}
+	if ! vless_domain__probe_id "${id}"; then
+		printf '%s\n' 'Соединение не прошло сетевую проверку; активация отменена.' >&2
+		return 2
+	fi
+	old_id=$(vless_runtime__active_id)
+	if [ "${old_id}" = "${id}" ]; then
+		printf 'Соединение «%s» уже активно.\n' "$(vless_cli__name_by_id "${id}")"
+		return 0
+	fi
+	[ -n "${old_id}" ] && vless_runtime__set_connection "${old_id}" draining null 0 0 '' false 2>/dev/null || true
+	if [ "${force}" = false ]; then
+		vless_runtime__override "mors-vless-${id}" || return 1
+	fi
+	vless_runtime__set_active_id "${id}" || return 1
+	if ! vless_domain__apply_generated "${id}" "${force}"; then
+		if [ -n "${old_id}" ]; then
+			vless_runtime__set_active_id "${old_id}"
+			vless_runtime__override "mors-vless-${old_id}" >/dev/null 2>&1 || true
+		else
+			vless_runtime__clear_active_id
+			vless_runtime__override mors-block >/dev/null 2>&1 || true
+		fi
+		return 1
+	fi
+	vless_runtime__record_switch "${old_id}" "${id}" manual
+	vless_runtime__event switch "${old_id}" "${id}" manual ok
+	vless_runtime__reconcile >/dev/null 2>&1 || true
+	printf 'Активировано соединение «%s».\n' "$(vless_cli__name_by_id "${id}")"
+}
+
+vless_domain__remove_locked() {
+	local selector="${1}" force="${2:-false}" id registry_backup secret_file secret_backup active_id old_active candidate paused switched=false
+	vless_store__ensure || return 1
+	id=$(vless_store__resolve "${selector}") || return 1
+	registry_backup="${VLESS_REGISTRY_FILE}.backup.$$"
+	secret_file=$(vless_store__secret_file "${id}")
+	secret_backup="${secret_file}.backup.$$"
+	cp -p "${VLESS_REGISTRY_FILE}" "${registry_backup}" || return 1
+	cp -p "${secret_file}" "${secret_backup}" || {
+		rm -f "${registry_backup}"
+		return 1
+	}
+	vless_runtime__ensure >/dev/null 2>&1 || true
+	old_active=$(vless_runtime__active_id)
+	active_id=${old_active}
+	paused=$(vless_store__is_paused)
+	if [ "${old_active}" = "${id}" ]; then
+		candidate=$(vless_runtime__best_standby)
+		if [ -z "${candidate}" ] && [ "${paused}" = false ] && [ "$(vless_store__enabled_count)" -gt 1 ]; then
+			rm -f "${registry_backup}" "${secret_backup}"
+			printf '%s\n' 'Нет исправного резерва. Удаление активного соединения отменено.' >&2
+			return 1
+		fi
+		if [ -z "${candidate}" ] && [ "${paused}" = true ]; then
+			candidate=$(jq -r --arg id "${id}" '.connections[] | select(.enabled == true and .id != $id) | .id' "${VLESS_REGISTRY_FILE}" | head -n 1)
+		fi
+		if [ -n "${candidate}" ]; then
+			if [ "${paused}" = false ] && [ "${force}" = false ]; then
+				vless_runtime__override "mors-vless-${candidate}" || {
+					rm -f "${registry_backup}" "${secret_backup}"
+					printf '%s\n' 'Не удалось плавно переключить Xray. Повторите с --force --yes.' >&2
+					return 1
+				}
+			fi
+			vless_runtime__set_active_id "${candidate}"
+			active_id=${candidate}
+		else
+			if [ "${paused}" = false ] && [ "${force}" = false ]; then
+				vless_runtime__override mors-block || {
+					rm -f "${registry_backup}" "${secret_backup}"
+					printf '%s\n' 'Не удалось безопасно закрыть VLESS-маршрут. Повторите с --force --yes.' >&2
+					return 1
+				}
+			fi
+			vless_runtime__clear_active_id
+			active_id=''
+		fi
+		switched=true
+	elif [ "${paused}" = false ] && [ "${force}" = false ] && [ -n "${old_active}" ]; then
+		vless_runtime__override "mors-vless-${old_active}" || {
+			rm -f "${registry_backup}" "${secret_backup}"
+			printf '%s\n' 'Не удалось зафиксировать активный outbound. Повторите с --force --yes.' >&2
+			return 1
+		}
+	fi
+	if ! vless_store__remove "${id}"; then
+		rm -f "${registry_backup}" "${secret_backup}"
+		[ -n "${old_active}" ] && vless_runtime__set_active_id "${old_active}" || vless_runtime__clear_active_id
+		return 1
+	fi
+	if ! vless_domain__apply_generated "${active_id}" "$([ "${paused}" = true ] && printf false || printf '%s' "${force}")"; then
+		mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+		mv -f "${secret_backup}" "${secret_file}"
+		if [ -n "${old_active}" ]; then
+			vless_runtime__set_active_id "${old_active}"
+			[ "${paused}" = true ] || vless_runtime__override "mors-vless-${old_active}" || true
+		else
+			vless_runtime__clear_active_id
+		fi
+		return 1
+	fi
+	rm -f "${registry_backup}" "${secret_backup}"
+	[ -n "${active_id}" ] || vless_runtime__clear_active_id
+	if [ "${switched}" = true ]; then
+		vless_runtime__record_switch "${id}" "${active_id}" manual_remove
+		vless_runtime__event switch "${id}" "${active_id}" manual_remove ok
+	fi
+	vless_runtime__ensure >/dev/null 2>&1 || true
+	printf '%s\n' 'Соединение удалено.'
+}
+
+vless_domain__pause_locked() {
+	local force="${1:-false}" registry_backup old_active
+	vless_store__ensure || return 1
+	[ "$(vless_store__connection_count)" -gt 0 ] || {
+		printf '%s\n' 'VLESS ещё не настроен. Сначала добавьте соединение.' >&2
+		return 1
+	}
+	if [ "$(vless_store__is_paused)" = true ]; then
+		printf '%s\n' 'VLESS уже приостановлен.'
+		return 0
+	fi
+	registry_backup="${VLESS_REGISTRY_FILE}.backup.$$"
+	cp -p "${VLESS_REGISTRY_FILE}" "${registry_backup}" || return 1
+	old_active=$(vless_runtime__active_id)
+	if [ "${force}" = false ] && ! vless_runtime__override mors-block; then
+		rm -f "${registry_backup}"
+		printf '%s\n' 'Не удалось плавно приостановить VLESS. Повторите с --force --yes.' >&2
+		return 1
+	fi
+	vless_store__set_paused true || {
+		rm -f "${registry_backup}"
+		[ -n "${old_active}" ] && vless_runtime__override "mors-vless-${old_active}" >/dev/null 2>&1 || true
+		return 1
+	}
+	if ! vless_domain__apply_generated "${old_active}" "${force}"; then
+		mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+		vless_domain__restore_declared_runtime "${old_active}" true >/dev/null 2>&1 || return 3
+		[ -n "${old_active}" ] && vless_runtime__override "mors-vless-${old_active}" >/dev/null 2>&1 || true
+		return 1
+	fi
+	rm -f "${registry_backup}"
+	vless_runtime__set_overall paused unknown "${old_active}" >/dev/null 2>&1 || true
+	vless_runtime__event pause "${old_active}" '' manual ok
+	printf '%s\n' 'VLESS приостановлен. Включённые соединения сохранены.'
+}
+
+vless_domain__resume_locked() {
+	local registry_backup active_id metadata
+	vless_store__ensure || return 1
+	if [ "$(vless_store__is_paused)" = false ]; then
+		printf '%s\n' 'VLESS уже активен.'
+		return 0
+	fi
+	[ "$(vless_store__enabled_count)" -gt 0 ] || {
+		printf '%s\n' 'Нет включённых соединений. Сначала включите хотя бы одно.' >&2
+		return 1
+	}
+	vless_domain__ensure_platform || return 1
+	active_id=$(vless_runtime__active_id)
+	metadata=$(vless_store__get "${active_id}")
+	if [ -z "${metadata}" ] || [ "$(printf '%s\n' "${metadata}" | jq -r '.enabled')" != true ]; then
+		active_id=$(vless_store__list_enabled | head -n 1 | jq -r '.id // empty')
+	fi
+	registry_backup="${VLESS_REGISTRY_FILE}.backup.$$"
+	cp -p "${VLESS_REGISTRY_FILE}" "${registry_backup}" || return 1
+	vless_store__set_paused false || {
+		rm -f "${registry_backup}"
+		return 1
+	}
+	if ! vless_domain__apply_generated "${active_id}" true; then
+		mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+		vless_domain__restore_declared_runtime '' true >/dev/null 2>&1 || return 3
+		return 1
+	fi
+	if ! vless_runtime__override mors-block || ! vless_domain__probe_id "${active_id}"; then
+		mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+		vless_domain__restore_declared_runtime '' true >/dev/null 2>&1 || return 3
+		printf '%s\n' 'Последнее активное соединение не прошло проверку; VLESS остался на паузе.' >&2
+		return 2
+	fi
+	if ! vless_runtime__override "mors-vless-${active_id}"; then
+		mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+		vless_domain__restore_declared_runtime '' true >/dev/null 2>&1 || return 3
+		return 1
+	fi
+	rm -f "${registry_backup}"
+	vless_runtime__set_active_id "${active_id}"
+	vless_runtime__reconcile >/dev/null 2>&1 || true
+	vless_runtime__event resume '' "${active_id}" manual ok
+	printf 'VLESS возобновлён. Активное соединение: %s.\n' "$(vless_cli__name_by_id "${active_id}")"
+}
+
+vless_domain__add() { vless_runtime__with_decision_lock vless_domain__add_locked "$@"; }
+vless_domain__update() { vless_runtime__with_decision_lock vless_domain__update_locked "$@"; }
+vless_domain__rename() { vless_runtime__with_decision_lock vless_domain__rename_locked "$@"; }
+vless_domain__set_enabled() { vless_runtime__with_decision_lock vless_domain__set_enabled_locked "$@"; }
+vless_domain__activate() { vless_runtime__with_decision_lock vless_domain__activate_locked "$@"; }
+vless_domain__remove() { vless_runtime__with_decision_lock vless_domain__remove_locked "$@"; }
+vless_domain__pause() { vless_runtime__with_decision_lock vless_domain__pause_locked "$@"; }
+vless_domain__resume() { vless_runtime__with_decision_lock vless_domain__resume_locked "$@"; }
+
+cmd_vless_check() {
+	local json=false status previous_cycle current_cycle pid waited=0 completed=false
+	case "$#" in
+		0) ;;
+		1) [ "${1}" = '--json' ] || return 64; json=true ;;
+		*) return 64 ;;
+	esac
+	if [ -f "${VLESS_STATE_FILE}" ]; then
+		previous_cycle=$(jq -r '.cycle // 0' "${VLESS_STATE_FILE}")
+	else
+		previous_cycle=0
+	fi
+	pid=''
+	[ -s "${VLESS_SUPERVISOR_PID_FILE}" ] && pid=$(tr -d '\r\n' <"${VLESS_SUPERVISOR_PID_FILE}")
+	if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+		kill -USR1 "${pid}" 2>/dev/null || true
+		while [ "${waited}" -lt "${VLESS_CHECK_WAIT_SECONDS:-120}" ]; do
+			current_cycle=$(jq -r '.cycle // 0' "${VLESS_STATE_FILE}")
+			if [ "${current_cycle}" -gt "${previous_cycle}" ]; then
+				completed=true
+				break
+			fi
+			sleep 1
+			waited=$((waited + 1))
+		done
+	else
+		/opt/apps/mors/bin/main/vless-supervisor once >/dev/null 2>&1 || true
+		current_cycle=$(jq -r '.cycle // 0' "${VLESS_STATE_FILE}")
+		[ "${current_cycle}" -gt "${previous_cycle}" ] && completed=true
+	fi
+	status=$(jq -r '.overall_state' "${VLESS_STATE_FILE}")
+	if [ "${json}" = true ]; then
+		vless_cli__status_json
+	else
+		cmd_vless_status
+	fi
+	if [ "${completed}" != true ]; then
+		printf '%s\n' 'Новый цикл проверки supervisor не завершился вовремя.' >&2
+		return 4
+	fi
+	case "${status}" in
+		healthy) return 0 ;;
+		degraded|starting) return 1 ;;
+		unavailable|direct_fallback) return 2 ;;
+		paused|unconfigured) return 3 ;;
+		*) return 4 ;;
+	esac
+}
+
+cmd_vless_policy_locked() {
+	local action="${1:-}" confirmed="${2:-false}" value registry_backup overall
+	case "${action}" in
+		on)
+			vless_cli__require_confirmation 'При общей аварии VLESS трафик пойдёт напрямую. Продолжить?' "${confirmed}" || return $?
+			value=true
+			;;
+		off) value=false ;;
+		*) printf '%s\n' 'Использование: mors vless policy direct-fallback on|off' >&2; return 64 ;;
+	esac
+	vless_store__ensure || return 1
+	registry_backup="${VLESS_REGISTRY_FILE}.backup.$$"
+	cp -p "${VLESS_REGISTRY_FILE}" "${registry_backup}" || return 1
+	vless_store__set_direct_fallback "${value}" || {
+		rm -f "${registry_backup}"
+		return 1
+	}
+	vless_runtime__ensure >/dev/null 2>&1 || true
+	overall=$(jq -r '.overall_state // "unconfigured"' "${VLESS_STATE_FILE}" 2>/dev/null)
+	if [ "${value}" = false ] && [ "${overall}" = direct_fallback ]; then
+		if ! vless_runtime__override mors-block; then
+			mv -f "${registry_backup}" "${VLESS_REGISTRY_FILE}"
+			printf '%s\n' 'Не удалось закрыть прямой резерв; политика не изменена.' >&2
+			return 1
+		fi
+		vless_runtime__set_overall unavailable up '' >/dev/null 2>&1 || true
+	fi
+	rm -f "${registry_backup}"
+	vless_runtime__wake_supervisor >/dev/null 2>&1 || true
+	printf 'Прямой резерв: %s.\n' "$([ "${value}" = true ] && printf 'разрешён' || printf 'запрещён')"
+}
+
+cmd_vless_policy() { vless_runtime__with_decision_lock cmd_vless_policy_locked "$@"; }
+
+cmd_vless_add() {
+	local name='' link='' enabled=true confirmed=false result
+	while [ "$#" -gt 0 ]; do
+		case "${1}" in
+			--name) [ "$#" -ge 2 ] || { printf '%s\n' 'Для --name требуется значение.' >&2; return 64; }; name=${2}; shift 2 ;;
+			--link) [ "$#" -ge 2 ] || { printf '%s\n' 'Для --link требуется VLESS-ссылка.' >&2; return 64; }; link=${2}; shift 2 ;;
+			--disabled) enabled=false; shift ;;
+			--yes) confirmed=true; shift ;;
+			*) printf 'Неизвестный параметр: %s\n' "${1}" >&2; return 64 ;;
+		esac
+		done
+	if [ -z "${link}" ]; then
+		vless_cli__is_interactive || {
+			printf '%s\n' 'Использование: mors vless add --name ИМЯ --link VLESS_ССЫЛКА [--disabled] [--yes]' >&2
+			return 64
+		}
+		link=$(vless_cli__prompt 'Введите VLESS-ссылку') || return 1
+	fi
+	if [ -z "${name}" ]; then
+		vless_uri__parse "${link}" >/dev/null || return 1
+		if vless_cli__is_interactive; then
+			name=$(vless_cli__prompt 'Имя соединения' "${VLESS_PARSED_NAME}") || return 1
+		else
+			printf '%s\n' 'В неинтерактивном режиме укажите --name.' >&2
+			return 64
+		fi
+	fi
+	vless_uri__parse "${link}" >/dev/null || return 1
+	if [ "${enabled}" = true ] && [ "$(vless_store__is_paused)" = false ] && [ "$(vless_store__enabled_count)" -gt 0 ]; then
+		vless_cli__require_confirmation 'Добавление включённого резерва перезапустит Xray и оборвёт текущие сессии. Продолжить?' "${confirmed}" || return $?
+	fi
+	vless_domain__add "${name}" "${link}" "${enabled}"
+	result=$?
+	if [ "${result}" -eq 2 ] && vless_cli__is_interactive; then
+		if vless_cli__confirm 'Сохранить соединение выключенным?'; then
+			vless_domain__add "${name}" "${link}" false
+			return $?
+		fi
+	fi
+	return "${result}"
+}
+
+cmd_vless_update() {
+	local selector="${1:-}" link='' confirmed=false result id enabled
+	[ -n "${selector}" ] || return 64
+	shift
+	while [ "$#" -gt 0 ]; do
+		case "${1}" in
+			--link) [ "$#" -ge 2 ] || { printf '%s\n' 'Для --link требуется VLESS-ссылка.' >&2; return 64; }; link=${2}; shift 2 ;;
+			--yes) confirmed=true; shift ;;
+			*) return 64 ;;
+		esac
+	done
+	id=$(vless_store__resolve "${selector}") || return 1
+	enabled=$(vless_store__get "${id}" | jq -r '.enabled')
+	[ -z "${link}" ] || vless_uri__parse "${link}" >/dev/null || return 1
+	if [ -z "${link}" ] && ! vless_cli__is_interactive; then
+		printf '%s\n' 'Использование: mors vless update ИМЯ --link VLESS_ССЫЛКА [--yes]' >&2
+		return 64
+	fi
+	if [ "${enabled}" = true ] && [ "$(vless_store__is_paused)" = false ]; then
+		vless_cli__require_confirmation 'Обновление включённого соединения перезапустит Xray и оборвёт текущие сессии. Продолжить?' "${confirmed}" || return $?
+	fi
+	if [ -z "${link}" ]; then
+		link=$(vless_cli__prompt 'Введите новую VLESS-ссылку') || return 1
+		vless_uri__parse "${link}" >/dev/null || return 1
+	fi
+	vless_domain__update "${selector}" "${link}"
+	result=$?
+	if [ "${result}" -eq 2 ] && vless_cli__is_interactive; then
+		if vless_cli__confirm 'Сохранить новые параметры, но выключить соединение?'; then
+			vless_domain__set_enabled "${selector}" false false || return 1
+			vless_domain__update "${selector}" "${link}"
+			return $?
+		fi
+	fi
+	return "${result}"
+}
+
+cmd_vless_enable() {
+	local selector="${1:-}" confirmed=false id metadata
+	[ -n "${selector}" ] || return 64
+	shift
+	while [ "$#" -gt 0 ]; do
+		case "${1}" in
+			--yes) confirmed=true ;;
+			*) return 64 ;;
+		esac
+		shift
+	done
+	id=$(vless_store__resolve "${selector}") || return 1
+	metadata=$(vless_store__get "${id}")
+	if [ "$(printf '%s\n' "${metadata}" | jq -r '.enabled')" = false ] && \
+		[ "$(vless_store__is_paused)" = false ] && [ "$(vless_store__enabled_count)" -gt 0 ]; then
+		vless_cli__require_confirmation 'Включение ещё одного резерва перезапустит Xray и оборвёт текущие сессии. Продолжить?' "${confirmed}" || return $?
+	fi
+	vless_domain__set_enabled "${selector}" true
+}
+
+cmd_vless_disable() {
+	local selector="${1:-}" force=false confirmed=false id metadata
+	[ -n "${selector}" ] || return 64
+	shift
+	while [ "$#" -gt 0 ]; do
+		case "${1}" in
+			--force) force=true ;;
+			--yes) confirmed=true ;;
+			*) return 64 ;;
+		esac
+		shift
+	done
+	if [ "${force}" = true ]; then
+		vless_cli__require_confirmation 'Немедленное выключение перезапустит Xray и оборвёт текущие сессии. Продолжить?' "${confirmed}" || return $?
+	fi
+	id=$(vless_store__resolve "${selector}") || return 1
+	metadata=$(vless_store__get "${id}")
+	if [ "$(printf '%s\n' "${metadata}" | jq -r '.enabled')" = true ] && [ "$(vless_store__enabled_count)" -eq 1 ]; then
+		vless_cli__require_confirmation 'Это последнее включённое соединение; VLESS будет приостановлен. Продолжить?' "${confirmed}" || return $?
+	fi
+	vless_domain__set_enabled "${selector}" false "${force}"
+}
+
+cmd_vless_activate() {
+	local selector="${1:-}" force=false confirmed=false
+	[ -n "${selector}" ] || return 64
+	shift
+	while [ "$#" -gt 0 ]; do
+		case "${1}" in
+			--force) force=true ;;
+			--yes) confirmed=true ;;
+			*) return 64 ;;
+		esac
+		shift
+	done
+	if [ "${force}" = true ]; then
+		vless_cli__require_confirmation 'Немедленная активация перезапустит Xray и оборвёт текущие сессии. Продолжить?' "${confirmed}" || return $?
+	fi
+	vless_domain__activate "${selector}" "${force}"
+}
+
+cmd_vless_remove() {
+	local selector="${1:-}" force=false confirmed=false name
+	[ -n "${selector}" ] || return 64
+	shift
+	while [ "$#" -gt 0 ]; do
+		case "${1}" in
+			--force) force=true ;;
+			--yes) confirmed=true ;;
+			*) return 64 ;;
+		esac
+		shift
+	done
+	name=$(vless_cli__name_by_id "$(vless_store__resolve "${selector}")")
+	[ -n "${name}" ] || return 1
+	vless_cli__require_confirmation "Удалить соединение «${name}» и его секретные параметры?" "${confirmed}" || return $?
+	vless_domain__remove "${selector}" "${force}"
+}
+
+cmd_vless_pause() {
+	local confirmed=false force=false
+	while [ "$#" -gt 0 ]; do
+		case "${1}" in
+			--yes) confirmed=true ;;
+			--force) force=true ;;
+			*) return 64 ;;
+		esac
+		shift
+	done
+	vless_cli__require_confirmation 'Приостановить VLESS? Новые сессии не будут направляться через VLESS.' "${confirmed}" || return $?
+	vless_domain__pause "${force}"
+}
+
+cmd_vless_menu_connection() {
+	local id="${1}" name choice
+	while true; do
+		name=$(vless_cli__name_by_id "${id}")
+		print_line
+		printf 'Соединение: %s\n' "${name}"
+		printf '%s\n' '[1] Активировать  [2] Обновить  [3] Переименовать'
+		printf '%s\n' '[4] Включить      [5] Выключить [6] Удалить  [Q] Назад'
+		printf '%s' 'Выберите действие: '
+		IFS= read -r choice || return
+		case "${choice}" in
+			1) vless_domain__activate "${id}" ;;
+			2) cmd_vless_update "${id}" ;;
+			3) vless_domain__rename "${id}" "$(vless_cli__prompt 'Новое имя')" ;;
+			4) cmd_vless_enable "${id}" ;;
+			5)
+				if [ "$(vless_store__enabled_count)" -eq 1 ]; then
+					vless_cli__confirm 'Это приостановит VLESS. Продолжить?' || continue
+				fi
+				vless_domain__set_enabled "${id}" false
+				;;
+			6) vless_cli__confirm "Удалить соединение «${name}»?" && vless_domain__remove "${id}" ;;
+			q|Q) return ;;
+		esac
+	done
+}
+
+cmd_vless_menu() {
+	local choice row number id
+	while true; do
+		print_line
+		cmd_vless_status
+		print_line
+		number=0
+		while IFS= read -r row; do
+			[ -n "${row}" ] || continue
+			number=$((number + 1))
+			printf '[%s] %s\n' "${number}" "$(printf '%s\n' "${row}" | jq -r '.name')"
+		done <<EOF
+$(vless_store__list)
+EOF
+		printf '%s\n' '[A] Добавить  [E] События  [P] Политика прямого резерва  [Q] Выход'
+		printf '%s' 'Выберите соединение или действие: '
+		IFS= read -r choice || return
+		case "${choice}" in
+			a|A) cmd_vless_add ;;
+			e|E) cmd_vless_events ;;
+			p|P)
+				if [ "$(vless_store__policy | jq -r '.direct_fallback')" = true ]; then
+					vless_cli__confirm 'Запретить прямой резерв?' && cmd_vless_policy off true
+				else
+					vless_cli__confirm 'Разрешить прямой выход при полной аварии VLESS?' && cmd_vless_policy on true
+				fi
+				;;
+			q|Q) return ;;
+			*[!0-9]*|'') ;;
+			*)
+				id=$(vless_store__list | sed -n "${choice}p" | jq -r '.id // empty')
+				[ -n "${id}" ] && cmd_vless_menu_connection "${id}"
+				;;
+		esac
+	done
+}
+
+cmd_vless_cli() {
+	local command="${1:-}"
+	[ "$#" -gt 0 ] && shift
+	case "${command}" in
+		version|ver) [ "$#" -eq 0 ] || return 64; xray_version_check; return ;;
+		new)
+			printf '%s\n' "Команда 'mors vless new' удалена. Используйте 'mors vless add' или 'mors vless update ИМЯ'." >&2
+			return 64
+			;;
+	esac
+	vless_store__ensure || return 1
+	case "${command}" in
+		'') if vless_cli__is_interactive; then cmd_vless_menu; else cmd_vless_status; fi ;;
+		add) cmd_vless_add "$@" ;;
+		update) cmd_vless_update "$@" ;;
+		rename)
+			[ "$#" -eq 2 ] || {
+				printf '%s\n' 'Использование: mors vless rename ИМЯ НОВОЕ_ИМЯ' >&2
+				return 64
+			}
+			vless_domain__rename "${1}" "${2}"
+			;;
+		enable) cmd_vless_enable "$@" ;;
+		disable) cmd_vless_disable "$@" ;;
+		activate|use) cmd_vless_activate "$@" ;;
+		remove|rm|del) cmd_vless_remove "$@" ;;
+		pause) cmd_vless_pause "$@" ;;
+		resume) [ "$#" -eq 0 ] || return 64; vless_domain__resume ;;
+		list) cmd_vless_list "$@" ;;
+		status) cmd_vless_status "$@" ;;
+		check) cmd_vless_check "$@" ;;
+		events) cmd_vless_events "$@" ;;
+		policy)
+			[ "${1:-}" = direct-fallback ] || return 64
+			shift
+			case "${2:-}" in
+				'') cmd_vless_policy "${1:-}" false ;;
+				--yes) [ "$#" -eq 2 ] || return 64; cmd_vless_policy "${1:-}" true ;;
+				*) return 64 ;;
+			esac
+			;;
+		*) printf 'Неизвестная команда VLESS: %s\n' "${command}" >&2; return 64 ;;
+	esac
+}

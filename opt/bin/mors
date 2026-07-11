@@ -98,15 +98,8 @@ case "${1}" in
 	# Тоннели
 
 	vless)
-		case "${2}" in
-			new) 	rm -f "${VLESS_CONFIG_FILE}" 
-					start_vless "$(cat ${INFACE_NAMES_FILE} | grep vless | cut -d'|' -f2)"
-				;;
-			version | ver)	xray_version_check
-				;;
-			*) 		xray_install_and_check && cmd_install_proxy_package
-				;;
-		esac	
+		shift
+		cmd_vless_cli "$@"
 			;;
 
 	ssr)

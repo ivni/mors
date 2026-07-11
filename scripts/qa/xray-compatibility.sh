@@ -45,3 +45,5 @@ sed -i \
 	"${config}"
 
 "${XRAY}" run -test -c "${config}"
+
+bash scripts/qa/xray-managed-compatibility.sh "${xray_binary}" "${expected_version}"

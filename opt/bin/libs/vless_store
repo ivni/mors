@@ -1,0 +1,345 @@
+#!/bin/sh
+
+# Persistent, versioned storage for managed VLESS connections.
+# This library does not call Xray, Keenetic RCI, or mutate routing state.
+
+VLESS_STORE_ROOT=${VLESS_STORE_ROOT:-/opt/etc/mors/vless}
+VLESS_REGISTRY_FILE=${VLESS_REGISTRY_FILE:-${VLESS_STORE_ROOT}/registry.json}
+VLESS_CONNECTIONS_DIR=${VLESS_CONNECTIONS_DIR:-${VLESS_STORE_ROOT}/connections}
+VLESS_STORE_SCHEMA_VERSION=1
+VLESS_MAX_CONNECTIONS=4
+VLESS_PROBE_PORT_FIRST=${VLESS_PROBE_PORT_FIRST:-11971}
+VLESS_PROBE_PORT_LAST=${VLESS_PROBE_PORT_LAST:-11974}
+VLESS_PRIMARY_PROBE_URL=${VLESS_PRIMARY_PROBE_URL:-https://connectivitycheck.gstatic.com/generate_204}
+VLESS_SECONDARY_PROBE_URL=${VLESS_SECONDARY_PROBE_URL:-https://cp.cloudflare.com/generate_204}
+VLESS_DIRECT_PROBE_URL=${VLESS_DIRECT_PROBE_URL:-https://connectivitycheck.gstatic.com/generate_204}
+
+vless_store__now() {
+	date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+vless_store__require_jq() {
+	command -v jq >/dev/null 2>&1 || {
+		printf '%s\n' 'Для управления VLESS требуется jq.' >&2
+		return 1
+	}
+}
+
+vless_store__write_json() {
+	local destination="${1}"
+	local temporary="${destination}.tmp.$$"
+
+	umask 077
+	if ! jq -e . >"${temporary}"; then
+		rm -f "${temporary}"
+		return 1
+	fi
+	chmod 600 "${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	mv -f "${temporary}" "${destination}"
+}
+
+vless_store__default_registry() {
+	local now
+	now=$(vless_store__now)
+	jq -n \
+		--argjson schema_version "${VLESS_STORE_SCHEMA_VERSION}" \
+		--arg now "${now}" \
+		--arg primary_probe_url "${VLESS_PRIMARY_PROBE_URL}" \
+		--arg secondary_probe_url "${VLESS_SECONDARY_PROBE_URL}" \
+		--arg direct_probe_url "${VLESS_DIRECT_PROBE_URL}" \
+		'{
+			schema_version: $schema_version,
+			revision: 0,
+			created_at: $now,
+			updated_at: $now,
+			policy: {
+				paused: false,
+				direct_fallback: false,
+				primary_probe_url: $primary_probe_url,
+				secondary_probe_url: $secondary_probe_url,
+				direct_probe_url: $direct_probe_url
+			},
+			connections: []
+		}'
+}
+
+vless_store__ensure() {
+	vless_store__require_jq || return 1
+	mkdir -p "${VLESS_CONNECTIONS_DIR}" || return 1
+	chmod 700 "${VLESS_STORE_ROOT}" "${VLESS_CONNECTIONS_DIR}" 2>/dev/null || return 1
+
+	if [ ! -f "${VLESS_REGISTRY_FILE}" ]; then
+		vless_store__default_registry | vless_store__write_json "${VLESS_REGISTRY_FILE}" || return 1
+	fi
+
+	vless_store__validate_registry
+}
+
+vless_store__validate_registry() {
+	[ -f "${VLESS_REGISTRY_FILE}" ] || return 1
+	jq -e \
+		--argjson schema_version "${VLESS_STORE_SCHEMA_VERSION}" \
+		--argjson max_connections "${VLESS_MAX_CONNECTIONS}" '
+			.schema_version == $schema_version and
+			(.revision | type == "number") and
+			(.policy | type == "object") and
+			(.policy.paused | type == "boolean") and
+			(.policy.direct_fallback | type == "boolean") and
+			(.policy.primary_probe_url | type == "string" and length > 0) and
+			(.policy.secondary_probe_url | type == "string" and length > 0) and
+			(.policy.direct_probe_url | type == "string" and length > 0) and
+			(.connections | type == "array" and length <= $max_connections) and
+			(all(.connections[];
+				(.id | type == "string" and length > 0) and
+				(.name | type == "string" and length > 0 and length <= 64) and
+				(.enabled | type == "boolean") and
+				(.probe_port | type == "number" and floor == . and . >= 1 and . <= 65535)
+			)) and
+			([.connections[].id] | length == (unique | length)) and
+			([.connections[].name | ascii_downcase] | length == (unique | length)) and
+			([.connections[].probe_port] | length == (unique | length))
+		' "${VLESS_REGISTRY_FILE}" >/dev/null
+}
+
+vless_store__validate_tree() {
+	local root="${1}" registry connections id expected_files actual_files
+	registry="${root}/registry.json"
+	connections="${root}/connections"
+	[ -f "${registry}" ] && [ -d "${connections}" ] || return 1
+	[ -z "$(find "${root}" -type l -print -quit 2>/dev/null)" ] || return 1
+	[ -z "$(find "${root}" -mindepth 1 -maxdepth 1 -type d ! -name connections -print -quit 2>/dev/null)" ] || return 1
+	[ -z "$(find "${root}" -mindepth 1 -maxdepth 1 -type f ! -name registry.json -print -quit 2>/dev/null)" ] || return 1
+	[ -z "$(find "${connections}" -mindepth 1 -type d -print -quit 2>/dev/null)" ] || return 1
+	(
+		VLESS_STORE_ROOT=${root}
+		VLESS_REGISTRY_FILE=${registry}
+		VLESS_CONNECTIONS_DIR=${connections}
+		vless_store__validate_registry || exit 1
+		expected_files=$(jq -r '.connections | length' "${registry}") || exit 1
+		actual_files=$(find "${connections}" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')
+		[ "${actual_files}" = "${expected_files}" ] || exit 1
+		while IFS= read -r id; do
+			[ -f "${connections}/${id}.json" ] && jq -e . "${connections}/${id}.json" >/dev/null || exit 1
+		done <<EOF
+$(jq -r '.connections[].id' "${registry}")
+EOF
+	)
+}
+
+vless_store__connection_count() {
+	jq -r '.connections | length' "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__enabled_count() {
+	jq -r '[.connections[] | select(.enabled == true)] | length' "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__list() {
+	jq -c '.connections[]' "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__list_enabled() {
+	jq -c '.connections[] | select(.enabled == true)' "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__get() {
+	local id="${1}"
+	jq -c --arg id "${id}" '.connections[] | select(.id == $id)' "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__resolve() {
+	local selector="${1}"
+	local result
+
+	[ -n "${selector}" ] || return 1
+	result=$(jq -r --arg selector "${selector}" '
+		[
+			.connections[] |
+			select(.id == $selector or .name == $selector or (.name | ascii_downcase) == ($selector | ascii_downcase)) |
+			.id
+		] |
+		if length == 1 then .[0] else empty end
+	' "${VLESS_REGISTRY_FILE}")
+	[ -n "${result}" ] || return 1
+	printf '%s\n' "${result}"
+}
+
+vless_store__validate_name() {
+	local name="${1}"
+	local length
+
+	[ -n "${name}" ] || return 1
+	printf '%s' "${name}" | grep -q '[[:cntrl:]]' && return 1
+	length=$(printf '%s' "${name}" | jq -Rs 'length') || return 1
+	[ "${length}" -le 64 ]
+}
+
+vless_store__name_available() {
+	local name="${1}"
+	local except_id="${2:-}"
+	jq -e --arg name "${name}" --arg except_id "${except_id}" '
+		all(.connections[]; .id == $except_id or (.name | ascii_downcase) != ($name | ascii_downcase))
+	' "${VLESS_REGISTRY_FILE}" >/dev/null
+}
+
+vless_store__new_id() {
+	local candidate
+	local attempts=0
+
+	while [ "${attempts}" -lt 20 ]; do
+		if [ -r /proc/sys/kernel/random/uuid ]; then
+			candidate=$(tr -d '-' </proc/sys/kernel/random/uuid | cut -c1-12)
+		else
+			candidate=$(printf '%s' "$(date +%s)-$$-${attempts}" | cksum | awk '{print $1}')
+		fi
+		candidate="vless-${candidate}"
+		if ! jq -e --arg id "${candidate}" '.connections[] | select(.id == $id)' "${VLESS_REGISTRY_FILE}" >/dev/null; then
+			printf '%s\n' "${candidate}"
+			return 0
+		fi
+		attempts=$((attempts + 1))
+	done
+	return 1
+}
+
+vless_store__allocate_probe_port() {
+	local port="${VLESS_PROBE_PORT_FIRST}"
+
+	while [ "${port}" -le "${VLESS_PROBE_PORT_LAST}" ]; do
+		if ! jq -e --argjson port "${port}" '.connections[] | select(.probe_port == $port)' "${VLESS_REGISTRY_FILE}" >/dev/null; then
+			printf '%s\n' "${port}"
+			return 0
+		fi
+		port=$((port + 1))
+	done
+	return 1
+}
+
+vless_store__secret_file() {
+	printf '%s/%s.json\n' "${VLESS_CONNECTIONS_DIR}" "${1}"
+}
+
+vless_store__read_secret() {
+	local secret_file
+	secret_file=$(vless_store__secret_file "${1}")
+	[ -f "${secret_file}" ] || return 1
+	jq -c . "${secret_file}"
+}
+
+vless_store__write_secret() {
+	local id="${1}"
+	local destination
+	destination=$(vless_store__secret_file "${id}")
+	vless_store__write_json "${destination}"
+}
+
+vless_store__candidate_secret_file() {
+	printf '%s/.%s.candidate.%s.json\n' "${VLESS_CONNECTIONS_DIR}" "${1}" "$$"
+}
+
+vless_store__add_metadata() {
+	local id="${1}"
+	local name="${2}"
+	local enabled="${3}"
+	local probe_port="${4}"
+	local now candidate
+	now=$(vless_store__now)
+	candidate="${VLESS_REGISTRY_FILE}.candidate.$$"
+
+	jq \
+		--arg id "${id}" \
+		--arg name "${name}" \
+		--arg now "${now}" \
+		--argjson enabled "${enabled}" \
+		--argjson probe_port "${probe_port}" '
+			.revision += 1 |
+			.updated_at = $now |
+			.connections += [{
+				id: $id,
+				name: $name,
+				enabled: $enabled,
+				probe_port: $probe_port,
+				created_at: $now,
+				updated_at: $now
+			}]
+		' "${VLESS_REGISTRY_FILE}" >"${candidate}" || {
+		rm -f "${candidate}"
+		return 1
+	}
+	chmod 600 "${candidate}" || {
+		rm -f "${candidate}"
+		return 1
+	}
+	mv -f "${candidate}" "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__set_name() {
+	local id="${1}"
+	local name="${2}"
+	local now
+	now=$(vless_store__now)
+	jq --arg id "${id}" --arg name "${name}" --arg now "${now}" '
+		.revision += 1 |
+		.updated_at = $now |
+		(.connections[] | select(.id == $id)) |= (.name = $name | .updated_at = $now)
+	' "${VLESS_REGISTRY_FILE}" | vless_store__write_json "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__set_enabled() {
+	local id="${1}"
+	local enabled="${2}"
+	local now
+	now=$(vless_store__now)
+	jq --arg id "${id}" --argjson enabled "${enabled}" --arg now "${now}" '
+		.revision += 1 |
+		.updated_at = $now |
+		(.connections[] | select(.id == $id)) |= (.enabled = $enabled | .updated_at = $now)
+	' "${VLESS_REGISTRY_FILE}" | vless_store__write_json "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__remove() {
+	local id="${1}"
+	local now secret_file
+	now=$(vless_store__now)
+	secret_file=$(vless_store__secret_file "${id}")
+
+	jq --arg id "${id}" --arg now "${now}" '
+		.revision += 1 |
+		.updated_at = $now |
+		.connections |= map(select(.id != $id))
+	' "${VLESS_REGISTRY_FILE}" | vless_store__write_json "${VLESS_REGISTRY_FILE}" || return 1
+	rm -f "${secret_file}"
+}
+
+vless_store__policy() {
+	jq -c '.policy' "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__is_paused() {
+	jq -r '.policy.paused' "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__set_paused() {
+	local paused="${1}"
+	local now
+	now=$(vless_store__now)
+	jq --argjson paused "${paused}" --arg now "${now}" '
+		.revision += 1 |
+		.updated_at = $now |
+		.policy.paused = $paused
+	' "${VLESS_REGISTRY_FILE}" | vless_store__write_json "${VLESS_REGISTRY_FILE}"
+}
+
+vless_store__set_direct_fallback() {
+	local enabled="${1}"
+	local now
+	now=$(vless_store__now)
+	jq --argjson enabled "${enabled}" --arg now "${now}" '
+		.revision += 1 |
+		.updated_at = $now |
+		.policy.direct_fallback = $enabled
+	' "${VLESS_REGISTRY_FILE}" | vless_store__write_json "${VLESS_REGISTRY_FILE}"
+}

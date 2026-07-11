@@ -1,4 +1,7 @@
 #!/bin/sh
+. /opt/apps/mors/bin/libs/lifecycle
+
+lifecycle__guard_shell || exit 1
 #--------------------------------------------------------------------------------------------------------------
 #
 #	Файл обновления пакета
@@ -369,4 +372,5 @@ else
 fi
 
 rm -f upgrade install
+lifecycle__unguard_shell || exit 1
 
