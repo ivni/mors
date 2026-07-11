@@ -6,10 +6,30 @@ entware_dir="${ENTWARE_DIR:-${repo_root}/.qa/entware}"
 entware_repo="${ENTWARE_REPO_URL:-https://github.com/Entware/Entware.git}"
 entware_config="${ENTWARE_CONFIG:-configs/aarch64-3.10.config}"
 jobs="${JOBS:-$(nproc)}"
+python2_compat_dir=''
 
-# Entware invokes nested make processes while installing feed metadata. Export
-# FORCE so the Python 2.7 gate for unrelated node_legacy is bypassed there too.
-export FORCE=1
+cleanup() {
+	[ -n "${python2_compat_dir}" ] && rm -rf "${python2_compat_dir}"
+}
+trap cleanup EXIT
+
+# Entware globally probes Python 2.7 although only node_legacy needs it.
+# Ubuntu 24.04 no longer ships Python 2. The narrow shim satisfies `-V`, but
+# fails loudly if an unexpectedly selected package tries to execute Python 2.
+if ! command -v python2.7 >/dev/null 2>&1; then
+	python2_compat_dir=$(mktemp -d)
+	cat >"${python2_compat_dir}/python2.7" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = '-V' ] || [ "${1:-}" = '--version' ]; then
+	printf '%s\n' 'Python 2.7.18'
+	exit 0
+fi
+printf '%s\n' 'Python 2 compatibility shim cannot execute build scripts.' >&2
+exit 127
+EOF
+	chmod +x "${python2_compat_dir}/python2.7"
+	export PATH="${python2_compat_dir}:${PATH}"
+fi
 
 mkdir -p "$(dirname "${entware_dir}")"
 
@@ -40,10 +60,6 @@ else
 	printf '\nCONFIG_PACKAGE_mors=m\n' >> .config
 fi
 
-# Current Entware still declares Python 2.7 for the unrelated node_legacy
-# package. Ubuntu 24.04 no longer ships it; Mors does not build node_legacy.
-# FORCE=1 bypasses that global host-prerequisite gate without selecting or
-# compiling any additional package.
 make defconfig
 make -j"${jobs}" package/mors/compile || make package/mors/compile V=sc
 
