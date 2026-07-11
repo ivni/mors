@@ -7,6 +7,10 @@ entware_repo="${ENTWARE_REPO_URL:-https://github.com/Entware/Entware.git}"
 entware_config="${ENTWARE_CONFIG:-configs/aarch64-3.10.config}"
 jobs="${JOBS:-$(nproc)}"
 
+# Entware invokes nested make processes while installing feed metadata. Export
+# FORCE so the Python 2.7 gate for unrelated node_legacy is bypassed there too.
+export FORCE=1
+
 mkdir -p "$(dirname "${entware_dir}")"
 
 if [ ! -d "${entware_dir}/.git" ]; then
@@ -40,8 +44,8 @@ fi
 # package. Ubuntu 24.04 no longer ships it; Mors does not build node_legacy.
 # FORCE=1 bypasses that global host-prerequisite gate without selecting or
 # compiling any additional package.
-make FORCE=1 defconfig
-make FORCE=1 -j"${jobs}" package/mors/compile || make FORCE=1 package/mors/compile V=sc
+make defconfig
+make -j"${jobs}" package/mors/compile || make package/mors/compile V=sc
 
 mkdir -p "${repo_root}/packages"
 find bin/targets -type f -name 'mors_*_all.ipk' -exec cp -f {} "${repo_root}/packages/" \;
