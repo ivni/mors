@@ -30,12 +30,16 @@ Use the original Kvas repository and wiki only as historical/reference material 
 - `opt/bin/libs/` - shared shell libraries:
   - `main` contains global paths, config helpers, output/log helpers, router API helpers, and low-level utilities.
   - `vpn` contains most runtime orchestration: init/reset, VPN/SSR/VLESS switching, DNSMasq/DNSCrypt/AdGuard Home setup, host list operations, and route updates.
+  - `xray` contains Xray version parsing and the supported/tested compatibility policy for VLESS Reality.
   - `ndm` contains NDM/netfilter and `iptables`/`ipset` helpers for Keenetic hooks.
   - `check`, `debug`, `route`, `tags`, `hosts`, `adblock`, `vless`, `keen_api`, `ndm_d`, `update` provide focused feature areas.
 - `opt/bin/main/` - standalone helper scripts invoked by the CLI and services, such as `adblock`, `adguard`, `dnsmasq`, `ipset`, `setup`, `update`, and `upgrade`.
 - `opt/etc/conf/` - default config/templates copied or referenced at install time (`mors.conf`, `mors.list`, `dnsmasq.conf`, `shadowsocks.json`, `mors.vless`, `tags.list`, etc.).
 - `opt/etc/init.d/` - Entware init scripts for Mors and optional services.
 - `opt/etc/ndm/` - Keenetic NDM hooks for filesystem startup, interface lifecycle, netfilter refreshes, and WAN events.
+- `tests/` - router-independent BATS tests for CLI/help contracts and focused library behavior.
+- `scripts/qa/` - local/CI validation helpers for static checks, package layout, Entware builds, Xray compatibility, and guarded router smoke tests.
+- `.github/workflows/` - GitHub Actions workflows: `qa.yml` runs static/BATS/Xray checks, `package.yml` builds release artifacts, and `router-smoke.yml` is a manually confirmed test-router workflow.
 - `ipk/` - prebuilt package artifacts. It may still contain historical `kvas_*` packages; do not treat them as current Mors releases and do not change them unless intentionally adding/replacing release artifacts.
 - `logs/` - captured build logs. Update only when recording a real build.
 
@@ -87,7 +91,9 @@ Use the original Kvas repository and wiki only as historical/reference material 
   - consider README/wiki/changelog updates if behavior is user-visible;
   - add or adjust helper functions in the relevant `opt/bin/libs/*` file.
 - When adding a new runtime dependency, update `Makefile` `DEPENDS` and document the reason.
+- When preparing a commit that changes packaged files or runtime behavior, increment `PKG_RELEASE` once for that release batch. Change `PKG_VERSION` only as part of a deliberate version transition.
 - When changing default configuration, update templates in `opt/etc/conf/` and verify the install/setup paths that copy or transform them.
+- When changing VLESS/Xray behavior or `opt/etc/conf/mors.vless`, inspect `opt/bin/libs/xray` and keep the compatibility policy, README, CLI help, changelog, and CI matrix synchronized. Update `XRAY_TESTED_VERSION` only after the compatibility CI validates that version.
 - When changing NDM hooks, inspect `opt/etc/ndm/ndm`, `opt/bin/libs/ndm_d`, and all matching hook directories because similar logic is duplicated across interface and netfilter events.
 - When editing install, uninstall, update, or rollback behavior, inspect `opt/bin/main/setup`, `opt/bin/main/upgrade`, and `Makefile` post-install logic together.
 - Do not rewrite large legacy shell sections just for style. Prefer targeted fixes with clear behavior.
@@ -95,7 +101,7 @@ Use the original Kvas repository and wiki only as historical/reference material 
 
 ## Safety Rules
 
-- Do not run router-mutating scripts locally as root. In particular, avoid local execution of `opt/bin/main/setup`, `opt/bin/main/upgrade`, uninstall paths, NDM hooks, and scripts that call `opkg`, `iptables`, `ipset`, or Keenetic RCI.
+- Do not run router-mutating scripts on a normal development host, regardless of privileges. Run `opt/bin/main/setup`, `opt/bin/main/upgrade`, uninstall paths, NDM hooks, and scripts that call `opkg`, `iptables`, `ipset`, or Keenetic RCI only on an explicitly scoped real/disposable Keenetic test target.
 - Treat `rm -rf`, `sed -i`, `opkg`, `iptables`, `ipset`, `ndmc`, and `curl localhost:79/rci` changes as high-risk. Prefer dry reasoning, targeted tests, or a disposable router/test VM.
 - Do not commit secrets or real endpoint data. Keep Shadowsocks/VLESS credentials, Telegram tokens, router IPs, SSH keys, and GitHub tokens out of the repo. Templates should use placeholders.
 - Do not modify `.ipk` files, `packages/`, `.molot/`, or build outputs unless the task is explicitly about packaging/release artifacts.
@@ -104,14 +110,29 @@ Use the original Kvas repository and wiki only as historical/reference material 
 
 ## Build And Test
 
-- There are no committed BATS tests at the moment, even though README mentions BATS. If adding tests, place them under `tests/` and keep them runnable without a real router where practical.
-- Full package compilation requires an Entware buildroot. Typical build validation happens inside an Entware tree after linking this package into feeds, then running a package compile target such as:
+- Keep BATS tests under `tests/` and runnable without a real router where practical.
+- Run the fast repository checks from the repository root on a POSIX/Bash-capable host:
+
+```sh
+bash scripts/qa/static.sh
+bats tests
+```
+
+  `static.sh` checks package layout, secrets, line endings, shell syntax, and ShellCheck when it is installed. CI installs BATS and ShellCheck and runs both commands.
+- Full package compilation requires an Entware buildroot. The canonical build helper is:
+
+```sh
+bash scripts/qa/entware-build.sh
+```
+
+  Inside an already prepared Entware tree, the equivalent package target is:
 
 ```sh
 make package/feeds/packages/mors/compile V=sc
 ```
 
 - The legacy Docker/Jenkins path uses `builder/Dockerfile` and `builder/builder`, but review it before trusting it for releases.
+- `.github/workflows/router-smoke.yml` performs remote installation and router mutations. Trigger it only when the user explicitly requests a smoke run, the required secrets target an authorized test router, and the workflow confirmation is intentionally supplied.
 - On a real or disposable Keenetic router, useful smoke checks include:
   - install the built `.ipk` with `opkg install`;
   - run `mors setup`;
@@ -120,7 +141,7 @@ make package/feeds/packages/mors/compile V=sc
   - verify `mors vpn status`, `mors dnsmasq status`, `mors ipset`, and service statuses;
   - verify generated DNSMasq/AdGuardHome and `ipset` data files;
   - inspect `iptables-save` output for the expected `MORS_*` chains/rules.
-- If a POSIX shell and ShellCheck are available, syntax/lint changed scripts before router testing. Expect some false positives because scripts rely on Entware/Keenetic globals and absolute runtime paths.
+- Treat new ShellCheck errors as actionable. When triaging legacy findings, account for Entware/Keenetic globals, BusyBox behavior, and absolute runtime paths rather than suppressing warnings broadly.
 
 ## Historical Wiki Notes
 
