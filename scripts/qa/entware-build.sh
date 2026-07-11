@@ -63,6 +63,8 @@ else
 fi
 
 make defconfig
+make -j"${jobs}" tools/install || make tools/install V=sc
+make -j"${jobs}" toolchain/install || make toolchain/install V=sc
 make -j"${jobs}" tools/go-src/compile || make tools/go-src/compile V=sc
 make -j"${jobs}" package/mors/compile || make package/mors/compile V=sc
 
