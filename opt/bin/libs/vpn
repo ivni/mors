@@ -1564,7 +1564,6 @@ dns_show() {
 vpn_off() {
 #	ready "Интерфейс vpn отключен "
 	[ -f "/opt/etc/ndm/netfilter.d/100-vpn-mark" ] && rm -f "/opt/etc/ndm/netfilter.d/100-vpn-mark"
-	[ -f /opt/etc/ndm/ifstatechanged.d/100-mors-vpn ] && rm -f /opt/etc/ndm/ifstatechanged.d/100-mors-vpn
 	[ -f /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ] && rm -f /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
 	ip4__flush 'chain table' &> /dev/null
 }
@@ -1633,11 +1632,8 @@ vpn_on() {
 		cp "/opt/apps/${APP_NAME}/etc/ndm/netfilter.d/100-vpn-mark" "/opt/etc/ndm/netfilter.d/100-vpn-mark"
 		chmod +x "/opt/etc/ndm/netfilter.d/100-vpn-mark"
 
-#		Если версия фирменной оболочки равно или больше 4.0,
-#		то применяем механизм iflayerchanged.d, если нет, то ifstatechanged.d
-		hook_dir=$(get_hook_dir)
-		cp "/opt/apps/${APP_NAME}/etc/ndm/${hook_dir}/100-mors-vpn" "/opt/etc/ndm/${hook_dir}/100-mors-vpn"
-		chmod +x "/opt/etc/ndm/${hook_dir}/100-mors-vpn"
+		cp "/opt/apps/${APP_NAME}/etc/ndm/iflayerchanged.d/100-mors-vpn" "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn"
+		chmod +x "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn"
 
 		state=$(get_value_interface_field "${inface_cli}" state)
 
@@ -2034,7 +2030,7 @@ update_interface_name_list() {
 	warning "Сохраняйте терпение и спокойствие!"
 	print_line
 
-	HOOK_INFACE_FILE=/opt/etc/ndm/$(get_hook_dir)/100-save-inface_entware
+	HOOK_INFACE_FILE=/opt/etc/ndm/iflayerchanged.d/100-save-inface_entware
 	rm -f "${INFACE_NAMES_FILE}"
 	touch "${INFACE_NAMES_FILE}"
 	# если нет файла по отлавливанию хука
@@ -2320,7 +2316,7 @@ start_vless(){
 		"${XRAY_INIT}" start && when_ok "УСПЕШНО"
 		vpn_on "${_inface_entware}" &> /dev/null
 		# Тестируем работу proxy vless
-		test_vless_proxy "${_inface_entware}"
+		test_vless_proxy
 
 
 	else

@@ -355,34 +355,21 @@ backup_copy(){
 
 get_firmware_version(){
 #	номер версии фирменной Keenetic ОС
-	curl -s localhost:79/rci/show/version | jq '.title' | sed 's/["a-zA-Z]//g'
+	curl -s localhost:79/rci/show/version \
+		| jq -r '.title // empty' \
+		| grep -oE '[0-9]+(\.[0-9]+)+' \
+		| head -n 1
 }
 
-get_hook_dir(){
-#	Получаем директорию текущего механизма обработки состояний подключений
-	get_firmware_version | grep -q '^4\.' && echo "iflayerchanged.d" ||  echo "ifstatechanged.d"
-}
+is_supported_keenetic_os() {
+	local os_version="${1:-$(get_firmware_version)}"
+	local os_major="${os_version%%.*}"
 
-is_os_below_4_2() {
-	if [ -n "${1}" ]; then
-		local os_version="${1}"
-	else
-		local os_version="$(version_os)"
-	fi
+	case "${os_major}" in
+		'' | *[!0-9]*) return 1 ;;
+	esac
 
-	local os_subversion=$(echo "${os_version}" | cut -d '.' -f 1)
-	if [ "${os_subversion}" -lt 4 ]; then
-		return
-	fi
-
-	if [ "${os_subversion}" -eq 4 ]; then
-		os_subversion=$(echo "${os_version}" | cut -d '.' -f 2)
-		if [ "${os_subversion}" -lt 2 ]; then
-			return
-		fi
-	fi
-
-	false
+	[ "${os_major}" -ge 5 ]
 }
 
 is_ip_private() {
@@ -405,21 +392,8 @@ get_external_interface() {
 }
 
 get_entware_ikev2_inface() {
-	if ! is_os_below_4_2 ; then
-		# на последних прошивках IKEv2 на этом интерфейсе
-		echo 'xfrms+'
-		return
-	fi
-
-	local external_interface="$(get_external_interface)"
-	if [ -n "${external_interface}" ]; then
-		echo "${external_interface}"
-		return
-	fi
-
-	log_error 'Сетевой интерфейс для IKEv2 найти не удалось'
-	# чтобы остальной код продолжал работать, вернём точно имеющийся интерфейс
-	echo 'br0'
+	# KeeneticOS 5 использует xfrm-интерфейсы для клиентов IKEv2.
+	echo 'xfrms+'
 }
 
 get_from_json() {
@@ -702,7 +676,7 @@ reset_connection() {
 
 
 	# в зависимости от состояния - включаем и выключаем или выключаем и включаем интерфейс
-	# для того, чтобы сработал наш хук в файле /opt/etc/ndm/ifstatechanged.d/100-save-inface_entware
+	# для того, чтобы сработал наш хук в iflayerchanged.d/100-save-inface_entware
 	if [ "${state}" = 'up' ]; then
 		curl -s -d '{"down":"true"}' "${INFACE_PART_REQUEST}/${inface_cli}" &> /dev/null
 	else

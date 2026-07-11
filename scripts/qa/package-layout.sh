@@ -22,6 +22,7 @@ required_paths=(
 	opt/etc/conf/mors.vless
 	opt/etc/init.d/S96mors
 	opt/etc/ndm/fs.d/15-mors-start.sh
+	opt/etc/ndm/iflayerchanged.d/100-mors-vpn
 	opt/etc/ndm/netfilter.d/100-dns-local
 	opt/etc/ndm/ndm
 )

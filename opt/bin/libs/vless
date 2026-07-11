@@ -31,7 +31,7 @@ PROXY_VLESS_DESC="Mors-proxy-vless"
 PROXY_LOCAL_IP="127.0.0.1"
 PROXY_VLESS_PORT=1097
 PROXY_VLESS_PROTO=socks5
-DOMAIN_FOR_CHECK="ifconfig.me"
+DOMAIN_FOR_CHECK="https://ifconfig.me/ip"
 
 
 has_package_installed() {
@@ -58,8 +58,9 @@ has_xray_enable(){
 #	Функция проверяет, включен ли Xray
 #
 #-------------------------------------------------------------------------------
-    # [ -x "${XRAY}" ] && [ -f "${XRAY_INIT}" ] && [ "$("${XRAY_INIT}" status)" = 'alive' ]
-    [ -f "${XRAY_INIT}" ] && [ "$("${XRAY_INIT}" status)" = 'alive' ]
+    [ -f "${XRAY_INIT}" ] && {
+        "${XRAY_INIT}" status 2>/dev/null | grep -qF 'alive'
+    }
 }
 
 xray_version_check() {
@@ -474,23 +475,44 @@ set +xeu
 test_vless_proxy() {
 #-------------------------------------------------------------------------------
 #
-#	Функция проверяет работу Proxy Vless на доступность доменного имени
+#	Функция проверяет Xray/VLESS напрямую через локальный SOCKS5-вход.
 #
 #-------------------------------------------------------------------------------
-    local _inface=${1}
-    # iface=$(ip a | grep global | grep t2s_br${PROXY_INFACE_NUMEBER} | sed 's/.*\(t2s_br'${PROXY_INFACE_NUMEBER}'\)/\1/g')
+    local _proxy="socks5h://${PROXY_LOCAL_IP}:${PROXY_VLESS_PORT}"
+    local _out=''
+    local _status=0
+    local _address=''
+
     ready "Проверка соединения \"${PROXY_VLESS_DESC}\" к ${DOMAIN_FOR_CHECK}"
-    local _out=$(curl -s --interface ${_inface} ${DOMAIN_FOR_CHECK} 2>&1)
-    if echo "${_out}" | tail -n 1 | grep -qE "${IP_FILTER}" ; then
-        when_ok "УСПЕШНО"
-    else
+
+    if ! has_xray_enable; then
         when_bad "ОШИБКА"
-        [ -n "${_out}" ] && {
-            print_line
-            echo "${_out}" && echo
-        }
-        
+        error 'Сервис Xray не запущен.'
+        return 1
     fi
+
+    _out=$(curl -fLsS \
+        --connect-timeout 10 \
+        --max-time 20 \
+        --noproxy '' \
+        --proxy "${_proxy}" \
+        "${DOMAIN_FOR_CHECK}" 2>&1)
+    _status=$?
+    _address=$(printf '%s' "${_out}" | tr -d '\r\n')
+
+    if [ "${_status}" -eq 0 ] && echo "${_address}" | grep -qE "^(${IP_FILTER}|[0-9A-Fa-f]*:[0-9A-Fa-f:]+)$" ; then
+        when_ok "УСПЕШНО (${_address})"
+        return 0
+    fi
+
+    when_bad "ОШИБКА"
+    error "Проверка через ${_proxy} завершилась с кодом curl ${_status}."
+    if [ -n "${_out}" ]; then
+        print_line
+        echo "${_out}"
+        echo
+    fi
+    return 1
 }
 
 _cmd_install_vless_proxy(){

@@ -1,4 +1,6 @@
 ## Unreleased
+- Минимальная поддерживаемая версия повышена до KeeneticOS 5; удалены старые `ifstatechanged`-хуки и ветвление по механизму NDM.
+- Проверка VLESS теперь выполняется напрямую через локальный SOCKS5-вход Xray, использует однозначный endpoint `/ip` и показывает причину ошибки `curl`.
 - Пакет и CLI переименованы с `kvas` на `mors`.
 - Runtime-пути, конфигурационные файлы, init/NDM hooks, DNSMasq/AdGuard generated files и internal ipset/iptables-имена переведены на `mors`/`MORS`.
 - Обновление пакета теперь ориентировано на релизы `ivni/mors` и артефакты вида `mors_*_all.ipk`.

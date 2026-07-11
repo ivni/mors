@@ -6,6 +6,21 @@
 # В случае проблем с инсталляцией пакета ставим в значение true
 ANSWER_AGH=n
 
+setup_require_supported_os() {
+	local firmware_version
+	firmware_version=$(get_firmware_version)
+
+	if [ -z "${firmware_version}" ]; then
+		error 'Не удалось определить версию KeeneticOS. Установка остановлена.'
+		return 1
+	fi
+
+	if ! is_supported_keenetic_os "${firmware_version}"; then
+		error "KeeneticOS ${firmware_version} не поддерживается. Требуется KeeneticOS 5 или новее."
+		return 1
+	fi
+}
+
 log_in_file(){
 	if [ "${1}" = line ]; then
 		print_line >> "${INSTALL_LOG}"
@@ -141,12 +156,6 @@ cmd_pause_mors(){
 		[ -f /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ] && {
 			mv /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ${MORS_BACKUP_PATH}/100-mors-vpn-layer
 		}
-		[ -f /opt/etc/ndm/iflayerchanged.d/mors-ips-reset ] && {
-			mv /opt/etc/ndm/iflayerchanged.d/mors-ips-reset ${MORS_BACKUP_PATH}/mors-ips-reset-layer
-		}
-		[ -f /opt/etc/ndm/ifstatechanged.d/100-mors-vpn ] && {
-			mv /opt/etc/ndm/ifstatechanged.d/100-mors-vpn ${MORS_BACKUP_PATH}/100-mors-vpn-state
-		}
 		[ -f /opt/etc/ndm/netfilter.d/100-proxy-redirect ] && {
 			mv /opt/etc/ndm/netfilter.d/100-proxy-redirect ${MORS_BACKUP_PATH}/100-proxy-redirect
 		}
@@ -185,14 +194,8 @@ cmd_unpause_mors(){
 	ready "Восстанавливаем работу Морса после паузы..."
 	{
 		#  Восстанавливаем из архива файлы механизма ndm
-		[ -f ${MORS_BACKUP_PATH}/mors-ips-reset-layer ] && {
-			mv ${MORS_BACKUP_PATH}/mors-ips-reset-layer /opt/etc/ndm/iflayerchanged.d/mors-ips-reset
-		}
 		[ -f ${MORS_BACKUP_PATH}/100-mors-vpn-layer ] && {
 			mv ${MORS_BACKUP_PATH}/100-mors-vpn-layer /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
-		}
-		[ -f ${MORS_BACKUP_PATH}/100-mors-vpn-state ] && {
-			mv ${MORS_BACKUP_PATH}/100-mors-vpn-state /opt/etc/ndm/ifstatechanged.d/100-mors-vpn
 		}
 		[ -f ${MORS_BACKUP_PATH}/100-proxy-redirect ] && {
 			mv ${MORS_BACKUP_PATH}/100-proxy-redirect /opt/etc/ndm/netfilter.d/100-proxy-redirect
@@ -389,9 +392,10 @@ rm_package_files() {
 
 		rm_file /opt/etc/ndm/ifcreated.d/mors-iface-add
 		rm_file /opt/etc/ndm/ifdestroyed.d/mors-iface-del
-		rm_file /opt/etc/ndm/iflayerchanged.d/mors-ips-reset
 		rm_file /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
+		# Миграционная очистка файлов версий до KeeneticOS 5.
 		rm_file /opt/etc/ndm/ifstatechanged.d/100-mors-vpn
+		rm_file /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn
 
 		rm_file /opt/etc/ndm/fs.d/15-mors-start.sh
 		rm_file /opt/etc/cron.5mins/check_vpn
@@ -414,10 +418,10 @@ rm_previous_version_files() {
 	# текущие, создадутся в cmd_install позже
 	rm_file /opt/etc/ndm/ifcreated.d/mors-iface-add
 	rm_file /opt/etc/ndm/ifdestroyed.d/mors-iface-del
-	rm_file /opt/etc/ndm/iflayerchanged.d/mors-ips-reset
 	rm_file /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
-	rm_file /opt/etc/ndm/iflayerchanged.d/100-unblock-vpn
+	# Миграционная очистка файлов версий до KeeneticOS 5.
 	rm_file /opt/etc/ndm/ifstatechanged.d/100-mors-vpn
+	rm_file /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn
 	# исторический
 	rm_file /opt/etc/ndm/wan.d/internet-up
 
@@ -512,6 +516,7 @@ cmd_install(){
 #	Если режим обновления, то не спрашиваем про выбор соединения,
 #	а просто берем его из файла конфигурации Морса
 	update_mode=${1:-false}
+	setup_require_supported_os || return 1
 
 	log_warning 'Установка пакета МОРС начата...'
 
@@ -542,9 +547,8 @@ cmd_install(){
 	cat /dev/null > "${INSTALL_LOG}"
 
 	[ -d "/opt/etc/ndm/iflayerchanged.d" ] || mkdir -p /opt/etc/ndm/iflayerchanged.d
-	hook_dir=$(get_hook_dir); home_dir=/opt/apps/mors
-	ln -sf "${home_dir}/etc/ndm/${hook_dir}/100-mors-vpn" "/opt/etc/ndm/${hook_dir}/100-mors-vpn"
-	ln -sf "${home_dir}/etc/ndm/iflayerchanged.d/mors-ips-reset" "/opt/etc/ndm/iflayerchanged.d/mors-ips-reset"
+	home_dir=/opt/apps/mors
+	ln -sf "${home_dir}/etc/ndm/iflayerchanged.d/100-mors-vpn" "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn"
 	ln -sf "${home_dir}/etc/ndm/ifcreated.d/mors-iface-add" "/opt/etc/ndm/ifcreated.d/mors-iface-add"
 	ln -sf "${home_dir}/etc/ndm/ifdestroyed.d/mors-iface-del" "/opt/etc/ndm/ifdestroyed.d/mors-iface-del"
 

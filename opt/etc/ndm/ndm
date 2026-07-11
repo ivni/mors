@@ -43,46 +43,6 @@ ip4() (/opt/sbin/ip -4 "$@")
 ip4tables() (/opt/sbin/iptables -C "$@" &>/dev/null || /opt/sbin/iptables -A "$@")
 iptab() (/opt/sbin/iptables "$@")
 get_gw4()([ "${1}" ] && /opt/sbin/ip addr show "${1}" | grep -Po "(?<=inet ).*(?=/)")
-is_os_4()([[ "$(version_os)" =~ 4.* ]])
-
-get_model() {
-	if [ -n "${1}" ]; then
-		local version_data="${1}"
-	else
-		local version_data=$(ndmc -c show version)
-	fi
-
-	echo "${version_data}" | grep -F 'model' | head -1 | cut -d: -f2 | xargs
-}
-
-get_version() {
-	if [ -n "${1}" ]; then
-		local version_data="${1}"
-	else
-		local version_data=$(ndmc -c show version)
-	fi
-
-	echo "${version_data}" | grep -F 'version' | grep -oE '[0-9][0-9\.]*[0-9]' | head -1
-}
-
-version_os() {
-	local versions_data=$(ndmc -c show version)
-
-	# пробуем использовать version только в блоке с ndw4
-	local version_ndw4=$(echo "${versions_data}" | grep -zoP '(?s)ndw4:.+?\n\n')
-	if [ -n "${version_ndw4}" ]; then
-		version_ndw4=$(get_version "${version_ndw4}")
-		if [ -n "${version_ndw4}" ]; then
-			echo "${version_ndw4}"
-			return
-		fi
-	fi
-
-	# иначе любой
-	echo $(get_version "${versions_data}")
-}
-
-
 #как пример гостевая сеть br3, которой необходимо обеспечить доступ к VPN
 inface_cli()(get_config_value "INFACE_CLI")
 inface_ent()(get_config_value "INFACE_ENT")
@@ -112,17 +72,8 @@ is_ppe_enabled() {
 		return
 	fi
 
-	local param
-	if ! is_os_below_4_2 ; then
-		# no: yes
-		# "no": true,
-		param='no'
-	elif is_os_4; then
-		# "enabled": false,
-		param='enable'
-	else
-		param='false'
-	fi
+	# KeeneticOS 5: выключенное ускорение обозначается полем "no".
+	local param='no'
 
 	! curl -s '127.0.0.1:79/rci/show/rc/ppe' | grep -F "${engine}" -C1 | grep -qF "${param}"
 }
