@@ -2,7 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-entware_dir="${ENTWARE_DIR:-${repo_root}/.qa/entware}"
+# Keep the buildroot outside the package source. package/mors is a symlink to
+# repo_root, so nesting Entware below it creates a recursive filesystem loop.
+entware_dir="${ENTWARE_DIR:-${repo_root}.entware-build}"
 entware_repo="${ENTWARE_REPO_URL:-https://github.com/Entware/Entware.git}"
 entware_config="${ENTWARE_CONFIG:-configs/aarch64-3.10.config}"
 jobs="${JOBS:-$(nproc)}"
@@ -61,6 +63,7 @@ else
 fi
 
 make defconfig
+make -j"${jobs}" tools/go-src/compile || make tools/go-src/compile V=sc
 make -j"${jobs}" package/mors/compile || make package/mors/compile V=sc
 
 mkdir -p "${repo_root}/packages"
