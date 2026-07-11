@@ -84,6 +84,9 @@ Use the original Kvas repository and wiki only as historical/reference material 
 
 ## Change Guidelines
 
+- Treat inherited Kvas code and design decisions as historical input, not as an architectural authority. Mors is a fork of a third-party project, so existing behavior may contain accidental complexity, defects, or compromises that should not be preserved merely because they already exist.
+- When a task exposes a flawed architecture, unsafe coupling, duplicated responsibility, or another structural weakness, call it out explicitly, explain the practical consequences, and propose the most correct maintainable implementation. Do not silently reproduce or work around a known design defect.
+- Prefer sound architecture, correctness, testability, and long-term quality over the fastest possible closure of the immediate task. If the proper solution materially expands the requested scope, present the recommended design and tradeoffs and obtain direction before making that broader change.
 - Keep changes narrowly scoped. This package touches DNS, firewall, routing, and VPN state on user routers.
 - When adding or changing a CLI command:
   - update `opt/bin/mors` dispatch logic;
