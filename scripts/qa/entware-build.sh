@@ -36,8 +36,12 @@ else
 	printf '\nCONFIG_PACKAGE_mors=m\n' >> .config
 fi
 
-make defconfig
-make -j"${jobs}" package/mors/compile || make package/mors/compile V=sc
+# Current Entware still declares Python 2.7 for the unrelated node_legacy
+# package. Ubuntu 24.04 no longer ships it; Mors does not build node_legacy.
+# FORCE=1 bypasses that global host-prerequisite gate without selecting or
+# compiling any additional package.
+make FORCE=1 defconfig
+make FORCE=1 -j"${jobs}" package/mors/compile || make FORCE=1 package/mors/compile V=sc
 
 mkdir -p "${repo_root}/packages"
 find bin/targets -type f -name 'mors_*_all.ipk' -exec cp -f {} "${repo_root}/packages/" \;
