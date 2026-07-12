@@ -4,7 +4,7 @@ Mors использует многоуровневый QA pipeline: быстры
 
 ## Быстрый QA
 
-`.github/workflows/qa.yml` запускается на pull request, push в `main` и вручную.
+`.github/workflows/qa.yml` запускается на pull request, push в `main`, вручную и как обязательный reusable gate из release workflow.
 
 Проверки:
 
@@ -13,6 +13,7 @@ Mors использует многоуровневый QA pipeline: быстры
 - CRLF в tracked text-файлах;
 - `bash -n` для runtime-скриптов;
 - ShellCheck на уровне error с allowlist для текущих legacy-находок;
+- actionlint для всех GitHub Actions workflows с проверенным pinned binary;
 - BATS-тесты из `tests/`.
 
 Локальный запуск на Linux:
@@ -24,7 +25,9 @@ bats tests
 
 ## Сборка Пакета
 
-`.github/workflows/package.yml` запускается вручную и по тегам `v*`. Workflow готовит Entware buildroot, подключает этот репозиторий как `package/mors`, явно собирает host `opkg`, проверяет порядок `1.2.0 < 1.3.0~beta3 < 1.3.0` с изолированной пустой host-конфигурацией, собирает `.ipk` и публикует `packages/mors_*_all.ipk` как artifact. Для beta дополнительно проверяется точное имя `mors_1.3.0~beta3-1_all.ipk`.
+`.github/workflows/package.yml` запускается вручную или как обязательный reusable gate из release workflow. Push тега намеренно не запускает сборку: release tag создаётся только после успешного кандидата.
+
+Workflow готовит Entware buildroot, подключает этот репозиторий как `package/mors`, явно собирает host `opkg`, с изолированной пустой host-конфигурацией проверяет, что prerelease-версия сортируется ниже соответствующей стабильной версии, собирает `.ipk` и публикует `packages/mors_*_all.ipk` как artifact. Ожидаемое имя вычисляется из `PKG_VERSION` и `PKG_RELEASE`; отдельной жёстко заданной копии версии в build-скрипте нет.
 
 Локальный запуск на Linux:
 
@@ -38,6 +41,27 @@ bash scripts/qa/entware-build.sh
 - `ENTWARE_REPO_URL` - URL репозитория Entware;
 - `ENTWARE_CONFIG` - целевой config, по умолчанию `configs/aarch64-3.10.config`;
 - `JOBS` - число параллельных make-задач.
+
+## Release Gate
+
+`.github/workflows/release.yml` запускается только вручную на выбранном commit/branch и требует:
+
+- tag, точно соответствующий `PKG_VERSION` (`~` в версии преобразуется в `-` в tag);
+- русский заголовок и release notes;
+- явное подтверждение `publish-mors`;
+- выбор prerelease/stable.
+
+Workflow на одном `github.sha` выполняет:
+
+1. Проверку соответствия tag, `Makefile` и первой записи `HISTORY.md`.
+2. Полный reusable `qa.yml` gate.
+3. Полный reusable `package.yml` gate.
+4. Проверку единственного `.ipk`: имя, `debian-binary`, control metadata, обязательные runtime-файлы и SHA-256.
+5. Только после успеха всех gates — создание аннотированного неизменяемого tag и GitHub Release. Если публикация Release оборвалась уже после tag push, повторный workflow может использовать tag только при точном совпадении SHA; tag никогда не перемещается.
+
+Имя upload asset заранее нормализуется так же, как GitHub (`~` заменяется на `.`); внутренняя control-версия сохраняет `~`. Секция с именем файла, control version, размером и SHA-256 добавляется к release notes автоматически.
+
+Для проверки кандидата без tag/release запускайте `package.yml` вручную. Не создавайте tag вручную «для запуска сборки»: это нарушает связь между проверенным SHA и опубликованным релизом.
 
 ## Router Smoke
 

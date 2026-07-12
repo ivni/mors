@@ -21,3 +21,6 @@ bash scripts/qa/shell-syntax.sh
 
 echo "== shellcheck =="
 bash scripts/qa/shellcheck.sh
+
+echo "== actionlint =="
+bash scripts/qa/actionlint.sh

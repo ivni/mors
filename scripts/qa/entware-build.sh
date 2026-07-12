@@ -2,6 +2,13 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+package_version="$(sed -n 's/^PKG_VERSION:=//p; /^PKG_VERSION:=/q' "${repo_root}/Makefile")"
+package_release="$(sed -n 's/^PKG_RELEASE:=//p; /^PKG_RELEASE:=/q' "${repo_root}/Makefile")"
+expected_package="mors_${package_version}-${package_release}_all.ipk"
+if [ -z "${package_version}" ] || [[ ! "${package_release}" =~ ^[1-9][0-9]*$ ]]; then
+	echo 'Makefile has no valid PKG_VERSION/PKG_RELEASE pair.' >&2
+	exit 1
+fi
 # Keep the buildroot outside the package source. package/mors is a symlink to
 # repo_root, so nesting Entware below it creates a recursive filesystem loop.
 entware_dir="${ENTWARE_DIR:-${repo_root}.entware-build}"
@@ -71,13 +78,13 @@ if [ -z "${host_opkg}" ] || [ ! -x "${host_opkg}" ]; then
 	echo 'Entware host opkg was not built.' >&2
 	exit 1
 fi
-bash "${repo_root}/scripts/qa/opkg-version-order.sh" "${host_opkg}"
+bash "${repo_root}/scripts/qa/opkg-version-order.sh" "${host_opkg}" "${package_version}"
 
 make -j"${jobs}" toolchain/install || make toolchain/install V=sc
 make -j"${jobs}" tools/go-src/compile || make tools/go-src/compile V=sc
 make -j"${jobs}" package/mors/compile || make package/mors/compile V=sc
 
-find bin/targets -type f -name 'mors_1.3.0~beta3-1_all.ipk' -print -quit | grep -q .
+find bin/targets -type f -name "${expected_package}" -print -quit | grep -q .
 mkdir -p "${repo_root}/packages"
 find bin/targets -type f -name 'mors_*_all.ipk' -exec cp -f {} "${repo_root}/packages/" \;
 

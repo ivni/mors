@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-opkg_bin="${1:?Usage: opkg-version-order.sh /path/to/host/opkg}"
+opkg_bin="${1:?Usage: opkg-version-order.sh /path/to/host/opkg VERSION}"
+package_version="${2:?Usage: opkg-version-order.sh /path/to/host/opkg VERSION}"
+stable_version="${package_version%%~*}"
 
-"${opkg_bin}" --conf /dev/null compare-versions 1.2.0 '<' '1.3.0~beta3'
-"${opkg_bin}" --conf /dev/null compare-versions '1.3.0~beta3' '<' 1.3.0
+if [ "${package_version}" = "${stable_version}" ]; then
+	"${opkg_bin}" --conf /dev/null compare-versions \
+		"${package_version}" '=' "${stable_version}"
+else
+	"${opkg_bin}" --conf /dev/null compare-versions \
+		"${package_version}" '<' "${stable_version}"
+fi
 
-printf '%s\n' 'opkg version order: 1.2.0 < 1.3.0~beta3 < 1.3.0'
+printf 'opkg version order: %s <= %s\n' "${package_version}" "${stable_version}"

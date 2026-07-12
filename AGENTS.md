@@ -48,7 +48,7 @@ Use the original Kvas repository and wiki only as historical/reference material 
 - `opt/etc/ndm/` - Keenetic NDM hooks for filesystem startup, interface lifecycle, netfilter refreshes, and WAN events.
 - `tests/` - router-independent BATS tests for CLI/help contracts and focused library behavior.
 - `scripts/qa/` - local/CI validation helpers for static checks, package layout, Entware builds, Xray compatibility, and guarded router smoke tests.
-- `.github/workflows/` - GitHub Actions workflows: `qa.yml` runs static/BATS/Xray checks, `package.yml` builds release artifacts, and `router-smoke.yml` is a manually confirmed test-router workflow.
+- `.github/workflows/` - GitHub Actions workflows: `qa.yml` runs reusable static/BATS/Xray checks, `package.yml` builds reusable release-candidate artifacts, `release.yml` gates tag/release creation on both workflows for the same SHA, and `router-smoke.yml` is a manually confirmed test-router workflow.
 - `ipk/` - prebuilt package artifacts. It may still contain historical `kvas_*` packages; do not treat them as current Mors releases and do not change them unless intentionally adding/replacing release artifacts.
 - `logs/` - captured build logs. Update only when recording a real build.
 
@@ -69,6 +69,10 @@ Use the original Kvas repository and wiki only as historical/reference material 
   - `gh repo view qzeleza/kvas --web` when checking the old upstream
 - GitHub wiki pages are backed by a Git repository. If Mors gets its own wiki, inspect `https://github.com/ivni/mors.wiki.git`; for historical Kvas documentation, inspect `https://github.com/qzeleza/kvas.wiki.git`.
 - Do not create issues, comments, releases, tags, or PRs unless the user explicitly asks for that remote mutation.
+- Publish releases only through `.github/workflows/release.yml` on the intended commit. Do not create or push a release tag before the reusable `qa.yml` and `package.yml` gates succeed for that exact SHA.
+- Treat every pushed release tag as immutable. Never move, overwrite, or silently reuse a failed tag; prepare a new version candidate instead.
+- Use `package.yml` with `workflow_dispatch` when only a candidate `.ipk` is needed. A pushed tag is not a package-build trigger and is not a substitute for the release workflow.
+- Before reporting a release complete, verify the GitHub Release is not a draft, has the intended prerelease/latest state, points to the gated SHA, and exposes exactly one checked `.ipk` whose digest matches the workflow output.
 
 ## Runtime Assumptions
 
@@ -134,7 +138,7 @@ bash scripts/qa/static.sh
 bats tests
 ```
 
-  `static.sh` checks package layout, secrets, line endings, shell syntax, and ShellCheck when it is installed. CI installs BATS and ShellCheck and runs both commands.
+  `static.sh` checks package layout, secrets, line endings, shell syntax, ShellCheck, and actionlint when the optional local tools are installed. CI installs BATS/ShellCheck, verifies a pinned actionlint binary, and runs both commands.
 - Full package compilation requires an Entware buildroot. The canonical build helper is:
 
 ```sh
@@ -146,6 +150,8 @@ bash scripts/qa/entware-build.sh
 ```sh
 make package/feeds/packages/mors/compile V=sc
 ```
+
+- A release request requires both fast QA and a complete Entware package build for the same commit before any tag is created. Use the manually confirmed `.github/workflows/release.yml`; do not infer that a missing router test stand prevents these host-only gates.
 
 - The legacy Docker/Jenkins path uses `builder/Dockerfile` and `builder/builder`, but review it before trusting it for releases.
 - `.github/workflows/router-smoke.yml` performs remote installation and router mutations. Trigger it only when the user explicitly requests a smoke run, the required secrets target an authorized test router, and the workflow confirmation is intentionally supplied.

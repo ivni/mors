@@ -1,0 +1,198 @@
+name: Release
+run-name: Release ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag matching PKG_VERSION, for example v1.3.0-beta4.
+        required: true
+        type: string
+      title:
+        description: Russian release title.
+        required: true
+        type: string
+      notes:
+        description: Russian release notes without the generated artifact section.
+        required: true
+        type: string
+      prerelease:
+        description: Publish as a GitHub prerelease.
+        required: true
+        default: true
+        type: boolean
+      confirm:
+        description: Type publish-mors to authorize tag and release creation.
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      package_version: ${{ steps.metadata.outputs.package_version }}
+    steps:
+      - name: Checkout candidate SHA
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Validate explicit authorization and metadata
+        id: metadata
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TITLE: ${{ inputs.title }}
+        run: |
+          if [ "${CONFIRM}" != publish-mors ]; then
+            echo 'Release confirmation must be publish-mors.' >&2
+            exit 1
+          fi
+          case "${RELEASE_TITLE}" in
+            *[![:space:]]*) ;;
+            *) echo 'Release title must not be empty.' >&2; exit 1 ;;
+          esac
+          case "${RELEASE_NOTES}" in
+            *[![:space:]]*) ;;
+            *) echo 'Release notes must not be empty.' >&2; exit 1 ;;
+          esac
+          package_version="$(bash scripts/qa/release-metadata.sh "${RELEASE_TAG}")"
+          printf 'package_version=%s\n' "${package_version}" >>"${GITHUB_OUTPUT}"
+
+      - name: Reject a conflicting remote tag or existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          remote_tag_commit="$(
+            git ls-remote origin "refs/tags/${RELEASE_TAG}^{}" | awk 'NR == 1 { print $1 }'
+          )"
+          remote_tag_object="$(
+            git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk 'NR == 1 { print $1 }'
+          )"
+          if [ -n "${remote_tag_object}" ] && [ -z "${remote_tag_commit}" ]; then
+            echo "Remote tag ${RELEASE_TAG} is not annotated and will not be reused." >&2
+            exit 1
+          fi
+          if [ -n "${remote_tag_commit}" ] && [ "${remote_tag_commit}" != "${GITHUB_SHA}" ]; then
+            echo "Remote tag ${RELEASE_TAG} points to another commit and will not be moved." >&2
+            exit 1
+          fi
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "GitHub Release ${RELEASE_TAG} already exists." >&2
+            exit 1
+          fi
+
+  qa:
+    name: Required QA gate
+    needs: validate
+    uses: ./.github/workflows/qa.yml
+
+  package:
+    name: Required package gate
+    needs: validate
+    uses: ./.github/workflows/package.yml
+
+  publish:
+    name: Create immutable tag and release
+    needs: [validate, qa, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Checkout the gated SHA
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Download gated package artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: mors-ipk
+          path: release-artifact
+
+      - name: Verify release artifact
+        id: artifact
+        env:
+          PACKAGE_VERSION: ${{ needs.validate.outputs.package_version }}
+        run: |
+          bash scripts/qa/verify-release-artifact.sh \
+            release-artifact "${PACKAGE_VERSION}" release-upload "${GITHUB_OUTPUT}"
+
+      - name: Compose release notes
+        env:
+          ASSET_NAME: ${{ steps.artifact.outputs.asset_name }}
+          CONTROL_VERSION: ${{ steps.artifact.outputs.control_version }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+          SHA256: ${{ steps.artifact.outputs.sha256 }}
+          SIZE: ${{ steps.artifact.outputs.size }}
+        run: |
+          printf '%s\n' "${RELEASE_NOTES}" >release-notes.md
+          {
+            printf '\n## Артефакт\n\n'
+            printf "Файл в GitHub Releases: \`%s\`\n\n" "${ASSET_NAME}"
+            printf "Версия пакета в control metadata: \`%s\`\n\n" "${CONTROL_VERSION}"
+            printf "Размер: \`%s\` байт\n\n" "${SIZE}"
+            printf "SHA-256: \`%s\`\n" "${SHA256}"
+          } >>release-notes.md
+
+      - name: Create annotated tag on the gated SHA
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TITLE: ${{ inputs.title }}
+        run: |
+          remote_tag_commit="$(
+            git ls-remote origin "refs/tags/${RELEASE_TAG}^{}" | awk 'NR == 1 { print $1 }'
+          )"
+          remote_tag_object="$(
+            git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk 'NR == 1 { print $1 }'
+          )"
+          if [ -n "${remote_tag_object}" ] && [ -z "${remote_tag_commit}" ]; then
+            echo "Remote tag ${RELEASE_TAG} is no longer annotated." >&2
+            exit 1
+          fi
+          if [ -n "${remote_tag_commit}" ]; then
+            if [ "${remote_tag_commit}" != "${GITHUB_SHA}" ]; then
+              echo "Remote tag ${RELEASE_TAG} changed after validation." >&2
+              exit 1
+            fi
+            echo "Reusing immutable tag ${RELEASE_TAG} on the gated SHA."
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git tag -a "${RELEASE_TAG}" "${GITHUB_SHA}" -m "${RELEASE_TITLE}"
+            git push origin "refs/tags/${RELEASE_TAG}"
+          fi
+
+      - name: Publish GitHub Release
+        env:
+          ASSET_PATH: ${{ steps.artifact.outputs.asset_path }}
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TITLE: ${{ inputs.title }}
+        run: |
+          release_flags=()
+          if [ "${PRERELEASE}" = true ]; then
+            release_flags+=(--prerelease)
+          else
+            release_flags+=(--latest)
+          fi
+          gh release create "${RELEASE_TAG}" "${ASSET_PATH}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title "${RELEASE_TITLE}" \
+            --notes-file release-notes.md \
+            "${release_flags[@]}"
