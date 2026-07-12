@@ -11,6 +11,10 @@ Primary project references:
 - Repository: `https://github.com/ivni/mors`
 - Local Git remote should normally point at `ivni/mors`.
 
+Local test infrastructure:
+
+- If present, read [`TEST_INFRASTRUCTURE.local.md`](TEST_INFRASTRUCTURE.local.md) before connecting to or mutating the disposable router. This machine-local file is intentionally ignored by Git and must not contain passwords or private keys.
+
 Normative design and architecture references:
 
 - `docs/cli-design-system.md` - required CLI terminology, state vocabulary, interaction, error, JSON, and safety contracts.
