@@ -1,0 +1,301 @@
+#!/bin/sh
+
+test_cold__journal_file() {
+	printf '%s/%s\n' "${MORS_COLD_JOURNAL_DIR}" "${1}"
+}
+
+test_cold__write_phase() {
+	local temporary
+	temporary="$(test_cold__journal_file phase).tmp.$$"
+	printf '%s\n' "${1}" >"${temporary}" || return 1
+	chmod 600 "${temporary}" 2>/dev/null || true
+	mv -f "${temporary}" "$(test_cold__journal_file phase)"
+}
+
+test_cold__service_running() {
+	case "${1}" in
+		adguard) [ -x "${ADGUARDHOME_DEMON}" ] && \
+			"${ADGUARDHOME_DEMON}" status 2>/dev/null | grep -qE 'alive|running' ;;
+		dnsmasq) [ -x "${DNSMASQ_DEMON}" ] && \
+			"${DNSMASQ_DEMON}" status 2>/dev/null | grep -qE 'alive|running' ;;
+		*) return 1 ;;
+	esac
+}
+
+test_cold__service_action() {
+	case "${1}" in
+		adguard) "${ADGUARDHOME_DEMON}" "${2}" >/dev/null 2>&1 ;;
+		dnsmasq) "${DNSMASQ_DEMON}" "${2}" >/dev/null 2>&1 ;;
+		*) return 1 ;;
+	esac
+}
+
+test_cold__address_file_valid() {
+	awk -F. '
+		NF != 4 { bad = 1; next }
+		{
+			for (i = 1; i <= 4; i++) {
+				if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) bad = 1
+			}
+		}
+		END { exit(bad ? 1 : 0) }
+	' "${1}" >/dev/null 2>&1
+}
+
+test_cold__entries_file_valid() {
+	awk -v set="${IPSET_TABLE_NAME}" '
+		function ipv4(value, parts, count, i) {
+			count = split(value, parts, ".")
+			if (count != 4) return 0
+			for (i = 1; i <= 4; i++) {
+				if (parts[i] !~ /^[0-9]+$/ || parts[i] < 0 || parts[i] > 255) return 0
+			}
+			return 1
+		}
+		NF == 0 { next }
+		$1 != "add" || $2 != set || !ipv4($3) { bad = 1 }
+		END { exit(bad ? 1 : 0) }
+	' "${1}" >/dev/null 2>&1
+}
+
+test_cold__dns_restart_probe() {
+	if test_cold__service_action "${MORS_TEST_DNS_BACKEND}" restart; then
+		test_probe__set working cold_dns_restarted \
+			'Активный DNS backend перезапущен для cold test.' '{"restarted":true}'
+		return 0
+	fi
+	test_probe__set error cold_dns_restart_failed \
+		'Не удалось перезапустить активный DNS backend.' '{"restarted":false}'
+	return 1
+}
+
+test_cold__record_generated_probe() {
+	if test_cold__record_generated; then
+		test_probe__set working cold_generated_recorded \
+			'Новые A-адреса добавлены в recovery scope.' '{"recorded":true}'
+		return 0
+	fi
+	test_probe__set error cold_journal_update_failed \
+		'Не удалось расширить recovery scope новыми A-адресами.' '{"recorded":false}'
+	return 1
+}
+
+test_cold__journal_valid() {
+	local name backend service_state phase
+	[ -d "${MORS_COLD_JOURNAL_DIR}" ] || return 1
+	for name in affected generated entries.restore backend service-state phase; do
+		[ -r "$(test_cold__journal_file "${name}")" ] || return 1
+	done
+	backend=$(runtime_lock__read "$(test_cold__journal_file backend)")
+	service_state=$(runtime_lock__read "$(test_cold__journal_file service-state)")
+	phase=$(runtime_lock__read "$(test_cold__journal_file phase)")
+	case "${backend}" in dnsmasq|adguard) ;; *) return 1 ;; esac
+	case "${service_state}" in running|stopped) ;; *) return 1 ;; esac
+	case "${phase}" in
+		snapshotted|mutating|entries_removed|dns_restarted|refill_confirmed|e2e_confirmed|restoring|restore_failed|restored) ;;
+		*) return 1 ;;
+	esac
+	[ -s "$(test_cold__journal_file affected)" ] || return 1
+	test_cold__address_file_valid "$(test_cold__journal_file affected)" || return 1
+	[ ! -s "$(test_cold__journal_file generated)" ] || \
+		test_cold__address_file_valid "$(test_cold__journal_file generated)" || return 1
+	test_cold__entries_file_valid "$(test_cold__journal_file entries.restore)"
+}
+
+test_cold__create_journal() {
+	local parent temporary
+	parent=${MORS_COLD_JOURNAL_DIR%/*}
+	temporary="${MORS_COLD_JOURNAL_DIR}.tmp.$$"
+	mkdir -p "${parent}" || return 1
+	rm -rf "${temporary}"
+	(umask 077; mkdir "${temporary}") || return 1
+	: >"${temporary}/entries.restore"
+	: >"${temporary}/generated"
+	if ! "${MORS_TEST_IPSET}" save "${IPSET_TABLE_NAME}" \
+		>"${temporary}/ipset.save" 2>/dev/null; then
+		rm -rf "${temporary}"
+		return 1
+	fi
+	awk -v set="${IPSET_TABLE_NAME}" '
+			NR == FNR { affected[$1] = 1; next }
+			$1 == "add" && $2 == set && ($3 in affected) { print }
+		' "${MORS_TEST_DNS_FILE}" "${temporary}/ipset.save" \
+		>"${temporary}/entries.restore" || {
+		rm -rf "${temporary}"
+		return 1
+	}
+	rm -f "${temporary}/ipset.save"
+	cp "${MORS_TEST_DNS_FILE}" "${temporary}/affected"
+	printf '%s\n' "${MORS_TEST_DNS_BACKEND}" >"${temporary}/backend"
+	if test_cold__service_running "${MORS_TEST_DNS_BACKEND}"; then
+		printf '%s\n' running >"${temporary}/service-state"
+	else
+		printf '%s\n' stopped >"${temporary}/service-state"
+	fi
+	printf '%s\n' snapshotted >"${temporary}/phase"
+	chmod 600 "${temporary}"/* 2>/dev/null || true
+	mv "${temporary}" "${MORS_COLD_JOURNAL_DIR}" || {
+		rm -rf "${temporary}"
+		return 1
+	}
+}
+
+test_cold__record_generated() {
+	local generated temporary
+	[ -d "${MORS_COLD_JOURNAL_DIR}" ] || return 1
+	[ -r "${MORS_TEST_DNS_FILE}" ] || return 1
+	generated=$(test_cold__journal_file generated)
+	temporary="${generated}.tmp.$$"
+	awk '
+		$0 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && !seen[$0]++ { print }
+	' "${generated}" "${MORS_TEST_DNS_FILE}" >"${temporary}" || return 1
+	chmod 600 "${temporary}" 2>/dev/null || true
+	mv -f "${temporary}" "${generated}"
+}
+
+test_cold__affected_addresses() {
+	cat "$(test_cold__journal_file affected)" \
+		"$(test_cold__journal_file generated)" 2>/dev/null | sort -u
+}
+
+test_cold__was_in_snapshot() {
+	awk -v set="${IPSET_TABLE_NAME}" -v address="${1}" '
+		$1 == "add" && $2 == set && $3 == address { found = 1 }
+		END { exit(found ? 0 : 1) }
+	' "$(test_cold__journal_file entries.restore)"
+}
+
+test_cold__remove_affected() {
+	local address
+	test_cold__affected_addresses | while IFS= read -r address; do
+		"${MORS_TEST_IPSET}" del "${IPSET_TABLE_NAME}" "${address}" >/dev/null 2>&1 || true
+	done
+}
+
+test_cold__restore() {
+	local backend service_state failed=false address addresses_file
+	[ -d "${MORS_COLD_JOURNAL_DIR}" ] || return 0
+	test_cold__journal_valid || return 1
+	backend=$(runtime_lock__read "$(test_cold__journal_file backend)")
+	service_state=$(runtime_lock__read "$(test_cold__journal_file service-state)")
+	test_cold__write_phase restoring || return 1
+	addresses_file="$(test_cold__journal_file affected.all).$$"
+	test_cold__affected_addresses >"${addresses_file}" || return 1
+	chmod 600 "${addresses_file}" 2>/dev/null || true
+
+	# Remove values produced during the cold query, then restore exactly the
+	# affected entries (including saved timeout metadata when ipset provides it).
+	while IFS= read -r address; do
+		"${MORS_TEST_IPSET}" del "${IPSET_TABLE_NAME}" "${address}" >/dev/null 2>&1 || true
+	done <"${addresses_file}"
+	if [ -s "$(test_cold__journal_file entries.restore)" ]; then
+		"${MORS_TEST_IPSET}" restore -exist <"$(test_cold__journal_file entries.restore)" \
+			>/dev/null 2>&1 || failed=true
+	fi
+
+	if [ "${MORS_COLD_BOOT_RECOVERY:-false}" = true ]; then
+		: # Штатный init восстановит service state в системном порядке загрузки.
+	elif [ "${service_state}" = running ]; then
+		test_cold__service_running "${backend}" || \
+			test_cold__service_action "${backend}" start || failed=true
+	else
+		test_cold__service_running "${backend}" && \
+			test_cold__service_action "${backend}" stop || true
+	fi
+
+	while IFS= read -r address; do
+		if test_cold__was_in_snapshot "${address}"; then
+			"${MORS_TEST_IPSET}" test "${IPSET_TABLE_NAME}" "${address}" \
+				>/dev/null 2>&1 || failed=true
+		elif "${MORS_TEST_IPSET}" test "${IPSET_TABLE_NAME}" "${address}" \
+			>/dev/null 2>&1; then
+			failed=true
+		fi
+	done <"${addresses_file}"
+	if [ "${MORS_COLD_BOOT_RECOVERY:-false}" != true ]; then
+		if [ "${service_state}" = running ]; then
+			test_cold__service_running "${backend}" || failed=true
+		elif test_cold__service_running "${backend}"; then
+			failed=true
+		fi
+	fi
+
+	if [ "${failed}" = true ]; then
+		rm -f "${addresses_file}"
+		test_cold__write_phase restore_failed >/dev/null 2>&1 || true
+		return 1
+	fi
+	rm -f "${addresses_file}"
+	test_cold__write_phase restored || return 1
+	rm -rf "${MORS_COLD_JOURNAL_DIR}"
+}
+
+test_cold__recover() {
+	local acquired=false result
+	[ -d "${MORS_COLD_JOURNAL_DIR}" ] || return 0
+	MORS_ALLOW_COLD_RECOVERY=true; export MORS_ALLOW_COLD_RECOVERY
+	if ! runtime_mutation_lock__is_reentrant; then
+		runtime_mutation_lock__acquire 'mors test cold recover' || {
+			unset MORS_ALLOW_COLD_RECOVERY
+			return 1
+		}
+		acquired=true
+	fi
+	test_cold__restore
+	result=$?
+	[ "${acquired}" = true ] && runtime_mutation_lock__release >/dev/null 2>&1 || true
+	unset MORS_ALLOW_COLD_RECOVERY
+	return "${result}"
+}
+
+test_cold__run() {
+	local result=0
+	runtime_mutation_lock__acquire 'mors test cold' || return $?
+	runtime_lock__clear_cold_cancel
+	if ! test_cold__create_journal; then
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	fi
+	runtime_lock__cold_cancelled && result=3
+	test_cold__write_phase mutating || result=1
+	[ "${result}" -eq 0 ] && test_cold__remove_affected
+	runtime_lock__cold_cancelled && result=3
+	if [ "${result}" -eq 0 ]; then
+		test_cold__write_phase entries_removed || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		test__stage cold_dns_restart true true test_cold__dns_restart_probe || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		test_cold__write_phase dns_restarted || result=1
+	fi
+	if runtime_lock__cold_cancelled; then
+		result=3
+	fi
+	if [ "${result}" -eq 0 ]; then
+		test__stage cold_dns_a true true test_probe__dns_a || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		test__stage cold_recovery_scope true true test_cold__record_generated_probe || result=1
+	fi
+	runtime_lock__cold_cancelled && result=3
+	if [ "${result}" -eq 0 ]; then
+		test__stage cold_ipset_population true true test_probe__ipset_population || result=1
+	fi
+	runtime_lock__cold_cancelled && result=3
+	if [ "${result}" -eq 0 ]; then
+		test_cold__write_phase refill_confirmed || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		test__cold_e2e || result=1
+	fi
+	runtime_lock__cold_cancelled && result=3
+	[ "${result}" -eq 0 ] && test_cold__write_phase e2e_confirmed || true
+	test_cold__record_generated >/dev/null 2>&1 || true
+	if ! test_cold__restore; then
+		result=2
+	fi
+	runtime_lock__clear_cold_cancel
+	runtime_mutation_lock__release >/dev/null 2>&1 || [ "${result}" -ne 0 ] || result=2
+	return "${result}"
+}

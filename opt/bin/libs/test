@@ -1,0 +1,820 @@
+#!/bin/sh
+
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+. "${MORS_LIB_DIR}/runtime_lock"
+. "${MORS_LIB_DIR}/test_result"
+. "${MORS_LIB_DIR}/test_probe"
+. "${MORS_LIB_DIR}/test_tunnel"
+. "${MORS_LIB_DIR}/test_cold"
+
+test__stage() {
+	local id="${1}" required="${2}" blocks_cold="${3}" function_name="${4}"
+	local started finished result
+	shift 4
+	case "${id}" in
+		configuration|dependencies) ;;
+		*)
+			if [ "$(test_probe__remaining)" -le 0 ]; then
+				test_probe__set not_checked budget_exhausted \
+					'Этап не начат: исчерпан общий бюджет времени.' \
+					'{"started":false}'
+				test_result__add "${id}" "${MORS_PROBE_STATUS}" "${MORS_PROBE_REASON}" \
+					"${MORS_PROBE_MESSAGE}" "${required}" "${blocks_cold}" 0 0 \
+					"${MORS_PROBE_EVIDENCE}"
+				return 1
+			fi
+			;;
+	esac
+	test__progress "${id}"
+	started=$(test_result__now_ms)
+	"${function_name}" "$@"
+	result=$?
+	case "${MORS_PROBE_REASON}" in
+		mors_path_not_observed) blocks_cold=false ;;
+	esac
+	finished=$(test_result__now_ms)
+	test_result__add "${id}" "${MORS_PROBE_STATUS}" "${MORS_PROBE_REASON}" \
+		"${MORS_PROBE_MESSAGE}" "${required}" "${blocks_cold}" \
+		$((finished - started)) "${MORS_TEST_HTTP_ATTEMPTS:-1}" "${MORS_PROBE_EVIDENCE:-{}}"
+	unset MORS_TEST_HTTP_ATTEMPTS
+	return "${result}"
+}
+
+test__progress() {
+	[ "${MORS_TEST_JSON:-false}" = false ] && [ -t 1 ] || return 0
+	printf '\rПроверка: %-48s' "${1}"
+}
+
+test__progress_clear() {
+	[ "${MORS_TEST_JSON:-false}" = false ] && [ -t 1 ] || return 0
+	printf '\r%68s\r' ' '
+}
+
+test__blocked() {
+	test_result__add "${1}" not_checked dependency_failed \
+		"Этап не выполнен: prerequisite завершился неуспешно." \
+		"${2:-true}" "${3:-true}" 0 0 '{"blocked":true}'
+}
+
+test__ordinary_request() {
+	local url counter_before counter_after local_port request_ok=false
+	MORS_TEST_MORS_UNPROVEN=false
+	url=$(test_tunnel__target_url "${MORS_TEST_TARGET}") || {
+		test_probe__set error target_invalid 'Контрольная HTTPS-цель не поддерживается.'
+		return 1
+	}
+	local_port=$((40000 + ($$ % 10000)))
+	MORS_TEST_LOCAL_PORT=${local_port}; export MORS_TEST_LOCAL_PORT
+	counter_before=$(test_probe__mors_counter)
+	if test_probe__http_ipv4 "${url}" plain; then request_ok=true; fi
+	counter_after=$(test_probe__mors_counter)
+	if [ "${request_ok}" = true ] && \
+		test_probe__flow_has_mors_evidence "${local_port}" "${counter_before}" "${counter_after}"; then
+		MORS_TEST_MORS_EXIT=${MORS_TEST_HTTP_VALUE}; unset MORS_TEST_LOCAL_PORT
+		test_probe__set working mors_request_ok 'HTTPS-flow подтверждён через правила Mors.' \
+			'{"request_ok":true,"counter_correlated":true,"conntrack_correlated":true}'
+		return 0
+	fi
+	if [ "${request_ok}" = false ] && test__activate_fallback_target; then
+		url=$(test_tunnel__target_url "${MORS_TEST_TARGET}")
+		local_port=$((local_port + 1))
+		MORS_TEST_LOCAL_PORT=${local_port}; export MORS_TEST_LOCAL_PORT
+		counter_before=$(test_probe__mors_counter)
+		request_ok=false
+		if test_probe__http_ipv4 "${url}" plain; then request_ok=true; fi
+		counter_after=$(test_probe__mors_counter)
+		if [ "${request_ok}" = true ] && \
+			test_probe__flow_has_mors_evidence "${local_port}" "${counter_before}" "${counter_after}"; then
+			MORS_TEST_MORS_EXIT=${MORS_TEST_HTTP_VALUE}; unset MORS_TEST_LOCAL_PORT
+			test_probe__set working mors_request_ok_fallback \
+				'HTTPS-flow подтверждён через Mors на резервной цели.' \
+				'{"request_ok":true,"fallback":true,"counter_correlated":true,"conntrack_correlated":true}'
+			return 0
+		fi
+	fi
+	unset MORS_TEST_LOCAL_PORT
+	MORS_TEST_MORS_EXIT=''
+	MORS_TEST_MORS_UNPROVEN=true
+	if [ "${request_ok}" = true ]; then
+		test_probe__set not_checked mors_path_not_observed \
+			'Router-originated HTTPS-flow не подтверждён в клиентской цепочке Mors.' \
+			'{"request_ok":true,"counter_correlated":false,"conntrack_correlated":false}'
+	else
+		test_probe__set not_checked mors_path_not_observed \
+			'Router-originated HTTPS-flow не дал доказательства клиентской цепочки Mors.' \
+			'{"request_ok":false,"counter_correlated":false,"conntrack_correlated":false}'
+	fi
+	return 1
+}
+
+test__forced_request() {
+	if test_tunnel__forced_request; then
+		MORS_TEST_FORCED_EXIT=${MORS_TEST_HTTP_VALUE}
+		test_probe__set working forced_tunnel_ok 'Принудительный HTTPS-запрос через тоннель успешен.' \
+			'{"request_ok":true}'
+		return 0
+	fi
+	if test__activate_fallback_target; then
+		# Both compared values must come from the same endpoint.
+		test__ordinary_request >/dev/null 2>&1 || true
+		if test_tunnel__forced_request; then
+			MORS_TEST_FORCED_EXIT=${MORS_TEST_HTTP_VALUE}
+			test_probe__set working forced_tunnel_ok_fallback \
+				'Принудительный запрос успешен на резервной контрольной цели.' \
+				'{"request_ok":true,"fallback":true}'
+			return 0
+		fi
+	fi
+	MORS_TEST_FORCED_EXIT=''
+	test_probe__set not_checked forced_tunnel_failed 'Принудительный запрос через тоннель не выполнен.' \
+		'{"request_ok":false}'
+	return 1
+}
+
+test__wan_request() {
+	if test_tunnel__wan_request; then
+		MORS_TEST_WAN_EXIT=${MORS_TEST_HTTP_VALUE}
+		test_probe__set working wan_evidence_available 'Контрольный WAN-запрос успешен.' \
+			'{"available":true}'
+		return 0
+	fi
+	MORS_TEST_WAN_EXIT=''
+	test_probe__set not_checked wan_evidence_unavailable \
+		'WAN evidence недоступно; активный тракт проверяется сравнением с тоннелем.' \
+		'{"available":false}'
+	return 1
+}
+
+test__exit_comparison() {
+	if [ -n "${MORS_TEST_MORS_EXIT}" ] && [ -n "${MORS_TEST_FORCED_EXIT}" ]; then
+		if [ "${MORS_TEST_MORS_EXIT}" = "${MORS_TEST_FORCED_EXIT}" ]; then
+			[ -n "${MORS_TEST_WAN_EXIT}" ] || MORS_TEST_FORCE_DEGRADED=true
+			test_probe__set working exit_matches_tunnel \
+				'Внешний выход Mors совпадает с принудительным тоннелем.' \
+				'{"mors_matches_tunnel":true}'
+			return 0
+		fi
+		if test__activate_fallback_target; then
+			test__ordinary_request >/dev/null 2>&1 || true
+			if [ -n "${MORS_TEST_MORS_EXIT}" ]; then
+				if test_tunnel__forced_request; then
+					MORS_TEST_FORCED_EXIT=${MORS_TEST_HTTP_VALUE}
+					if [ "${MORS_TEST_MORS_EXIT}" = "${MORS_TEST_FORCED_EXIT}" ]; then
+						test_probe__set working exit_matches_tunnel_fallback \
+							'Внешний выход Mors совпал с тоннелем на резервной цели.' \
+							'{"mors_matches_tunnel":true,"fallback":true}'
+						return 0
+					fi
+				fi
+			fi
+		fi
+		if [ "${MORS_TEST_MORS_UNPROVEN:-false}" = true ]; then
+			test_probe__set degraded mors_path_not_observed \
+				'Резервная цель не дала коррелированного доказательства клиентской цепочки Mors.' \
+				'{"mors_path_observed":false,"fallback":true}'
+			return 1
+		fi
+		test_probe__set error tunnel_bypass_confirmed \
+			'Внешний выход Mors отличается от принудительного тоннеля.' \
+			'{"mors_matches_tunnel":false}'
+		return 1
+	fi
+	if [ -z "${MORS_TEST_MORS_EXIT}" ] && [ -n "${MORS_TEST_FORCED_EXIT}" ]; then
+		if [ "${MORS_TEST_MORS_UNPROVEN:-false}" = true ]; then
+			test_probe__set degraded mors_path_not_observed \
+				'Тоннель работает, но router-originated flow не доказывает клиентскую цепочку Mors.' \
+				'{"tunnel_ok":true,"mors_path_observed":false}'
+			return 1
+		fi
+		test_probe__set error mors_rules_failed \
+			'Тоннель работает, но обычный тракт Mors не проходит.'
+		return 1
+	fi
+	if [ -n "${MORS_TEST_WAN_EXIT}" ]; then
+		test_probe__set error tunnel_unavailable \
+			'WAN работает, но Mors и принудительный тоннель недоступны.'
+		return 1
+	fi
+	test_probe__set not_checked external_connectivity_unknown \
+		'Ни один внешний запрос не дал достаточного доказательства.'
+	return 1
+}
+
+test__dns_with_fallback() {
+	if test_probe__dns_a; then
+		return 0
+	fi
+	if [ "${MORS_TEST_TARGET}" = ifconfig.me ] && \
+		test_probe__target_in_list api.ipify.org; then
+		MORS_TEST_TARGET=api.ipify.org; export MORS_TEST_TARGET
+		if test_probe__dns_a; then
+			test_probe__set working dns_answer_received_fallback \
+				'DNS-ответ получен для резервной контрольной цели.' \
+				'{"has_a_records":true,"fallback":true}'
+			return 0
+		fi
+	fi
+	return 1
+}
+
+test__activate_fallback_target() {
+	[ "${MORS_TEST_DISABLE_FALLBACK:-false}" != true ] || return 1
+	[ "${MORS_TEST_TARGET}" = ifconfig.me ] || return 1
+	test_probe__target_in_list api.ipify.org || return 1
+	MORS_TEST_TARGET=api.ipify.org; export MORS_TEST_TARGET
+	test_probe__dns_a || return 1
+	test_probe__ipset_population
+}
+
+test__cold_e2e() {
+	local failed=false MORS_TEST_DISABLE_FALLBACK=true
+	test__stage cold_firewall_route true true test_probe__firewall_route || failed=true
+	test__stage cold_active_tunnel true true test_tunnel__active_status || failed=true
+	test__stage cold_mors_request true true test__ordinary_request || true
+	test__stage cold_forced_tunnel_request true true test__forced_request || true
+	if ! test__stage cold_exit_comparison true true test__exit_comparison; then
+		[ "${MORS_PROBE_REASON}" = mors_path_not_observed ] || failed=true
+	fi
+	[ "${failed}" = false ]
+}
+
+test__network_group() {
+	local dns_ok=false target_ok=false tunnel_ok=false dns_path_ok=false
+	local firewall_ok=false ordinary_attempted=false forced_attempted=false
+	MORS_TEST_CLIENT_READY=false
+	MORS_TEST_FORCE_DEGRADED=false
+	test__stage dns_backend true true test_probe__dns_backend || true
+	[ "${MORS_PROBE_STATUS}" = working ] && dns_ok=true
+	test__stage target true true test_probe__target || true
+	[ "${MORS_PROBE_STATUS}" = working ] && target_ok=true
+	test__stage active_tunnel true true test_tunnel__active_status || true
+	[ "${MORS_PROBE_STATUS}" = working ] && tunnel_ok=true
+
+	if [ "${dns_ok}" = true ] && [ "${target_ok}" = true ]; then
+		test__stage dns_a true true test__dns_with_fallback || true
+		if [ "${MORS_PROBE_STATUS}" = working ]; then
+			test__stage ipset_population true true test_probe__ipset_population || true
+			[ "${MORS_PROBE_STATUS}" = working ] && dns_path_ok=true
+		else
+			test__blocked ipset_population true true
+		fi
+	else
+		test__blocked dns_a true true
+		test__blocked ipset_population true true
+	fi
+
+	if [ "${tunnel_ok}" = true ]; then
+		test__stage firewall_route true true test_probe__firewall_route || true
+		[ "${MORS_PROBE_STATUS}" = working ] && firewall_ok=true
+	else
+		test__blocked firewall_route true true
+	fi
+
+	if [ "${MORS_TEST_MODE}" = client ]; then
+		if [ "${target_ok}" = true ] && [ "${tunnel_ok}" = true ] && \
+			[ "${dns_path_ok}" = true ] && [ "${firewall_ok}" = true ]; then
+			MORS_TEST_CLIENT_READY=true
+		else
+			test__blocked mors_request true false
+			test__blocked exit_comparison true false
+		fi
+		if [ "${target_ok}" = true ] && [ "${tunnel_ok}" = true ]; then
+			test__stage forced_tunnel_request true true test__forced_request || true
+		else
+			test__blocked forced_tunnel_request true true
+		fi
+		if [ "${target_ok}" = true ]; then
+			test__stage wan_request false false test__wan_request || true
+		else
+			test__blocked wan_request false false
+		fi
+	else
+		if [ "${target_ok}" = true ] && [ "${tunnel_ok}" = true ] && \
+			[ "${dns_path_ok}" = true ] && [ "${firewall_ok}" = true ]; then
+			test__stage mors_request true true test__ordinary_request || true
+			ordinary_attempted=true
+		else
+			test__blocked mors_request true true
+		fi
+		if [ "${target_ok}" = true ] && [ "${tunnel_ok}" = true ]; then
+			test__stage forced_tunnel_request true true test__forced_request || true
+			forced_attempted=true
+		else
+			test__blocked forced_tunnel_request true true
+		fi
+		if [ "${target_ok}" = true ]; then
+			test__stage wan_request false false test__wan_request || true
+		else
+			test__blocked wan_request false false
+		fi
+		if [ "${ordinary_attempted}" = true ] && [ "${forced_attempted}" = true ]; then
+			test__stage exit_comparison true true test__exit_comparison || true
+		else
+			test__blocked exit_comparison true true
+		fi
+	fi
+	if [ "${target_ok}" = true ]; then
+		test__stage ipv6_bypass_risk false false test_probe__ipv6_risk || true
+	else
+		test__blocked ipv6_bypass_risk false false
+	fi
+	export MORS_TEST_CLIENT_READY
+}
+
+test__base() {
+	local before after saved_stages=${MORS_TEST_WORK_DIR}/stages.before-network
+	test__stage configuration true true test_probe__configuration || return 3
+	test__stage dependencies true true test_probe__dependencies || return 2
+	test_tunnel__detect_active
+	cp "${MORS_TEST_STAGES_FILE}" "${saved_stages}"
+	before=$(test_probe__fingerprint)
+	test__network_group
+	if [ "$(test_probe__remaining)" -le 0 ]; then
+		test_result__add state_consistency not_checked budget_exhausted \
+			'Стабильность runtime state не проверена: исчерпан общий бюджет.' true true 0 1 \
+			'{"stable":null}'
+		return 0
+	fi
+	after=$(test_probe__fingerprint)
+	if [ "${before}" != "${after}" ]; then
+		cp "${saved_stages}" "${MORS_TEST_STAGES_FILE}"
+		test_tunnel__detect_active
+		before=$(test_probe__fingerprint)
+		test__network_group
+		if [ "$(test_probe__remaining)" -le 0 ]; then
+			test_result__add state_consistency not_checked budget_exhausted \
+				'Повторная проверка стабильности не завершена: исчерпан бюджет.' true true 0 2 \
+				'{"stable":null,"retried":true}'
+			return 0
+		fi
+		after=$(test_probe__fingerprint)
+		if [ "${before}" != "${after}" ]; then
+			test_result__add state_consistency not_checked state_changed_during_test \
+				'Runtime state повторно изменилось во время проверки.' true true 0 2 \
+				'{"stable":false}'
+		else
+			test_result__add state_consistency working state_stable_after_retry \
+				'Runtime state стабильно после повторной проверки.' true true 0 2 \
+				'{"stable":true,"retried":true}'
+		fi
+	else
+		test_result__add state_consistency working state_stable \
+			'Runtime state не изменилось во время проверки.' true true 0 1 \
+			'{"stable":true,"retried":false}'
+	fi
+}
+
+test__all() {
+	local inventory item id kind role desired item_reason status=working reason message
+	inventory=$(test_tunnel__inventory)
+	if [ -z "${inventory}" ]; then
+		test_result__add all_connections working inventory_complete \
+			'Дополнительных включённых соединений нет.' false false 0 0 '{}'
+		return
+	fi
+	printf '%s\n' "${inventory}" | while IFS= read -r item; do
+		[ -n "${item}" ] || continue
+		id=$(printf '%s' "${item}" | jq -r '.id')
+		kind=$(printf '%s' "${item}" | jq -r '.kind')
+		role=$(printf '%s' "${item}" | jq -r '.role')
+		if [ "${kind}" = inventory_error ]; then
+			item_reason=$(printf '%s' "${item}" | jq -r '.reason_code')
+			test_result__add_connection "${id}" inventory "${role}" not_checked \
+				"${item_reason}" 'Inventory Keenetic VPN недоступен.'
+			continue
+		fi
+		desired=$(printf '%s' "${item}" | jq -r '.desired')
+		[ "${role}" = active ] && continue
+		if [ "$(test_probe__remaining)" -le 0 ]; then
+			test_result__add_connection "${id}" "${kind}" "${role}" not_checked \
+				budget_exhausted 'Соединение не проверено: исчерпан общий бюджет.'
+			continue
+		fi
+		case "${desired}" in
+			false|disabled|down) continue ;;
+			unknown|null)
+				test_result__add_connection "${id}" "${kind}" "${role}" not_checked \
+					desired_state_unknown 'Desired state интерфейса неизвестен.'
+				continue
+				;;
+		esac
+		test__progress "connection_${kind}"
+		if test_tunnel__probe_inventory_item "${item}"; then
+			test_result__add_connection "${id}" "${kind}" "${role}" working \
+				connection_probe_ok 'Принудительный HTTPS probe успешен.'
+		else
+			test_result__add_connection "${id}" "${kind}" "${role}" error \
+				connection_probe_failed 'Принудительный HTTPS probe не выполнен.'
+		fi
+	done
+	if jq -e 'select(.status == "error")' "${MORS_TEST_CONNECTIONS_FILE}" >/dev/null 2>&1; then
+		status=degraded; reason=reserve_unavailable; message='Одно или несколько включённых соединений недоступны.'
+	elif jq -e 'select(.status == "not_checked")' "${MORS_TEST_CONNECTIONS_FILE}" >/dev/null 2>&1; then
+		status=degraded
+		if jq -e 'select(.status == "not_checked" and .reason_code != "budget_exhausted")' \
+			"${MORS_TEST_CONNECTIONS_FILE}" >/dev/null 2>&1; then
+			reason=inventory_incomplete; message='Не все соединения или inventory удалось проверить.'
+		else
+			reason=budget_exhausted; message='Не все соединения удалось проверить в заданный timeout.'
+		fi
+	else
+		reason=all_connections_working; message='Все включённые соединения прошли probe.'
+	fi
+	test_result__add all_connections "${status}" "${reason}" "${message}" false false 0 1 '{}'
+}
+
+test__known_clients() {
+	local url=${MORS_TEST_CLIENTS_URL:-http://127.0.0.1:79/rci/show/ip/hotspot} rci_timeout
+	rci_timeout=$(test_probe__attempt_timeout 3) || return 1
+	"${MORS_TEST_CURL}" -fsS --noproxy '*' --max-time "${rci_timeout}" "${url}" 2>/dev/null | jq -r '
+		.[] | [(.ip // .address // empty),
+			((.name // .hostname // "без имени") | gsub("[\\u0000-\\u001f\\u007f]"; "?"))] | @tsv
+	' 2>/dev/null
+}
+
+test__choose_client() {
+	local clients choice selected count client_count remaining
+	clients=$(test__known_clients)
+	[ -n "${clients}" ] || return 1
+	count=1
+	printf '%s\n' 'Выберите клиента:'
+	printf '%s\n' "${clients}" | while IFS="$(printf '\t')" read -r _ip name; do
+		printf '%s. %s\n' "${count}" "${name}"
+		count=$((count + 1))
+	done
+	printf '%s' 'Номер: '
+	remaining=$(test_probe__remaining)
+	[ "${remaining}" -gt 0 ] || return 1
+	IFS= read -t "${remaining}" -r choice || return 1
+	case "${choice}" in ''|*[!0-9]*) return 1 ;; esac
+	client_count=$(printf '%s\n' "${clients}" | wc -l | tr -d ' ')
+	[ "${choice}" -ge 1 ] && [ "${choice}" -le "${client_count}" ] || return 1
+	selected=$(printf '%s\n' "${clients}" | sed -n "${choice}p" | cut -f1)
+	test_probe__canonical_ipv4 "${selected}" || return 1
+	MORS_TEST_CLIENT=${selected}
+}
+
+test__client_classify_dns() {
+	local snapshot="${1}" router_ip="${2}" dns_lines
+	dns_lines=$(printf '%s\n' "${snapshot}" | grep -E ' dport=53( |$)' || true)
+	[ -n "${dns_lines}" ] || return 0
+	if [ -n "${router_ip}" ] && \
+		printf '%s\n' "${dns_lines}" | grep -Fq " dst=${router_ip} "; then
+		MORS_TEST_CLIENT_DNS_ROUTER=true
+	fi
+	if [ -z "${router_ip}" ] || \
+		printf '%s\n' "${dns_lines}" | grep -Fv " dst=${router_ip} " | grep -q .; then
+		MORS_TEST_CLIENT_DNS_EXTERNAL=true
+	fi
+}
+
+test__client_route_observed() {
+	local snapshot="${1}" address
+	[ -r "${MORS_TEST_DNS_FILE:-}" ] || return 1
+	while IFS= read -r address; do
+		printf '%s\n' "${snapshot}" | grep -F " dst=${address} " | \
+			grep -Eq ' mark=(0xd1000|856064)( |$)' && return 0
+	done <"${MORS_TEST_DNS_FILE}"
+	return 1
+}
+
+test__client_observation() {
+	local router_ip
+	local observation_end now remaining snapshot route_observed=false
+	router_ip=$(get_router_ip 2>/dev/null)
+	[ "${MORS_TEST_JSON}" = true ] || printf '%s\n' \
+		"Откройте ${MORS_TEST_TARGET} на выбранном клиенте; наблюдение уже началось."
+	remaining=$(test_probe__remaining)
+	if [ "${remaining}" -le 0 ]; then
+		test_result__add client_dns not_checked budget_exhausted \
+			'Наблюдение клиента не начато: исчерпан общий бюджет.' false false 0 0 '{}'
+		test_result__add mors_request not_checked budget_exhausted \
+			'Путь клиента не проверен: исчерпан общий бюджет.' true false 0 0 '{}'
+		return 1
+	fi
+	[ "${remaining}" -gt 8 ] && remaining=8
+	observation_end=$(( $(test_probe__now_seconds) + remaining ))
+	MORS_TEST_CLIENT_DNS_ROUTER=false
+	MORS_TEST_CLIENT_DNS_EXTERNAL=false
+	while :; do
+		snapshot=$("${MORS_TEST_CONNTRACK}" -L -s "${MORS_TEST_CLIENT}" 2>/dev/null) || snapshot=''
+		test__client_classify_dns "${snapshot}" "${router_ip}"
+		if [ "${route_observed}" = false ] && test__client_route_observed "${snapshot}"; then
+			route_observed=true
+		fi
+		unset snapshot
+		now=$(test_probe__now_seconds)
+		[ "${now}" -lt "${observation_end}" ] || break
+		sleep 1
+	done
+	if [ "${MORS_TEST_CLIENT_DNS_EXTERNAL}" = true ]; then
+		test_result__add client_dns degraded client_external_dns_observed \
+			'Клиент использовал внешний DNS; возможен обход Mors.' false false 0 1 \
+			"{\"router_dns\":${MORS_TEST_CLIENT_DNS_ROUTER},\"external_dns\":true}"
+	elif [ "${MORS_TEST_CLIENT_DNS_ROUTER}" = true ]; then
+		test_result__add client_dns working client_router_dns_observed \
+			'Наблюдался DNS-запрос клиента к роутеру.' false false 0 1 \
+			'{"router_dns":true,"external_dns":false}'
+	else
+		test_result__add client_dns not_checked client_dns_not_observed \
+			'DNS-запрос клиента не наблюдался, возможно из-за cache.' false false 0 1 '{}'
+	fi
+	if [ "${route_observed}" = true ]; then
+		test_result__add mors_request working client_route_confirmed \
+			'Conntrack подтверждает путь клиента через Mors.' true false 0 1 \
+			'{"target_and_mark_correlated":true}'
+	else
+		test_result__add mors_request not_checked client_route_not_observed \
+			'Недостаточно conntrack evidence для пути клиента.' true false 0 1 \
+			'{"target_and_mark_correlated":false}'
+	fi
+}
+
+test__client_exit() {
+	local reported remaining
+	if [ "${MORS_TEST_JSON}" = true ] || [ ! -t 0 ]; then
+		test_result__add exit_comparison not_checked client_exit_ip_not_reported \
+			'Внешний IP клиента не был передан для сравнения.' false false 0 0 '{}'
+		MORS_TEST_FORCE_DEGRADED=true
+		return
+	fi
+	printf '%s' 'Введите внешний IPv4, показанный клиенту (пусто — пропустить): '
+	remaining=$(test_probe__remaining)
+	[ "${remaining}" -gt 0 ] && IFS= read -t "${remaining}" -r reported || reported=''
+	if [ -z "${reported}" ]; then
+		test_result__add exit_comparison not_checked client_exit_ip_not_reported \
+			'Внешний IP клиента не был передан для сравнения.' false false 0 0 '{}'
+		MORS_TEST_FORCE_DEGRADED=true
+	elif ! test_probe__valid_ipv4 "${reported}"; then
+		test_result__add exit_comparison not_checked client_exit_ip_invalid \
+			'Введено некорректное значение IPv4.' false false 0 1 '{}'
+		MORS_TEST_FORCE_DEGRADED=true
+	elif [ -z "${MORS_TEST_FORCED_EXIT:-}" ]; then
+		test_result__add exit_comparison not_checked forced_tunnel_failed \
+			'Выход клиента нельзя сравнить: нет tunnel evidence.' true false 0 1 '{}'
+		MORS_TEST_FORCE_DEGRADED=true
+	elif [ "${reported}" = "${MORS_TEST_FORCED_EXIT}" ]; then
+		test_result__add exit_comparison working client_exit_matches_tunnel \
+			'Внешний выход клиента совпадает с тоннелем.' true false 0 1 \
+			'{"matches_tunnel":true}'
+	else
+		test_result__add exit_comparison error client_exit_bypass \
+			'Внешний выход клиента отличается от тоннеля.' true false 0 1 \
+			'{"matches_tunnel":false}'
+	fi
+	reported=''
+}
+
+test__client_workflow() {
+	local before after
+	before=$(test_probe__fingerprint)
+	test__client_observation
+	test__client_exit
+	if [ "$(test_probe__remaining)" -le 0 ]; then
+		test_result__add client_state_consistency not_checked budget_exhausted \
+			'Стабильность state после client observation не проверена: исчерпан бюджет.' \
+			true false 0 1 '{"stable":null}'
+		return 0
+	fi
+	after=$(test_probe__fingerprint)
+	if [ "${before}" = "${after}" ]; then
+		test_result__add client_state_consistency working state_stable \
+			'Runtime state не изменилось во время client observation.' true false 0 1 \
+			'{"stable":true}'
+	else
+		test_result__add client_state_consistency not_checked state_changed_during_test \
+			'Runtime state изменилось во время client observation.' true false 0 1 \
+			'{"stable":false}'
+	fi
+}
+
+test__cleanup_handler() {
+	test_tunnel__cleanup
+	if runtime_mutation_lock__is_reentrant && [ -d "${MORS_COLD_JOURNAL_DIR}" ]; then
+		test_cold__record_generated >/dev/null 2>&1 || true
+		test_cold__restore >/dev/null 2>&1 || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+	fi
+	test_lock__release >/dev/null 2>&1 || true
+	test_result__cleanup
+}
+
+test__confirm() {
+	local answer remaining
+	printf '%s [y/N]: ' "${1}"
+	remaining=$(test_probe__remaining)
+	[ "${remaining}" -gt 0 ] || return 1
+	IFS= read -t "${remaining}" -r answer || return 1
+	case "${answer}" in y|Y|yes|YES|да|Да|ДА) return 0 ;; *) return 1 ;; esac
+}
+
+test__parse() {
+	MORS_TEST_MODE=default
+	MORS_TEST_JSON=false
+	MORS_TEST_VERBOSE=false
+	MORS_TEST_YES=false
+	MORS_TEST_TIMEOUT=''
+	MORS_TEST_RETRIES=1
+	MORS_TEST_RETRIES_EXPLICIT=false
+	MORS_TEST_CLIENT=''
+	MORS_TEST_CLIENT_INTERACTIVE=false
+	while [ "$#" -gt 0 ]; do
+		case "${1}" in
+			--json) MORS_TEST_JSON=true ;;
+			--verbose) MORS_TEST_VERBOSE=true ;;
+			--yes) MORS_TEST_YES=true ;;
+			--all) [ "${MORS_TEST_MODE}" = default ] || return 64; MORS_TEST_MODE=all ;;
+			--timeout)
+				shift; [ "$#" -gt 0 ] || return 64; MORS_TEST_TIMEOUT=${1}
+				;;
+			--retries)
+				shift; [ "$#" -gt 0 ] || return 64
+				MORS_TEST_RETRIES=${1}; MORS_TEST_RETRIES_EXPLICIT=true
+				;;
+			--client)
+				shift; [ "$#" -gt 0 ] || return 64
+				[ "${MORS_TEST_MODE}" = default ] || return 64
+				MORS_TEST_MODE=client; MORS_TEST_CLIENT=${1}
+				;;
+			client)
+				[ "${MORS_TEST_MODE}" = default ] || return 64
+				MORS_TEST_MODE=client; MORS_TEST_CLIENT_INTERACTIVE=true
+				;;
+			cold)
+				[ "${MORS_TEST_MODE}" = default ] || return 64
+				MORS_TEST_MODE=cold
+				;;
+			recover)
+				[ "${MORS_TEST_MODE}" = cold ] || return 64
+				MORS_TEST_MODE=cold_recover
+				;;
+			*) return 64 ;;
+		esac
+		shift
+	done
+	[ -n "${MORS_TEST_TIMEOUT}" ] || {
+		[ "${MORS_TEST_MODE}" = all ] && MORS_TEST_TIMEOUT=90 || MORS_TEST_TIMEOUT=30
+	}
+	case "${MORS_TEST_TIMEOUT}" in ''|*[!0-9]*) return 64 ;; esac
+	case "${MORS_TEST_RETRIES}" in ''|*[!0-9]*) return 64 ;; esac
+	[ "${MORS_TEST_TIMEOUT}" -ge 10 ] && [ "${MORS_TEST_TIMEOUT}" -le 300 ] || return 64
+	[ "${MORS_TEST_RETRIES}" -ge 0 ] && [ "${MORS_TEST_RETRIES}" -le 5 ] || return 64
+	if [ "${MORS_TEST_MODE}" = client ]; then
+		[ "${MORS_TEST_JSON}" = false ] || [ "${MORS_TEST_CLIENT_INTERACTIVE}" = false ] || return 64
+		[ "${MORS_TEST_CLIENT_INTERACTIVE}" = true ] || test_probe__canonical_ipv4 "${MORS_TEST_CLIENT}" || return 64
+	fi
+	case "${MORS_TEST_MODE}" in
+		cold|cold_recover)
+			[ "${MORS_TEST_JSON}" = false ] || [ "${MORS_TEST_YES}" = true ] || return 64
+			;;
+		*) [ "${MORS_TEST_YES}" = false ] || return 64 ;;
+	esac
+	[ "${MORS_TEST_MODE}" != cold_recover ] || \
+		[ "${MORS_TEST_RETRIES_EXPLICIT}" = false ] || return 64
+	[ "${MORS_TEST_MODE}" = cold_recover ] && MORS_TEST_RETRIES=0
+	export MORS_TEST_MODE MORS_TEST_JSON MORS_TEST_VERBOSE MORS_TEST_YES
+	export MORS_TEST_TIMEOUT MORS_TEST_RETRIES MORS_TEST_CLIENT
+}
+
+cmd_test_cli() {
+	local parse_status status result=0 has_blocking_failure=false
+	# Detect --json before full parsing so syntax failures preserve the JSON
+	# channel contract.
+	case " $* " in *' --json '*) MORS_TEST_JSON=true ;; *) MORS_TEST_JSON=false ;; esac
+	test__parse "$@"; parse_status=$?
+	if [ "${parse_status}" -ne 0 ]; then
+		if [ "${MORS_TEST_JSON}" = true ] && ! command -v jq >/dev/null 2>&1; then
+			printf '%s\n' '{"schema_version":1,"command":"test","mode":"default","status":"error","exit_code":64,"reason_code":"invalid_arguments","message":"Некорректные аргументы mors test.","timeout_seconds":0,"retries":0,"duration_ms":0,"active_connection":null,"stages":[],"connections":[],"client":null,"owner":null}'
+		else
+			test_result__early_error "${MORS_TEST_JSON}" error 64 invalid_arguments \
+				'Некорректные аргументы mors test.'
+		fi
+		return 64
+	fi
+	if ! command -v jq >/dev/null 2>&1; then
+		if [ "${MORS_TEST_JSON}" = true ]; then
+			printf '{"schema_version":1,"command":"test","mode":"%s","status":"error",' "${MORS_TEST_MODE}"
+			printf '"exit_code":2,"reason_code":"missing_dependency","message":"Отсутствует обязательная зависимость jq.",'
+			printf '"timeout_seconds":%s,"retries":%s,"duration_ms":0,' "${MORS_TEST_TIMEOUT}" "${MORS_TEST_RETRIES}"
+			printf '%s\n' '"active_connection":null,"stages":[],"connections":[],"client":null,"owner":null}'
+		else
+			printf '%s\n' 'Mors test: ОШИБКА' 'Причина: отсутствует обязательная зависимость jq.'
+		fi
+		return 2
+	fi
+	if ! test_lock__acquire "mors test ${MORS_TEST_MODE}"; then
+		test_result__early_error "${MORS_TEST_JSON}" not_checked 3 test_busy \
+			'Другая проверка Mors уже выполняется.' \
+			"$(runtime_lock__busy_owner_json "${MORS_TEST_LOCK_DIR}")"
+		return 3
+	fi
+	if ! test_result__init; then
+		test_lock__release >/dev/null 2>&1 || true
+		test_result__early_error "${MORS_TEST_JSON}" error 2 workspace_unavailable \
+			'Не удалось создать защищённое временное рабочее пространство.'
+		return 2
+	fi
+	trap 'test__cleanup_handler' 0
+	trap 'test__cleanup_handler; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
+	MORS_TEST_DEADLINE=$(( $(test_probe__now_seconds) + MORS_TEST_TIMEOUT )); export MORS_TEST_DEADLINE
+
+	if [ -d "${MORS_COLD_JOURNAL_DIR}" ] && [ "${MORS_TEST_MODE}" != cold_recover ]; then
+		test_result__add recovery error recovery_required \
+			'Обнаружена незавершённая cold-транзакция.' true true 0 0 '{}'
+		status=error
+	elif [ "${MORS_TEST_MODE}" = cold_recover ]; then
+		if [ ! -d "${MORS_COLD_JOURNAL_DIR}" ]; then
+			test_result__add recovery working recovery_not_required \
+				'Незавершённая cold-транзакция отсутствует.' true true 0 0 '{}'
+			status=working
+		else
+			if [ "${MORS_TEST_YES}" != true ]; then
+				[ "${MORS_TEST_JSON}" = true ] || printf '%s\n' \
+					'План: восстановить сохранённые ipset entries и исходное состояние DNS; journal будет удалён только после проверки.'
+				[ -t 0 ] && [ -t 1 ] && test__confirm \
+					'Восстановить состояние незавершённого cold test?' || {
+					test_result__add recovery not_checked confirmation_required \
+						'Восстановление не подтверждено.' true true 0 0 '{}'
+					status=not_checked
+				}
+			fi
+			if [ -z "${status:-}" ]; then
+				if test_cold__recover; then
+					test_result__add recovery working recovery_completed \
+						'Состояние cold-транзакции восстановлено.' true true 0 1 '{}'
+					status=working
+				else
+					test_result__add recovery error recovery_failed \
+						'Не удалось полностью восстановить cold-транзакцию.' true true 0 1 '{}'
+					status=error
+				fi
+			fi
+		fi
+	else
+		test__base
+		result=$?
+		if [ "${result}" -eq 3 ] || [ "${result}" -eq 2 ]; then
+			: # Unconfigured/missing dependency: no probes beyond the failed gate.
+		elif [ "${MORS_TEST_MODE}" = all ]; then
+			test__all
+		elif [ "${MORS_TEST_MODE}" = client ]; then
+			test__progress_clear
+			if [ "${MORS_TEST_CLIENT_READY}" != true ]; then
+				: # Baseline already recorded the blocked client stages.
+			elif [ "${MORS_TEST_CLIENT_INTERACTIVE}" = true ]; then
+				if ! test__choose_client; then
+					test_result__add client_selection not_checked client_not_selected \
+						'Клиент не выбран.' true false 0 0 '{}'
+					test_result__add mors_request not_checked client_not_selected \
+						'Путь клиента не проверен: клиент не выбран.' true false 0 0 '{}'
+					test_result__add exit_comparison not_checked client_not_selected \
+						'Выход клиента не сравнивался: клиент не выбран.' true false 0 0 '{}'
+				else
+					test__client_workflow
+				fi
+			else
+				test__client_workflow
+			fi
+		elif [ "${MORS_TEST_MODE}" = cold ]; then
+			test__progress_clear
+			if jq -e 'select(.blocks_cold == true and .status != "working")' \
+				"${MORS_TEST_STAGES_FILE}" >/dev/null 2>&1; then
+				has_blocking_failure=true
+				test_result__add cold not_checked baseline_blocks_cold \
+					'Cold test не начат: baseline содержит блокирующую проблему.' true true 0 0 '{}'
+			elif [ "${MORS_TEST_YES}" != true ] && \
+				{ [ ! -t 0 ] || [ ! -t 1 ] || ! test__confirm \
+				'Cold test временно удалит выбранные ipset entries и перезапустит DNS. Продолжить?'; }; then
+				test_result__add cold not_checked confirmation_required \
+					'Cold test не подтверждён.' true true 0 0 '{}'
+			elif [ "$(test_probe__remaining)" -le 0 ]; then
+				test_result__add cold not_checked budget_exhausted \
+					'Cold test не начат: после baseline исчерпан общий бюджет.' true true 0 0 '{}'
+			else
+				test_cold__run; result=$?
+				case "${result}" in
+					0) test_result__add cold working cold_completed \
+						'Cold test завершён, исходное состояние восстановлено.' true true 0 1 '{}' ;;
+					3) test_result__add cold not_checked interrupted_by_runtime_event \
+						'Cold test прерван runtime-событием; состояние восстановлено.' true true 0 1 '{}' ;;
+					2) test_result__add cold error recovery_failed \
+						'Cold test завершился с неполным восстановлением.' true true 0 1 '{}' ;;
+					*) test_result__add cold error cold_failed \
+						'Cold test не подтвердил повторное заполнение; состояние восстановлено.' true true 0 1 '{}' ;;
+				esac
+			fi
+		fi
+		status=$(test_result__aggregate)
+		if [ "${MORS_TEST_FORCE_DEGRADED:-false}" = true ] && [ "${status}" = not_checked ]; then
+			status=degraded
+		fi
+	fi
+
+	test__progress_clear
+	test_result__render "${status}"; result=$?
+	test_tunnel__cleanup
+	test_lock__release >/dev/null 2>&1 || true
+	test_result__cleanup
+	trap - 0 HUP INT TERM
+	return "${result}"
+}

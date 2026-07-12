@@ -37,6 +37,13 @@ PROXY_VLESS_PROTO=socks5
 DOMAIN_FOR_CHECK="https://ifconfig.me/ip"
 VLESS_SUPERVISOR_INIT=/opt/etc/init.d/S25mors-vless
 
+vless_runtime__supervisor_service() (
+	# The supervisor is long-lived. It must never inherit a transaction token
+	# owned by the CLI/setup process that starts it.
+	unset MORS_RUNTIME_LOCK_TOKEN MORS_RUNTIME_LOCK_DEPTH
+	"${VLESS_SUPERVISOR_INIT}" "${1}"
+)
+
 
 has_package_installed() {
 #-------------------------------------------------------------------------------
@@ -795,9 +802,9 @@ vless_domain__apply_generated() {
 	rm -f "${backup}"
 	if [ -f "${VLESS_SUPERVISOR_INIT}" ]; then
 		if [ "$(vless_store__enabled_count)" -gt 0 ] && [ "$(vless_store__is_paused)" = false ]; then
-			[ "${restart_runtime}" = true ] && "${VLESS_SUPERVISOR_INIT}" restart >/dev/null 2>&1 || true
+			[ "${restart_runtime}" = true ] && vless_runtime__supervisor_service restart >/dev/null 2>&1 || true
 		else
-			"${VLESS_SUPERVISOR_INIT}" stop >/dev/null 2>&1 || true
+			vless_runtime__supervisor_service stop >/dev/null 2>&1 || true
 		fi
 	fi
 	if vless_runtime__ensure >/dev/null 2>&1; then
@@ -836,9 +843,9 @@ vless_domain__restore_declared_runtime() {
 	fi
 	if [ -f "${VLESS_SUPERVISOR_INIT}" ]; then
 		if [ "$(vless_store__is_paused)" = false ] && [ "$(vless_store__enabled_count)" -gt 0 ]; then
-			[ "${restart_runtime}" = true ] && "${VLESS_SUPERVISOR_INIT}" restart >/dev/null 2>&1 || true
+			[ "${restart_runtime}" = true ] && vless_runtime__supervisor_service restart >/dev/null 2>&1 || true
 		else
-			"${VLESS_SUPERVISOR_INIT}" stop >/dev/null 2>&1 || true
+			vless_runtime__supervisor_service stop >/dev/null 2>&1 || true
 		fi
 	fi
 }

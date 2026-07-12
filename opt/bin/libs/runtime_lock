@@ -1,0 +1,219 @@
+#!/bin/sh
+
+# Shared locks for diagnostics and router-runtime mutations. Lock directories
+# are used because mkdir is atomic on the target filesystem.
+
+MORS_LOCK_ROOT=${MORS_LOCK_ROOT:-/opt/var/lock}
+MORS_TEST_LOCK_DIR=${MORS_TEST_LOCK_DIR:-${MORS_LOCK_ROOT}/mors-test.lock}
+MORS_RUNTIME_LOCK_DIR=${MORS_RUNTIME_LOCK_DIR:-${MORS_LOCK_ROOT}/mors-runtime.lock}
+MORS_RUNTIME_CANCEL_FILE=${MORS_RUNTIME_CANCEL_FILE:-/opt/var/run/mors/cancel-cold}
+MORS_COLD_JOURNAL_DIR=${MORS_COLD_JOURNAL_DIR:-/opt/etc/.mors/recovery/test-cold}
+
+runtime_lock__read() {
+	[ -f "${1}" ] && tr -d '\r\n' <"${1}"
+}
+
+runtime_lock__token() {
+	printf '%s-%s-%s' "$$" "$(date +%s 2>/dev/null || printf 0)" "${1}"
+}
+
+runtime_lock__process_start() {
+	[ -r "/proc/${1}/stat" ] || return 1
+	awk '{ print $22 }' "/proc/${1}/stat" 2>/dev/null
+}
+
+runtime_lock__owner_alive() {
+	local current_start
+	case "${1}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	kill -0 "${1}" 2>/dev/null || return 1
+	[ -n "${2:-}" ] || return 0
+	current_start=$(runtime_lock__process_start "${1}") || return 1
+	[ "${current_start}" = "${2}" ]
+}
+
+runtime_lock__remove_stale() {
+	local directory="${1}" owner owner_start
+	owner=$(runtime_lock__read "${directory}/pid")
+	if [ -z "${owner}" ]; then
+		# The mkdir winner may not have published metadata yet.
+		sleep 1
+		owner=$(runtime_lock__read "${directory}/pid")
+		# Do not remove a metadata-free directory immediately: the owner may have
+		# been descheduled between atomic mkdir and publishing its PID.
+		[ -n "${owner}" ] || return 1
+	fi
+	owner_start=$(runtime_lock__read "${directory}/owner_start")
+	if runtime_lock__owner_alive "${owner}" "${owner_start}"; then
+		return 1
+	fi
+	rm -f "${directory}/pid" "${directory}/owner_start" "${directory}/token" \
+		"${directory}/command" "${directory}/started_at"
+	rmdir "${directory}" 2>/dev/null
+}
+
+runtime_lock__acquire() {
+	local directory="${1}" domain="${2}" command_name="${3:-mors}"
+	local current_token stored_token token depth owner_start
+
+	case "${domain}" in
+		test) current_token=${MORS_TEST_LOCK_TOKEN:-}; depth=${MORS_TEST_LOCK_DEPTH:-0} ;;
+		runtime) current_token=${MORS_RUNTIME_LOCK_TOKEN:-}; depth=${MORS_RUNTIME_LOCK_DEPTH:-0} ;;
+		*) return 1 ;;
+	esac
+
+	if [ -n "${current_token}" ] && [ -d "${directory}" ]; then
+		stored_token=$(runtime_lock__read "${directory}/token")
+		if [ "${stored_token}" = "${current_token}" ]; then
+			depth=$((depth + 1))
+			case "${domain}" in
+				test) MORS_TEST_LOCK_DEPTH=${depth}; export MORS_TEST_LOCK_DEPTH ;;
+				runtime) MORS_RUNTIME_LOCK_DEPTH=${depth}; export MORS_RUNTIME_LOCK_DEPTH ;;
+			esac
+			return 0
+		fi
+	fi
+
+	if ! (umask 077; mkdir -p "${MORS_LOCK_ROOT}" 2>/dev/null && \
+		mkdir "${directory}" 2>/dev/null); then
+		runtime_lock__remove_stale "${directory}" || return 1
+		(umask 077; mkdir "${directory}" 2>/dev/null) || return 1
+	fi
+
+	token=$(runtime_lock__token "${domain}")
+	owner_start=$(runtime_lock__process_start "$$" 2>/dev/null || true)
+	if ! (umask 077
+		printf '%s\n' "$$" >"${directory}/pid" && \
+		printf '%s\n' "${owner_start}" >"${directory}/owner_start" && \
+		printf '%s\n' "${token}" >"${directory}/token" && \
+		printf '%s\n' "${command_name}" >"${directory}/command"); then
+		rm -f "${directory}/pid" "${directory}/owner_start" "${directory}/token" \
+			"${directory}/command" "${directory}/started_at"
+		rmdir "${directory}" 2>/dev/null || true
+		return 1
+	fi
+	date -u '+%Y-%m-%dT%H:%M:%SZ' >"${directory}/started_at" 2>/dev/null || \
+		printf '%s\n' unknown >"${directory}/started_at"
+
+	case "${domain}" in
+		test)
+			MORS_TEST_LOCK_TOKEN=${token}; MORS_TEST_LOCK_DEPTH=1
+			export MORS_TEST_LOCK_TOKEN MORS_TEST_LOCK_DEPTH
+			;;
+		runtime)
+			MORS_RUNTIME_LOCK_TOKEN=${token}; MORS_RUNTIME_LOCK_DEPTH=1
+			export MORS_RUNTIME_LOCK_TOKEN MORS_RUNTIME_LOCK_DEPTH
+			;;
+	esac
+}
+
+runtime_lock__release() {
+	local directory="${1}" domain="${2}" token stored_token depth owner
+	case "${domain}" in
+		test) token=${MORS_TEST_LOCK_TOKEN:-}; depth=${MORS_TEST_LOCK_DEPTH:-0} ;;
+		runtime) token=${MORS_RUNTIME_LOCK_TOKEN:-}; depth=${MORS_RUNTIME_LOCK_DEPTH:-0} ;;
+		*) return 1 ;;
+	esac
+	[ -n "${token}" ] || return 0
+	if [ "${depth}" -gt 1 ]; then
+		depth=$((depth - 1))
+		case "${domain}" in
+			test) MORS_TEST_LOCK_DEPTH=${depth}; export MORS_TEST_LOCK_DEPTH ;;
+			runtime) MORS_RUNTIME_LOCK_DEPTH=${depth}; export MORS_RUNTIME_LOCK_DEPTH ;;
+		esac
+		return 0
+	fi
+	stored_token=$(runtime_lock__read "${directory}/token")
+	[ "${stored_token}" = "${token}" ] || return 1
+	owner=$(runtime_lock__read "${directory}/pid")
+	if [ "${owner}" != "$$" ]; then
+		# A synchronous child may inherit a reentrant token. It must never remove
+		# the lock owned by its parent.
+		case "${domain}" in
+			test) unset MORS_TEST_LOCK_TOKEN MORS_TEST_LOCK_DEPTH ;;
+			runtime) unset MORS_RUNTIME_LOCK_TOKEN MORS_RUNTIME_LOCK_DEPTH ;;
+		esac
+		return 0
+	fi
+	rm -f "${directory}/pid" "${directory}/owner_start" "${directory}/token" \
+		"${directory}/command" "${directory}/started_at"
+	rmdir "${directory}" 2>/dev/null || return 1
+	case "${domain}" in
+		test) unset MORS_TEST_LOCK_TOKEN MORS_TEST_LOCK_DEPTH ;;
+		runtime) unset MORS_RUNTIME_LOCK_TOKEN MORS_RUNTIME_LOCK_DEPTH ;;
+	esac
+}
+
+test_lock__acquire() {
+	runtime_lock__acquire "${MORS_TEST_LOCK_DIR}" test "${1:-mors test}"
+}
+
+test_lock__release() {
+	runtime_lock__release "${MORS_TEST_LOCK_DIR}" test
+}
+
+runtime_mutation_lock__is_reentrant() {
+	local stored_token
+	[ -n "${MORS_RUNTIME_LOCK_TOKEN:-}" ] && \
+		[ -d "${MORS_RUNTIME_LOCK_DIR}" ] || return 1
+	stored_token=$(runtime_lock__read "${MORS_RUNTIME_LOCK_DIR}/token")
+	[ "${stored_token}" = "${MORS_RUNTIME_LOCK_TOKEN}" ]
+}
+
+runtime_mutation_lock__acquire() {
+	# A synchronous child of the current mutation transaction may need to run a
+	# hook while a cold journal exists (for example during DNS restart). It joins
+	# the existing token; unrelated mutators remain gated by the journal.
+	if runtime_mutation_lock__is_reentrant; then
+		runtime_lock__acquire "${MORS_RUNTIME_LOCK_DIR}" runtime "${1:-mors mutation}"
+		return $?
+	fi
+	# An unfinished cold transaction is a hard mutation gate. Recovery code sets
+	# MORS_ALLOW_COLD_RECOVERY while it owns the journal.
+	if [ -d "${MORS_COLD_JOURNAL_DIR}" ] && \
+		[ "${MORS_ALLOW_COLD_RECOVERY:-false}" != true ]; then
+		return 2
+	fi
+	runtime_lock__acquire "${MORS_RUNTIME_LOCK_DIR}" runtime "${1:-mors mutation}"
+}
+
+runtime_mutation_lock__release() {
+	runtime_lock__release "${MORS_RUNTIME_LOCK_DIR}" runtime
+}
+
+runtime_mutation_lock__run() {
+	local result
+	runtime_mutation_lock__acquire "${1}" || return $?
+	shift
+	"$@"
+	result=$?
+	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
+	return "${result}"
+}
+
+runtime_lock__busy_owner_json() {
+	local directory="${1}"
+	jq -nc \
+		--arg pid "$(runtime_lock__read "${directory}/pid")" \
+		--arg command "$(runtime_lock__read "${directory}/command")" \
+		--arg started_at "$(runtime_lock__read "${directory}/started_at")" \
+		'{pid: (if $pid == "" then null else $pid end), command: $command,
+		  started_at: (if $started_at == "" then null else $started_at end)}'
+}
+
+runtime_lock__request_cold_cancel() {
+	local directory
+	directory=${MORS_RUNTIME_CANCEL_FILE%/*}
+	(umask 077
+		mkdir -p "${directory}" 2>/dev/null && \
+		printf '%s\n' "${1:-runtime_event}" >"${MORS_RUNTIME_CANCEL_FILE}")
+}
+
+runtime_lock__cold_cancelled() {
+	[ -s "${MORS_RUNTIME_CANCEL_FILE}" ]
+}
+
+runtime_lock__clear_cold_cancel() {
+	rm -f "${MORS_RUNTIME_CANCEL_FILE}"
+}

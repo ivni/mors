@@ -15,10 +15,12 @@ if [ "${1}" = "hook" ] ; then
 
 	# Подключаем библиотеку ndm_d
 	. /opt/apps/mors/bin/libs/ndm_d
+	ndm_runtime__begin iface_created || exit $?
 
 	#	В случае, если созданное подключение еще нет в списке интерфейсов,
 	#	то добавляем его в файл /opt/etc/inface_equals
     grep -q "${id}" "${iface_file}" || is_cli_iface_global "${id}" \
     || echo "${id}|${system_name}|$(get_iface_description "${id}")"  >> "${iface_file}"
+	ndm_runtime__end
 
 fi

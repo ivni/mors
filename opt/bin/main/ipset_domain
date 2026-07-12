@@ -1,4 +1,8 @@
 #!/bin/sh
+. /opt/apps/mors/bin/libs/runtime_lock
+runtime_mutation_lock__acquire 'mors ipset domain worker' || exit $?
+trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
+trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
 #------------------------------------------------------------------------------
 #
 # ПАКЕТ МОРС

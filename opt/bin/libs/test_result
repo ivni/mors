@@ -1,0 +1,238 @@
+#!/bin/sh
+
+MORS_TEST_SCHEMA_VERSION=1
+
+test_result__now_ms() {
+	if [ -r /proc/uptime ]; then
+		awk '{ printf "%.0f\n", $1 * 1000 }' /proc/uptime
+	else
+		printf '%s000\n' "$(date +%s)"
+	fi
+}
+
+test_result__init() {
+	local root=${MORS_TEST_TMP_ROOT:-/opt/tmp}
+	mkdir -p "${root}" 2>/dev/null || return 1
+	MORS_TEST_WORK_DIR=$(umask 077; mktemp -d "${root}/mors-test.XXXXXX") || return 1
+	MORS_TEST_STAGES_FILE=${MORS_TEST_WORK_DIR}/stages.jsonl
+	MORS_TEST_CONNECTIONS_FILE=${MORS_TEST_WORK_DIR}/connections.jsonl
+	(umask 077
+		: >"${MORS_TEST_STAGES_FILE}" && \
+		: >"${MORS_TEST_CONNECTIONS_FILE}") || {
+		rm -rf "${MORS_TEST_WORK_DIR}"
+		unset MORS_TEST_WORK_DIR MORS_TEST_STAGES_FILE MORS_TEST_CONNECTIONS_FILE
+		return 1
+	}
+	chmod 700 "${MORS_TEST_WORK_DIR}" 2>/dev/null || true
+	chmod 600 "${MORS_TEST_STAGES_FILE}" "${MORS_TEST_CONNECTIONS_FILE}" 2>/dev/null || true
+	MORS_TEST_STARTED_MS=$(test_result__now_ms)
+	export MORS_TEST_WORK_DIR MORS_TEST_STAGES_FILE MORS_TEST_CONNECTIONS_FILE
+}
+
+test_result__cleanup() {
+	[ -n "${MORS_TEST_WORK_DIR:-}" ] && [ -d "${MORS_TEST_WORK_DIR}" ] && \
+		rm -rf "${MORS_TEST_WORK_DIR}"
+	unset MORS_TEST_WORK_DIR MORS_TEST_STAGES_FILE MORS_TEST_CONNECTIONS_FILE
+}
+
+test_result__status_label() {
+	case "${1}" in
+		working) printf '%s' 'РАБОТАЕТ' ;;
+		degraded) printf '%s' 'ДЕГРАДАЦИЯ' ;;
+		error) printf '%s' 'ОШИБКА' ;;
+		not_checked) printf '%s' 'НЕ ПРОВЕРЕНО' ;;
+		unconfigured) printf '%s' 'НЕ НАСТРОЕНО' ;;
+		*) printf '%s' 'НЕ ПРОВЕРЕНО' ;;
+	esac
+}
+
+test_result__exit_code() {
+	case "${1}" in
+		working) return 0 ;;
+		degraded) return 1 ;;
+		error) return 2 ;;
+		not_checked|unconfigured) return 3 ;;
+		*) return 3 ;;
+	esac
+}
+
+test_result__add() {
+	local id="${1}" status="${2}" reason_code="${3}" message="${4}"
+	local required="${5:-true}" blocks_cold="${6:-true}"
+	local duration_ms="${7:-0}" attempts="${8:-1}" evidence="${9:-{}}"
+
+	printf '%s' "${evidence}" | jq -e 'type == "object"' >/dev/null 2>&1 || evidence='{}'
+	jq -nc \
+		--arg id "${id}" \
+		--arg status "${status}" \
+		--arg reason_code "${reason_code}" \
+		--arg message "${message}" \
+		--argjson required "${required}" \
+		--argjson blocks_cold "${blocks_cold}" \
+		--argjson duration_ms "${duration_ms}" \
+		--argjson attempts "${attempts}" \
+		--argjson evidence "${evidence}" \
+		'{id: $id, status: $status, reason_code: $reason_code, message: $message,
+		  required: $required, blocks_cold: $blocks_cold,
+		  duration_ms: $duration_ms, attempts: $attempts, evidence: $evidence}' \
+		>>"${MORS_TEST_STAGES_FILE}"
+}
+
+test_result__add_connection() {
+	local id="${1}" kind="${2}" role="${3}" status="${4}"
+	local reason_code="${5}" message="${6}"
+	jq -nc \
+		--arg id "${id}" --arg kind "${kind}" --arg role "${role}" \
+		--arg status "${status}" --arg reason_code "${reason_code}" \
+		--arg message "${message}" \
+		'{id: $id, kind: $kind, role: $role, status: $status,
+		  reason_code: $reason_code, message: $message}' \
+		>>"${MORS_TEST_CONNECTIONS_FILE}"
+}
+
+test_result__has_stage_status() {
+	jq -e --arg status "${1}" 'select(.status == $status)' \
+		"${MORS_TEST_STAGES_FILE}" >/dev/null 2>&1
+}
+
+test_result__aggregate() {
+	if test_result__has_stage_status unconfigured; then
+		printf '%s\n' unconfigured
+	elif test_result__has_stage_status error; then
+		printf '%s\n' error
+	elif test_result__has_stage_status degraded; then
+		printf '%s\n' degraded
+	elif jq -e 'select(.status == "not_checked" and .required == true)' \
+		"${MORS_TEST_STAGES_FILE}" >/dev/null 2>&1; then
+		printf '%s\n' not_checked
+	elif test_result__has_stage_status not_checked; then
+		# Missing optional evidence (for example direct WAN or cached client DNS)
+		# does not invalidate a proven required path, but it is still visible as
+		# degradation rather than a fully working result.
+		printf '%s\n' degraded
+	else
+		printf '%s\n' working
+	fi
+}
+
+test_result__remediation() {
+	case "${1}" in
+		setup_incomplete) printf '%s' 'Завершите настройку командой mors setup.' ;;
+		configuration_invalid) printf '%s' 'Проверьте доступность /opt/etc/mors.conf и /opt/etc/mors.list.' ;;
+		missing_dependency) printf '%s' 'Проверьте установленные зависимости пакета через opkg.' ;;
+		dns_backend_ambiguous|dns_backend_unavailable) printf '%s' 'Проверьте состояния mors dnsmasq status и mors adguard.' ;;
+		target_not_configured) printf '%s' 'Добавьте поддерживаемую контрольную цель в mors.list явной командой mors add.' ;;
+		dns_query_failed) printf '%s' 'Проверьте read-only состояние DNS командой mors dnsmasq status или mors adguard.' ;;
+		ipset_incomplete) printf '%s' 'Соберите свидетельства командой mors debug dns.' ;;
+		firewall_route_mismatch) printf '%s' 'Соберите свидетельства командой mors debug iptables.' ;;
+		tunnel_unavailable|tunnel_not_configured|forced_tunnel_failed) printf '%s' 'Проверьте состояние выбранного тоннеля командой mors vpn status.' ;;
+		mors_path_not_observed|mors_request_failed) printf '%s' 'Запустите mors test client для доказательства клиентского тракта.' ;;
+		tunnel_bypass_confirmed|mors_rules_failed) printf '%s' 'Соберите mors debug iptables; состояние автоматически не изменялось.' ;;
+		ipv6_bypass_risk) printf '%s' 'Проверьте использование IPv6 и private DNS на клиентах.' ;;
+		state_changed_during_test) printf '%s' 'Повторите test после завершения изменений интерфейсов или настроек.' ;;
+		budget_exhausted) printf '%s' 'Повторите команду с увеличенным --timeout.' ;;
+		inventory_incomplete|inventory_unavailable|inventory_invalid) printf '%s' 'Повторите mors test --all --verbose после стабилизации Keenetic runtime.' ;;
+		test_busy) printf '%s' 'Дождитесь завершения уже выполняющейся проверки.' ;;
+		client_external_dns_observed|client_dns_not_observed) printf '%s' 'Проверьте DNS клиента и отключите private/external DNS для контрольного запуска.' ;;
+		client_route_not_observed|client_exit_ip_not_reported) printf '%s' 'Повторите интерактивный mors test client и откройте указанную контрольную цель.' ;;
+		recovery_required|recovery_failed) printf '%s' 'Выполните mors test cold recover.' ;;
+		*) printf '%s' 'Повторите проверку с --verbose или соберите mors debug.' ;;
+	esac
+}
+
+test_result__json() {
+	local status="${1}" exit_code="${2}" duration_ms="${3}"
+	local active_kind=${MORS_TEST_ACTIVE_KIND:-} active_id=${MORS_TEST_ACTIVE_ID:-}
+	local test_target=${MORS_TEST_TARGET:-}
+	jq -n \
+		--argjson schema_version "${MORS_TEST_SCHEMA_VERSION}" \
+		--arg mode "${MORS_TEST_MODE}" \
+		--arg status "${status}" \
+		--argjson exit_code "${exit_code}" \
+		--argjson timeout_seconds "${MORS_TEST_TIMEOUT}" \
+		--argjson retries "${MORS_TEST_RETRIES}" \
+		--argjson duration_ms "${duration_ms}" \
+		--arg active_kind "${active_kind}" \
+		--arg active_id "${active_id}" \
+		--arg test_target "${test_target}" \
+		--slurpfile stages "${MORS_TEST_STAGES_FILE}" \
+		--slurpfile connections "${MORS_TEST_CONNECTIONS_FILE}" \
+		'{schema_version: $schema_version, command: "test", mode: $mode,
+		  status: $status, exit_code: $exit_code,
+		  timeout_seconds: $timeout_seconds, retries: $retries,
+		  duration_ms: $duration_ms,
+		  active_connection: (if $active_kind == "" then null else
+		    {kind: $active_kind, id: (if $active_id == "" then null else $active_id end)} end),
+		  stages: $stages, connections: $connections,
+		  client: (if $mode == "client" then
+		    {selected: true, address_redacted: true,
+		     observation_targets: (if $test_target == "" then [] else [$test_target] end)}
+		    else null end)}'
+}
+
+test_result__human() {
+	local status="${1}" label id stage_status reason message remediation
+	local duration attempts evidence
+	label=$(test_result__status_label "${status}")
+	printf 'Mors test: %s\n\n' "${label}"
+	jq -r '[.id, .status, .reason_code, .message, (.duration_ms|tostring),
+		(.attempts|tostring), (.evidence|tojson)] | @tsv' \
+		"${MORS_TEST_STAGES_FILE}" | \
+	while IFS="$(printf '\t')" read -r id stage_status reason message duration attempts evidence; do
+		printf '%-24s %-16s %s\n' "${id}" "$(test_result__status_label "${stage_status}")" "${message}"
+		if [ "${MORS_TEST_VERBOSE:-false}" = true ]; then
+			printf '  Время: %s мс; попыток: %s; evidence: %s\n' \
+				"${duration}" "${attempts}" "${evidence}"
+		fi
+		if [ "${stage_status}" != working ] && [ -n "${reason}" ]; then
+			remediation=$(test_result__remediation "${reason}")
+			printf '  Причина: %s\n' "${reason}"
+			printf '  Действие: %s\n' "${remediation}"
+		fi
+	done
+
+	if [ -s "${MORS_TEST_CONNECTIONS_FILE}" ]; then
+		printf '\nСоединения:\n'
+		jq -r '[.id, .kind, .role, .status, .message] | @tsv' \
+			"${MORS_TEST_CONNECTIONS_FILE}" | \
+		while IFS="$(printf '\t')" read -r id kind role stage_status message; do
+			printf -- '- %s [%s, %s]: %s — %s\n' "${id}" "${kind}" "${role}" \
+				"$(test_result__status_label "${stage_status}")" "${message}"
+		done
+	fi
+}
+
+test_result__render() {
+	local status="${1}" exit_code duration_ms
+	test_result__exit_code "${status}"; exit_code=$?
+	duration_ms=$(( $(test_result__now_ms) - MORS_TEST_STARTED_MS ))
+	if [ "${MORS_TEST_JSON}" = true ]; then
+		test_result__json "${status}" "${exit_code}" "${duration_ms}"
+	else
+		test_result__human "${status}"
+	fi
+	return "${exit_code}"
+}
+
+test_result__early_error() {
+	local json="${1}" status="${2}" exit_code="${3}" reason="${4}" message="${5}"
+	local owner="${6:-null}" mode="${MORS_TEST_MODE:-default}"
+	local timeout="${MORS_TEST_TIMEOUT:-0}" retries="${MORS_TEST_RETRIES:-0}"
+	printf '%s' "${owner}" | jq -e 'type == "object" or . == null' >/dev/null 2>&1 || owner=null
+	if [ "${json}" = true ] && command -v jq >/dev/null 2>&1; then
+		jq -nc --argjson schema_version "${MORS_TEST_SCHEMA_VERSION}" \
+			--arg status "${status}" --argjson exit_code "${exit_code}" \
+			--arg reason_code "${reason}" --arg message "${message}" \
+			--arg mode "${mode}" --arg timeout "${timeout}" --arg retries "${retries}" \
+			--argjson owner "${owner}" \
+			'{schema_version: $schema_version, command: "test", mode: $mode, status: $status,
+			  exit_code: $exit_code, reason_code: $reason_code, message: $message,
+			  timeout_seconds: (if ($timeout|test("^[0-9]+$")) then ($timeout|tonumber) else 0 end),
+			  retries: (if ($retries|test("^[0-9]+$")) then ($retries|tonumber) else 0 end),
+			  duration_ms: 0, active_connection: null, stages: [], connections: [],
+			  client: null, owner: $owner}'
+	else
+		printf 'Mors test: %s\nПричина: %s\n' "$(test_result__status_label "${status}")" "${message}"
+	fi
+	return "${exit_code}"
+}

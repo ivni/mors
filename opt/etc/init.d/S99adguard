@@ -35,6 +35,10 @@ DESC=${PROCS}
 PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 case ${1} in
         start|restart)
+		. /opt/apps/mors/bin/libs/runtime_lock
+		runtime_mutation_lock__acquire 'mors adguard service' || exit $?
+		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
+		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
                 . /opt/apps/mors/bin/libs/vpn
                 cmd_mors_init initd
                 ready "Перезапускаем AdGuardHome"
@@ -54,6 +58,13 @@ case ${1} in
                 fi
 
         ;;
+	stop)
+		. /opt/apps/mors/bin/libs/runtime_lock
+		runtime_mutation_lock__acquire 'mors adguard service stop' || exit $?
+		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
+		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
+		. /opt/etc/init.d/rc.func
+		;;
 
         *)
                 . /opt/etc/init.d/rc.func

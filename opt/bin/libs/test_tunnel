@@ -1,0 +1,224 @@
+#!/bin/sh
+
+MORS_TEST_SS_LOCAL=${MORS_TEST_SS_LOCAL:-/opt/bin/ss-local}
+MORS_TEST_SS_PID=''
+
+test_tunnel__config_value() {
+	grep "^${1}=" "${MORS_CONF_FILE}" 2>/dev/null | head -n 1 | cut -d= -f2-
+}
+
+test_tunnel__detect_active() {
+	local interface_id interface_device
+	interface_id=$(test_tunnel__config_value INFACE_CLI)
+	interface_device=$(test_tunnel__config_value INFACE_ENT)
+	MORS_TEST_ACTIVE_ID=${interface_id}
+	MORS_TEST_ACTIVE_DEVICE=${interface_device}
+	case "${interface_id}" in
+		shadowsocks) MORS_TEST_ACTIVE_KIND=shadowsocks ;;
+		Proxy21) MORS_TEST_ACTIVE_KIND=vless ;;
+		'') MORS_TEST_ACTIVE_KIND='' ;;
+		*) MORS_TEST_ACTIVE_KIND=keenetic_vpn ;;
+	esac
+	export MORS_TEST_ACTIVE_KIND MORS_TEST_ACTIVE_ID MORS_TEST_ACTIVE_DEVICE
+}
+
+test_tunnel__active_status() {
+	local state active_id rci_timeout
+	case "${MORS_TEST_ACTIVE_KIND}" in
+		shadowsocks)
+			if [ -x /opt/etc/init.d/S22shadowsocks ] && \
+				/opt/etc/init.d/S22shadowsocks status 2>/dev/null | grep -qE 'alive|running'; then
+				test_probe__set working tunnel_active 'Активный Shadowsocks runtime работает.'
+				return 0
+			fi
+			;;
+		vless)
+			if [ -r "${VLESS_STATE_FILE}" ]; then
+				active_id=$(jq -r '.active_id // empty' "${VLESS_STATE_FILE}" 2>/dev/null)
+				state=$(jq -r --arg id "${active_id}" '.connections[$id].status // empty' \
+					"${VLESS_STATE_FILE}" 2>/dev/null)
+				if [ -n "${active_id}" ] && [ "${state}" = active ]; then
+					MORS_TEST_ACTIVE_ID=${active_id}; export MORS_TEST_ACTIVE_ID
+					test_probe__set working tunnel_active 'Активный VLESS runtime работает.'
+					return 0
+				fi
+			fi
+			;;
+		keenetic_vpn)
+			rci_timeout=$(test_probe__attempt_timeout 3) || rci_timeout=''
+			[ -n "${rci_timeout}" ] || {
+				test_probe__set not_checked budget_exhausted 'Не осталось времени для проверки Keenetic VPN.'
+				return 1
+			}
+			state=$("${MORS_TEST_CURL}" -fsS --noproxy '*' --max-time "${rci_timeout}" "${MORS_TEST_RCI_URL}" 2>/dev/null | \
+				jq -r --arg id "${MORS_TEST_ACTIVE_ID}" \
+				'.[] | select(.id == $id) | (.state // .link // "unknown")' 2>/dev/null)
+			if [ "${state}" = up ]; then
+				test_probe__set working tunnel_active 'Активный Keenetic VPN interface работает.'
+				return 0
+			fi
+			;;
+		*)
+			test_probe__set error tunnel_not_configured 'Активный тоннель Mors не выбран.'
+			return 1
+			;;
+	esac
+	test_probe__set error tunnel_unavailable 'Активный тоннель недоступен.'
+	return 1
+}
+
+test_tunnel__target_url() {
+	case "${1}" in
+		ifconfig.me) printf '%s\n' 'https://ifconfig.me/ip' ;;
+		api.ipify.org) printf '%s\n' 'https://api.ipify.org' ;;
+		*) return 1 ;;
+	esac
+}
+
+test_tunnel__vless_proxy() {
+	command -v vless_runtime__connection_proxy >/dev/null 2>&1 || return 1
+	vless_runtime__connection_proxy "${MORS_TEST_ACTIVE_ID}"
+}
+
+test_tunnel__ss_start() {
+	local port index=0 config_copy
+	[ -x "${MORS_TEST_SS_LOCAL}" ] || MORS_TEST_SS_LOCAL=$(command -v ss-local 2>/dev/null)
+	[ -x "${MORS_TEST_SS_LOCAL}" ] || return 1
+	[ -r "${SHADOWSOCKS_CONF}" ] || return 1
+	[ -d "${MORS_TEST_WORK_DIR:-}" ] || return 1
+	config_copy=${MORS_TEST_WORK_DIR}/shadowsocks-probe.json
+	(umask 077; cp "${SHADOWSOCKS_CONF}" "${config_copy}") || return 1
+	chmod 600 "${config_copy}" 2>/dev/null || true
+	MORS_TEST_SS_CONFIG=${config_copy}; export MORS_TEST_SS_CONFIG
+	port=$((20000 + ($$ % 20000)))
+	while [ "${index}" -lt 5 ] && [ "$(test_probe__remaining)" -gt 0 ]; do
+		"${MORS_TEST_SS_LOCAL}" -c "${MORS_TEST_SS_CONFIG}" -b 127.0.0.1 -l "${port}" \
+			>/dev/null 2>&1 &
+		MORS_TEST_SS_PID=$!
+		sleep 1
+		if kill -0 "${MORS_TEST_SS_PID}" 2>/dev/null; then
+			MORS_TEST_SS_PORT=${port}
+			export MORS_TEST_SS_PID MORS_TEST_SS_PORT
+			return 0
+		fi
+		wait "${MORS_TEST_SS_PID}" 2>/dev/null || true
+		MORS_TEST_SS_PID=''
+		port=$((port + 1)); index=$((index + 1))
+	done
+	return 1
+}
+
+test_tunnel__cleanup() {
+	if [ -n "${MORS_TEST_SS_PID:-}" ]; then
+		kill "${MORS_TEST_SS_PID}" 2>/dev/null || true
+		wait "${MORS_TEST_SS_PID}" 2>/dev/null || true
+	fi
+	MORS_TEST_SS_PID=''
+	[ -n "${MORS_TEST_SS_CONFIG:-}" ] && rm -f "${MORS_TEST_SS_CONFIG}"
+	MORS_TEST_SS_CONFIG=''
+}
+
+test_tunnel__forced_request() {
+	local url proxy result
+	url=$(test_tunnel__target_url "${MORS_TEST_TARGET}") || return 1
+	case "${MORS_TEST_ACTIVE_KIND}" in
+		vless)
+			proxy=$(test_tunnel__vless_proxy) || return 1
+			test_probe__http_ipv4 "${url}" proxy '' "${proxy}"
+			;;
+		shadowsocks)
+			test_tunnel__ss_start || return 1
+			test_probe__http_ipv4 "${url}" proxy '' \
+				"socks5h://127.0.0.1:${MORS_TEST_SS_PORT}"
+			result=$?
+			test_tunnel__cleanup
+			return "${result}"
+			;;
+		keenetic_vpn)
+			[ -n "${MORS_TEST_ACTIVE_DEVICE}" ] || return 1
+			test_probe__http_ipv4 "${url}" interface "${MORS_TEST_ACTIVE_DEVICE}"
+			;;
+		*) return 1 ;;
+	esac
+}
+
+test_tunnel__wan_interface() {
+	local rci_timeout
+	rci_timeout=$(test_probe__attempt_timeout 3) || return 1
+	"${MORS_TEST_CURL}" -fsS --noproxy '*' --max-time "${rci_timeout}" "${MORS_TEST_RCI_URL}" 2>/dev/null | \
+		jq -r '.[] | select(.defaultgw == true and .global == true) |
+			(.interface // .ifname // .id)' 2>/dev/null | head -n 1
+}
+
+test_tunnel__wan_request() {
+	local url wan
+	url=$(test_tunnel__target_url "${MORS_TEST_TARGET}") || return 1
+	wan=$(test_tunnel__wan_interface)
+	[ -n "${wan}" ] || return 1
+	test_probe__http_ipv4 "${url}" interface "${wan}"
+}
+
+test_tunnel__inventory() {
+	local active_id=${MORS_TEST_ACTIVE_ID:-} rci_timeout rci_response
+	if [ -r "${VLESS_REGISTRY_FILE}" ]; then
+		jq -c --arg active "${active_id}" '
+			.connections[] | select(.enabled == true) |
+			{id, kind:"vless", role:(if .id == $active then "active" else "reserve" end),
+			 desired:"enabled", probe_port}
+		' "${VLESS_REGISTRY_FILE}" 2>/dev/null
+	fi
+	if [ -r "${SHADOWSOCKS_CONF}" ] && jq -e . "${SHADOWSOCKS_CONF}" >/dev/null 2>&1; then
+		jq -nc --arg role "$([ "${MORS_TEST_ACTIVE_KIND}" = shadowsocks ] && printf active || printf other)" \
+			'{id:"shadowsocks",kind:"shadowsocks",role:$role,desired:"enabled"}'
+	fi
+	rci_timeout=$(test_probe__attempt_timeout 3 2>/dev/null || true)
+	if [ -z "${rci_timeout}" ]; then
+		printf '%s\n' '{"id":"keenetic_inventory","kind":"inventory_error","role":"meta","reason_code":"budget_exhausted"}'
+		return 0
+	fi
+	rci_response=$("${MORS_TEST_CURL}" -fsS --noproxy '*' --max-time "${rci_timeout}" \
+		"${MORS_TEST_RCI_URL}" 2>/dev/null) || {
+		printf '%s\n' '{"id":"keenetic_inventory","kind":"inventory_error","role":"meta","reason_code":"inventory_unavailable"}'
+		return 0
+	}
+	if ! printf '%s\n' "${rci_response}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+		printf '%s\n' '{"id":"keenetic_inventory","kind":"inventory_error","role":"meta","reason_code":"inventory_invalid"}'
+		return 0
+	fi
+	printf '%s\n' "${rci_response}" | jq -c \
+		--arg active "${active_id}" '
+		.[] |
+		select((.id // "") != "") |
+		select((.vpn == true) or ((.type // "") | test("vpn|wireguard|openvpn|l2tp|pptp|sstp|ipsec"; "i"))) |
+		select((.role // "client") != "server") |
+		{id,kind:"keenetic_vpn",role:(if .id == $active then "active" else "other" end),
+		 desired:(if has("up") then .up elif has("enabled") then .enabled else "unknown" end),
+		 state:(.state // .link // "unknown"),
+		 device:(.interface // .ifname // .id)}
+	' 2>/dev/null
+}
+
+test_tunnel__probe_inventory_item() {
+	local item="${1}" kind id port url result
+	kind=$(printf '%s' "${item}" | jq -r '.kind')
+	id=$(printf '%s' "${item}" | jq -r '.id')
+	url=$(test_tunnel__target_url "${MORS_TEST_TARGET}") || return 1
+	case "${kind}" in
+		vless)
+			port=$(printf '%s' "${item}" | jq -r '.probe_port')
+			test_probe__http_ipv4 "${url}" proxy '' "socks5h://127.0.0.1:${port}"
+			;;
+		shadowsocks)
+			test_tunnel__ss_start || return 1
+			test_probe__http_ipv4 "${url}" proxy '' "socks5h://127.0.0.1:${MORS_TEST_SS_PORT}"
+			result=$?
+			test_tunnel__cleanup
+			return "${result}"
+			;;
+		keenetic_vpn)
+			id=$(printf '%s' "${item}" | jq -r '.device')
+			test_probe__http_ipv4 "${url}" interface "${id}"
+			;;
+		*) return 1 ;;
+	esac
+}

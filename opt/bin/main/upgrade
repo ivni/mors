@@ -1,7 +1,11 @@
 #!/bin/sh
 . /opt/apps/mors/bin/libs/lifecycle
+. /opt/apps/mors/bin/libs/runtime_lock
 
 lifecycle__guard_shell || exit 1
+runtime_mutation_lock__acquire 'mors upgrade' || exit $?
+trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; lifecycle__release >/dev/null 2>&1 || true' 0
+trap 'exit 130' HUP INT TERM
 #--------------------------------------------------------------------------------------------------------------
 #
 #	Файл обновления пакета
@@ -365,12 +369,19 @@ else
 		connect_home_nets
 		print_line
 		echo 'Тестируем настройки...'
+		# Setup may have started the long-lived VLESS supervisor. Release the
+		# mutation transaction so the supervisor can acquire its own token before
+		# the read-only end-to-end test.
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		unset MORS_RUNTIME_LOCK_TOKEN MORS_RUNTIME_LOCK_DEPTH
+		sleep 1
 #		В данном случае, чтобы не печатать линию после
 #		окончания тестирования дважды передаем параметр upgrade
-		mors test upgrade
+		mors test --verbose
 	}
 fi
 
 rm -f upgrade install
+runtime_mutation_lock__release || exit 1
 lifecycle__unguard_shell || exit 1
 

@@ -3,6 +3,8 @@
 MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
 # shellcheck source=../libs/vless_store
 . "${MORS_LIB_DIR}/vless_store"
+# shellcheck source=../libs/runtime_lock
+. "${MORS_LIB_DIR}/runtime_lock"
 
 VLESS_SUPERVISOR_INIT=${VLESS_SUPERVISOR_INIT:-/opt/etc/init.d/S25mors-vless}
 MORS_CONF_FILE=${MORS_CONF_FILE:-/opt/etc/mors.conf}
@@ -12,6 +14,10 @@ PROXY_VLESS_NAME=${PROXY_VLESS_NAME:-Proxy21}
 configured_interface=$(sed -n 's/^INFACE_ENT=//p' "${MORS_CONF_FILE}" 2>/dev/null | head -n 1)
 cli_interface=$(awk -F'|' -v configured="${configured_interface}" '$2 == configured {print $1; exit}' "${INFACE_NAMES_FILE}" 2>/dev/null)
 [ "${cli_interface}" = "${PROXY_VLESS_NAME}" ] || exit 0
+
+runtime_mutation_lock__acquire 'vless watchdog' || exit $?
+trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
+trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
 
 vless_store__ensure >/dev/null 2>&1 || exit 0
 [ "$(vless_store__is_paused)" = false ] || exit 0

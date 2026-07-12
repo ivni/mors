@@ -21,7 +21,18 @@
 
 case ${1} in
 	start|restart)
+		start_vless=false
 		. /opt/apps/mors/bin/libs/vpn
+		. /opt/apps/mors/bin/libs/runtime_lock
+		. /opt/apps/mors/bin/libs/test_cold
+		MORS_TEST_IPSET=/opt/sbin/ipset
+		export MORS_TEST_IPSET
+		if [ -d "${MORS_COLD_JOURNAL_DIR}" ]; then
+			test_cold__recover || exit 1
+		fi
+		runtime_mutation_lock__acquire 'mors init service' || exit $?
+		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
+		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
 		cmd_mors_init no
 		if has_ssr_enable; then
 			while /opt/etc/init.d/S22shadowsocks status | grep -q dead
@@ -31,8 +42,16 @@ case ${1} in
 			done
 		elif is_vless_over_proxy_enabled; then
 			if [ "$(vless_store__is_paused)" = false ] && [ "$(vless_store__enabled_count)" -gt 0 ]; then
-				/opt/etc/init.d/S25mors-vless restart >/dev/null 2>&1
+				start_vless=true
 			fi
+		fi
+		runtime_mutation_lock__release >/dev/null 2>&1 || exit 1
+		trap - 0 HUP INT TERM
+		# Long-lived supervisor must acquire its own runtime lock token rather
+		# than inherit the init transaction token.
+		if [ "${start_vless}" = true ]; then
+			unset MORS_RUNTIME_LOCK_TOKEN MORS_RUNTIME_LOCK_DEPTH
+			/opt/etc/init.d/S25mors-vless restart >/dev/null 2>&1
 		fi
 	;;
 esac

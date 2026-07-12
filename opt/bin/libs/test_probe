@@ -1,0 +1,405 @@
+#!/bin/sh
+
+MORS_TEST_CURL=${MORS_TEST_CURL:-/opt/bin/curl}
+MORS_TEST_IPSET=${MORS_TEST_IPSET:-/opt/sbin/ipset}
+MORS_TEST_IPTABLES_SAVE=${MORS_TEST_IPTABLES_SAVE:-/opt/sbin/iptables-save}
+MORS_TEST_IPTABLES=${MORS_TEST_IPTABLES:-/opt/sbin/iptables}
+MORS_TEST_IP=${MORS_TEST_IP:-/opt/sbin/ip}
+MORS_TEST_CONNTRACK=${MORS_TEST_CONNTRACK:-/opt/sbin/conntrack}
+MORS_TEST_TIMEOUT_CMD=${MORS_TEST_TIMEOUT_CMD:-/opt/bin/timeout}
+MORS_TEST_RCI_URL=${MORS_TEST_RCI_URL:-http://127.0.0.1:79/rci/show/interface}
+
+test_probe__set() {
+	MORS_PROBE_STATUS=${1}
+	MORS_PROBE_REASON=${2}
+	MORS_PROBE_MESSAGE=${3}
+	MORS_PROBE_EVIDENCE=${4:-{}}
+}
+
+test_probe__now_seconds() {
+	if [ -r /proc/uptime ]; then
+		awk '{ printf "%.0f\n", int($1) }' /proc/uptime
+	else
+		date +%s
+	fi
+}
+
+test_probe__remaining() {
+	local now
+	now=$(test_probe__now_seconds)
+	if [ "${now}" -ge "${MORS_TEST_DEADLINE}" ]; then
+		printf '%s\n' 0
+	else
+		printf '%s\n' $((MORS_TEST_DEADLINE - now))
+	fi
+}
+
+test_probe__attempt_timeout() {
+	local remaining cap="${1}"
+	remaining=$(test_probe__remaining)
+	[ "${remaining}" -gt 0 ] || return 1
+	[ "${remaining}" -le "${cap}" ] || remaining=${cap}
+	printf '%s\n' "${remaining}"
+}
+
+test_probe__valid_ipv4() {
+	printf '%s\n' "${1}" | awk -F. '
+		BEGIN { valid = 1 }
+		NF != 4 { valid = 0 }
+		{
+			for (i = 1; i <= 4; i++) {
+				if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) valid = 0
+			}
+		}
+		END { exit(valid ? 0 : 1) }
+	' >/dev/null 2>&1
+}
+
+test_probe__canonical_ipv4() {
+	test_probe__valid_ipv4 "${1}" || return 1
+	printf '%s\n' "${1}" | awk -F. '
+		{
+			for (i = 1; i <= 4; i++) {
+				if (length($i) > 1 && substr($i, 1, 1) == "0") exit 1
+			}
+		}
+	' >/dev/null 2>&1
+}
+
+test_probe__configuration() {
+	local setup_finished
+	if [ ! -r "${MORS_CONF_FILE}" ]; then
+		test_probe__set unconfigured setup_incomplete 'Файл конфигурации Mors не найден.'
+		return 1
+	fi
+	setup_finished=$(grep '^SETUP_FINISHED=' "${MORS_CONF_FILE}" | head -n 1 | cut -d= -f2-)
+	if [ "${setup_finished}" != true ]; then
+		test_probe__set unconfigured setup_incomplete 'Начальная настройка Mors не завершена.'
+		return 1
+	fi
+	if [ ! -r "${MORS_LIST_FILE}" ]; then
+		test_probe__set error configuration_invalid 'Пользовательский список Mors недоступен.'
+		return 1
+	fi
+	test_probe__set working configuration_valid 'Конфигурация доступна и настройка завершена.'
+}
+
+test_probe__dependencies() {
+	local missing='' command_name
+	for command_name in jq "${MORS_TEST_CURL}" "${MORS_TEST_IPSET}" \
+		"${MORS_TEST_IPTABLES_SAVE}" "${MORS_TEST_IPTABLES}" "${MORS_TEST_IP}" "${MORS_TEST_CONNTRACK}" \
+		"${MORS_TEST_TIMEOUT_CMD}"; do
+		command -v "${command_name}" >/dev/null 2>&1 || missing="${missing} ${command_name}"
+	done
+	if ! command -v kdig >/dev/null 2>&1 && ! command -v dig >/dev/null 2>&1; then
+		missing="${missing} kdig/dig"
+	fi
+	if ! command -v ss-local >/dev/null 2>&1 && [ ! -x /opt/bin/ss-local ]; then
+		missing="${missing} ss-local"
+	fi
+	if [ -n "${missing}" ]; then
+		test_probe__set error missing_dependency "Отсутствуют обязательные зависимости:${missing}." \
+			'{"all_present":false}'
+		return 1
+	fi
+	test_probe__set working dependencies_present 'Обязательные зависимости доступны.' \
+		'{"all_present":true}'
+}
+
+test_probe__dns_backend() {
+	local adguard=false dnsmasq=false
+	if [ -x "${ADGUARDHOME_DEMON}" ] && \
+		"${ADGUARDHOME_DEMON}" status 2>/dev/null | grep -qE 'alive|running'; then
+		adguard=true
+	fi
+	if [ -x "${DNSMASQ_DEMON}" ] && \
+		"${DNSMASQ_DEMON}" status 2>/dev/null | grep -qE 'alive|running'; then
+		dnsmasq=true
+	fi
+	if [ "${adguard}" = true ] && [ "${dnsmasq}" = true ]; then
+		test_probe__set error dns_backend_ambiguous 'Одновременно активны AdGuard Home и dnsmasq.'
+		return 1
+	fi
+	if [ "${adguard}" = true ]; then
+		MORS_TEST_DNS_BACKEND=adguard
+	elif [ "${dnsmasq}" = true ]; then
+		MORS_TEST_DNS_BACKEND=dnsmasq
+	else
+		test_probe__set error dns_backend_unavailable 'Активный поддерживаемый DNS backend не найден.'
+		return 1
+	fi
+	export MORS_TEST_DNS_BACKEND
+	test_probe__set working dns_backend_active "Активен DNS backend ${MORS_TEST_DNS_BACKEND}." \
+		"{\"backend\":\"${MORS_TEST_DNS_BACKEND}\"}"
+}
+
+test_probe__target_in_list() {
+	local target="${1}"
+	sed 's/[[:space:]]*#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//; s/^\*\.//; /^[[:space:]]*$/d' \
+		"${MORS_LIST_FILE}" | \
+		grep -Fxq "${target}"
+}
+
+test_probe__target() {
+	local target
+	for target in ifconfig.me api.ipify.org; do
+		if test_probe__target_in_list "${target}"; then
+			MORS_TEST_TARGET=${target}
+			export MORS_TEST_TARGET
+			test_probe__set working target_selected 'Контрольная HTTPS-цель выбрана из пользовательского списка.' \
+				'{"configured":true}'
+			return 0
+		fi
+	done
+	test_probe__set not_checked target_not_configured \
+		'В пользовательском списке нет поддерживаемой контрольной цели.' \
+		'{"configured":false}'
+	return 1
+}
+
+test_probe__dns_command() {
+	local attempt_timeout
+	attempt_timeout=$(test_probe__attempt_timeout 5) || return 1
+	if command -v kdig >/dev/null 2>&1; then
+		"${MORS_TEST_TIMEOUT_CMD}" "${attempt_timeout}" kdig @127.0.0.1 "${1}" A +short 2>/dev/null
+	else
+		"${MORS_TEST_TIMEOUT_CMD}" "${attempt_timeout}" dig @127.0.0.1 "${1}" A +short 2>/dev/null
+	fi
+}
+
+test_probe__dns_a() {
+	local output count=0 attempts=0 max_attempts
+	MORS_TEST_DNS_FILE=${MORS_TEST_WORK_DIR}/dns-a
+	max_attempts=$((MORS_TEST_RETRIES + 1))
+	: >"${MORS_TEST_DNS_FILE}"
+	chmod 600 "${MORS_TEST_DNS_FILE}" 2>/dev/null || true
+	while [ "${attempts}" -lt "${max_attempts}" ]; do
+		attempts=$((attempts + 1)); count=0
+		: >"${MORS_TEST_DNS_FILE}"
+		output=$(test_probe__dns_command "${MORS_TEST_TARGET}") || output=''
+		printf '%s\n' "${output}" | awk -F. '
+			NF == 4 {
+				valid = 1
+				for (i = 1; i <= 4; i++) {
+					if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) valid = 0
+				}
+				if (valid) print
+			}
+		' >"${MORS_TEST_DNS_FILE}"
+		count=$(wc -l <"${MORS_TEST_DNS_FILE}" | tr -d ' ')
+		[ "${count}" -gt 0 ] && break
+		[ "$(test_probe__remaining)" -gt 0 ] || break
+	done
+	MORS_TEST_HTTP_ATTEMPTS=${attempts}
+	if [ "${count}" -eq 0 ]; then
+		test_probe__set error dns_query_failed 'DNS роутера не вернул корректный A-ответ.' \
+			'{"has_a_records":false}'
+		return 1
+	fi
+	if ! sort -u "${MORS_TEST_DNS_FILE}" >"${MORS_TEST_DNS_FILE}.sorted" 2>/dev/null || \
+		! mv -f "${MORS_TEST_DNS_FILE}.sorted" "${MORS_TEST_DNS_FILE}"; then
+		rm -f "${MORS_TEST_DNS_FILE}.sorted"
+		test_probe__set error workspace_unavailable \
+			'Не удалось сохранить нормализованный DNS-ответ.' '{"has_a_records":false}'
+		return 1
+	fi
+	export MORS_TEST_DNS_FILE
+	test_probe__set working dns_answer_received 'DNS роутера вернул корректный A-ответ.' \
+		'{"has_a_records":true}'
+}
+
+test_probe__ipset_population() {
+	local address missing=0 remaining
+	while :; do
+		missing=0
+		while IFS= read -r address; do
+			"${MORS_TEST_IPSET}" test "${IPSET_TABLE_NAME}" "${address}" >/dev/null 2>&1 || \
+				missing=$((missing + 1))
+		done <"${MORS_TEST_DNS_FILE}"
+		[ "${missing}" -eq 0 ] && break
+		remaining=$(test_probe__remaining)
+		[ "${remaining}" -gt 0 ] || break
+		runtime_lock__cold_cancelled && break
+		sleep 1
+	done
+	if [ "${missing}" -ne 0 ]; then
+		test_probe__set error ipset_incomplete 'Не все адреса DNS-ответа появились в MORS_LIST.' \
+			'{"all_dns_addresses_present":false}'
+		return 1
+	fi
+	test_probe__set working ipset_complete 'Все адреса DNS-ответа присутствуют в MORS_LIST.' \
+		'{"all_dns_addresses_present":true}'
+}
+
+test_probe__firewall_route() {
+	local rules policy_rules routes expected_chain
+	rules=$("${MORS_TEST_IPTABLES_SAVE}" 2>/dev/null) || rules=''
+	if [ "${MORS_TEST_ACTIVE_KIND}" = shadowsocks ]; then
+		expected_chain=MORS_DNAT_TO_PORT
+	else
+		expected_chain=MORS_MARK
+	fi
+	if ! printf '%s\n' "${rules}" | grep -F -- "--match-set ${IPSET_TABLE_NAME} dst" | \
+		grep -Fq -- "-j ${expected_chain}"; then
+		test_probe__set error firewall_route_mismatch \
+			"Правило MORS_LIST не ведёт в цепочку ${expected_chain}." \
+			'{"ipset_rule":false,"chain_rule":false}'
+		return 1
+	fi
+	if [ "${MORS_TEST_ACTIVE_KIND}" = shadowsocks ]; then
+		if ! printf '%s\n' "${rules}" | grep -F -- '-A MORS_DNAT_TO_PORT ' | \
+			grep -F -- '-p tcp ' | grep -Fq -- '-j REDIRECT'; then
+			test_probe__set error firewall_route_mismatch \
+				'Цепочка MORS_DNAT_TO_PORT не содержит TCP redirect.' \
+				'{"ipset_rule":true,"chain_rule":true,"redirect_rule":false}'
+			return 1
+		fi
+		test_probe__set working firewall_route_consistent \
+			'Firewall state согласовано с активным Shadowsocks redirect.' \
+			'{"ipset_rule":true,"chain_rule":true,"redirect_rule":true,"policy_rule":false}'
+		return 0
+	fi
+	if ! printf '%s\n' "${rules}" | grep -F -- '-A MORS_MARK ' | \
+		grep -F -- '-j MARK ' | grep -Fq '0xd1000'; then
+		test_probe__set error firewall_route_mismatch \
+			'Цепочка MORS_MARK не устанавливает ожидаемую метку.' \
+			'{"ipset_rule":true,"chain_rule":true,"mark_rule":false}'
+		return 1
+	fi
+	policy_rules=$("${MORS_TEST_IP}" rule show 2>/dev/null) || policy_rules=''
+	if ! printf '%s\n' "${policy_rules}" | grep -F 'fwmark 0xd1000/0xd1000' | \
+		grep -Eq '(lookup|table) 1001'; then
+			test_probe__set error firewall_route_mismatch 'Policy rule Mors для таблицы 1001 не найдено.' \
+			'{"ipset_rule":true,"mark_rule":true,"policy_rule":false}'
+		return 1
+	fi
+	routes=$("${MORS_TEST_IP}" route show table 1001 2>/dev/null) || routes=''
+	if ! printf '%s\n' "${routes}" | grep -Eq '^default([[:space:]]|$)'; then
+		test_probe__set error firewall_route_mismatch 'В таблице Mors нет default route.' \
+			'{"ipset_rule":true,"mark_rule":true,"policy_rule":true,"route_table":false}'
+		return 1
+	fi
+	if [ -n "${MORS_TEST_ACTIVE_DEVICE:-}" ] && \
+		! printf '%s\n' "${routes}" | grep -Fq "dev ${MORS_TEST_ACTIVE_DEVICE}"; then
+		test_probe__set error firewall_route_mismatch \
+			'Default route Mors не использует выбранный tunnel device.' \
+			'{"ipset_rule":true,"mark_rule":true,"policy_rule":true,"active_device":false}'
+		return 1
+	fi
+	test_probe__set working firewall_route_consistent 'Firewall и routing state согласованы с Mors.' \
+		'{"ipset_rule":true,"mark_rule":true,"policy_rule":true,"route_table":true,"active_device":true}'
+}
+
+test_probe__http_ipv4() {
+	local url="${1}" mode="${2:-plain}" value remaining attempts=0 max_attempts
+	local interface_name="${3:-}" proxy="${4:-}" attempt_timeout
+	max_attempts=$((MORS_TEST_RETRIES + 1))
+	while [ "${attempts}" -lt "${max_attempts}" ]; do
+		attempts=$((attempts + 1))
+		remaining=$(test_probe__remaining)
+		[ "${remaining}" -gt 0 ] || return 1
+		attempt_timeout=${remaining}
+		[ "${attempt_timeout}" -le "${MORS_TEST_NETWORK_ATTEMPT_TIMEOUT:-10}" ] || \
+			attempt_timeout=${MORS_TEST_NETWORK_ATTEMPT_TIMEOUT:-10}
+		case "${mode}" in
+			interface)
+				value=$("${MORS_TEST_CURL}" -4fsS --connect-timeout 5 --max-time "${attempt_timeout}" \
+					--noproxy '*' --interface "${interface_name}" "${url}" 2>/dev/null) || value=''
+				;;
+			proxy)
+				value=$("${MORS_TEST_CURL}" -4fsS --connect-timeout 5 --max-time "${attempt_timeout}" \
+					--noproxy '' --proxy "${proxy}" "${url}" 2>/dev/null) || value=''
+				;;
+			*)
+				if [ -n "${MORS_TEST_LOCAL_PORT:-}" ]; then
+					value=$("${MORS_TEST_CURL}" -4fsS --connect-timeout 5 --max-time "${attempt_timeout}" \
+						--noproxy '*' --local-port "${MORS_TEST_LOCAL_PORT}" "${url}" 2>/dev/null) || value=''
+				else
+					value=$("${MORS_TEST_CURL}" -4fsS --connect-timeout 5 --max-time "${attempt_timeout}" \
+						--noproxy '*' "${url}" 2>/dev/null) || value=''
+				fi
+				;;
+		esac
+		value=$(printf '%s' "${value}" | tr -d '\r\n')
+		if test_probe__valid_ipv4 "${value}"; then
+			MORS_TEST_HTTP_VALUE=${value}
+			MORS_TEST_HTTP_ATTEMPTS=${attempts}
+			return 0
+		fi
+	done
+	MORS_TEST_HTTP_ATTEMPTS=${attempts}
+	return 1
+}
+
+test_probe__mors_counter() {
+	local table chain
+	if [ "${MORS_TEST_ACTIVE_KIND}" = shadowsocks ]; then
+		table=nat; chain=MORS_DNAT_TO_PORT
+	else
+		table=mangle; chain=MORS_MARK
+	fi
+	"${MORS_TEST_IPTABLES}" -t "${table}" -nvxL "${chain}" 2>/dev/null | \
+		awk '$1 ~ /^[0-9]+$/ { packets += $1 } END { print packets + 0 }'
+}
+
+test_probe__flow_has_mors_evidence() {
+	local local_port="${1}" before="${2}" after="${3}" flow
+	[ "${after}" -gt "${before}" ] || return 1
+	flow=$("${MORS_TEST_CONNTRACK}" -L -p tcp --sport "${local_port}" 2>/dev/null) || flow=''
+	[ -n "${flow}" ] || return 1
+	if [ "${MORS_TEST_ACTIVE_KIND}" = shadowsocks ]; then
+		printf '%s\n' "${flow}" | grep -q 'dst=127\.0\.0\.1'
+	else
+		printf '%s\n' "${flow}" | grep -qE 'mark=0xd1000|mark=856064'
+	fi
+}
+
+test_probe__fingerprint() {
+	local rci_timeout
+	rci_timeout=$(test_probe__attempt_timeout 2 2>/dev/null || true)
+	{
+		cksum "${MORS_CONF_FILE}" "${MORS_LIST_FILE}" 2>/dev/null
+		[ -r "${VLESS_ACTIVE_FILE:-/nonexistent}" ] && \
+			cksum "${VLESS_ACTIVE_FILE}" 2>/dev/null || true
+		[ -x "${ADGUARDHOME_DEMON}" ] && \
+			"${ADGUARDHOME_DEMON}" status 2>/dev/null | grep -E 'alive|running|dead|stopped' || true
+		[ -x "${DNSMASQ_DEMON}" ] && \
+			"${DNSMASQ_DEMON}" status 2>/dev/null | grep -E 'alive|running|dead|stopped' || true
+		"${MORS_TEST_IP}" rule show 2>/dev/null
+		"${MORS_TEST_IP}" route show table 1001 2>/dev/null
+		"${MORS_TEST_IPTABLES_SAVE}" 2>/dev/null | grep -E 'MORS_|MORS_LIST'
+		if [ -n "${rci_timeout}" ]; then
+			"${MORS_TEST_CURL}" -fsS --noproxy '*' --max-time "${rci_timeout}" \
+				"${MORS_TEST_RCI_URL}" 2>/dev/null | \
+				jq -c 'sort_by(.id) | map({id,state,link,defaultgw,global})' 2>/dev/null
+		fi
+	} | cksum | awk '{print $1 ":" $2}'
+}
+
+test_probe__ipv6_risk() {
+	local aaaa=false default_route=false
+	if test_probe__dns_command_aaaa "${MORS_TEST_TARGET}" | grep -q ':'; then
+		aaaa=true
+	fi
+	if "${MORS_TEST_IP}" -6 route show default 2>/dev/null | grep -q .; then
+		default_route=true
+	fi
+	if [ "${aaaa}" = true ] && [ "${default_route}" = true ]; then
+		test_probe__set degraded ipv6_bypass_risk \
+			'Доступен IPv6-путь, который Mors не маршрутизирует.' \
+			'{"aaaa":true,"global_route":true,"mors_ipv6":false}'
+		return 1
+	fi
+	test_probe__set working no_ipv6_bypass_evidence 'Явный риск обхода через IPv6 не обнаружен.' \
+		"{\"aaaa\":${aaaa},\"global_route\":${default_route},\"mors_ipv6\":false}"
+}
+
+test_probe__dns_command_aaaa() {
+	local attempt_timeout
+	attempt_timeout=$(test_probe__attempt_timeout 5) || return 1
+	if command -v kdig >/dev/null 2>&1; then
+		"${MORS_TEST_TIMEOUT_CMD}" "${attempt_timeout}" kdig @127.0.0.1 "${1}" AAAA +short 2>/dev/null
+	else
+		"${MORS_TEST_TIMEOUT_CMD}" "${attempt_timeout}" dig @127.0.0.1 "${1}" AAAA +short 2>/dev/null
+	fi
+}

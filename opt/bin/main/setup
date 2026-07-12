@@ -3,6 +3,7 @@
 . /opt/apps/mors/bin/libs/vpn
 . /opt/apps/mors/bin/libs/vless
 . /opt/apps/mors/bin/libs/lifecycle
+. /opt/apps/mors/bin/libs/runtime_lock
 
 # В случае проблем с инсталляцией пакета ставим в значение true
 ANSWER_AGH=n
@@ -930,7 +931,7 @@ setup__cmd_uninstall_unlocked() {
 			${DNSCRYPT_DEMON} stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
 			config__restore_from_opkg "${DNSCRYPT_CONFIG}"
 		fi
-		[ -f "${VLESS_SUPERVISOR_INIT}" ] && "${VLESS_SUPERVISOR_INIT}" stop &>/dev/null || true
+		[ -f "${VLESS_SUPERVISOR_INIT}" ] && vless_runtime__supervisor_service stop &>/dev/null || true
 		[ -f "${XRAY_INIT}" ] && "${XRAY_INIT}" stop &>/dev/null || true
 
 		# Подключаем библиотеку keen_api
@@ -987,10 +988,28 @@ setup__cmd_uninstall_unlocked() {
 }
 
 cmd_install() {
-	lifecycle__run_locked setup__cmd_install_unlocked "$@"
+	lifecycle__run_locked setup__cmd_install_with_runtime "$@"
 }
 
 cmd_uninstall() {
-	lifecycle__run_locked setup__cmd_uninstall_unlocked "$@"
+	lifecycle__run_locked setup__cmd_uninstall_with_runtime "$@"
+}
+
+setup__cmd_install_with_runtime() {
+	local result
+	runtime_mutation_lock__acquire 'mors setup' || return $?
+	setup__cmd_install_unlocked "$@"
+	result=$?
+	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
+	return "${result}"
+}
+
+setup__cmd_uninstall_with_runtime() {
+	local result
+	runtime_mutation_lock__acquire 'mors uninstall' || return $?
+	setup__cmd_uninstall_unlocked "$@"
+	result=$?
+	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
+	return "${result}"
 }
 

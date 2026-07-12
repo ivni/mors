@@ -17,6 +17,7 @@
 cli_inface="$(inface_cli)"
 
 if [ "${1}" = "hook" ] && echo "${id}" | grep -q "${cli_inface}"; then
+	ndm_runtime__begin interface_layer_changed || exit $?
 
 	case "${layer}-${level}" in
 
@@ -34,6 +35,7 @@ if [ "${1}" = "hook" ] && echo "${id}" | grep -q "${cli_inface}"; then
 		;;
 
 	esac
+	ndm_runtime__end
 
 fi
 

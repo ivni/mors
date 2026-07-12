@@ -7,6 +7,7 @@
 . /opt/apps/mors/bin/libs/update
 . /opt/apps/mors/bin/libs/vless
 . /opt/apps/mors/bin/libs/vpn
+. /opt/apps/mors/bin/libs/test
 . /opt/apps/mors/bin/main/setup
 
 #------------------------------------------------------------------------------
@@ -45,7 +46,30 @@ cmd_show_mors_list(){
 	fi
 }
 
-if  echo "${1}" | grep -qvEi 'uninstall' && [ -z "$(get_config_value "SETUP_FINISHED")" ]; then
+mors_cli__requires_runtime_lock() {
+	case "${1}:${2:-}:${3:-}" in
+		purge:*|clear:*|import:*|add:*|new:*|del:*|rm:*) return 0 ;;
+		tags:add:*|tags:del:*|tags:update:*) return 0 ;;
+		vless:version:*|vless:ver:*|vless:list:*|vless:status:*|vless:check:*|vless:events:*) return 1 ;;
+		vless::*) [ -t 0 ] && [ -t 1 ] && return 0 || return 1 ;;
+		# Интерактивное меню и все изменяющие subcommands сериализуются целиком.
+		vless:*) return 0 ;;
+		ssr:new:*|ssr:port:*|ssr:reset:*) return 0 ;;
+		vpn:set:*|vpn:gateway:*|vpn:reset:*|vpn:rescan:*|vpn:scan:*|vpn:net:add|vpn:net:del|vpn:guest:add|vpn:guest:del) return 0 ;;
+		dns:test:*) return 1 ;;
+		dns:*|dnsmasq:port:*|dnsmasq:ip:*|dnsmasq:on:*|crypt:on:*|crypt:off:*|dnscrypt:on:*|dnscrypt:off:*) return 0 ;;
+		adblock:on:*|adblock:off:*|adblock:edit:*|adblock:add:*|adblock:del:*|ads:on:*|ads:off:*|ads:edit:*|ads:add:*|ads:del:*) return 0 ;;
+		adguard:on:*|adguard:off:*|adguard:test:*|adguard:update:*|adguard:restart:*) return 0 ;;
+		hosts:add:*|hosts:del:*|hosts:prune:*|hosts:edit:*) return 0 ;;
+		route:refresh:*|route:recreate:*|ipset:add:*|ipset:clear:*|ipset:flush:*|ipset:refill:*) return 0 ;;
+		reset:*|init:*|pause:*|freeze:*|unpause:*|unfreeze:*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+MORS_CLI_RUNTIME_LOCKED=false
+if [ "${1:-}" != uninstall ] && [ "${1:-}" != test ] && \
+	[ "$(get_config_value "SETUP_FINISHED")" != true ]; then
 	print_line
 	echo "${2}" | grep -q "upgrade" && warning "Запускаем настройку пакета" || {
 		error "Настройка пакета не завершена, запускаем настройку пакета" "1"
@@ -56,9 +80,22 @@ if  echo "${1}" | grep -qvEi 'uninstall' && [ -z "$(get_config_value "SETUP_FINI
 	exit 0
 fi
 
+if mors_cli__requires_runtime_lock "$@"; then
+	runtime_mutation_lock__acquire "mors ${1}" || {
+		lock_status=$?
+		[ "${lock_status}" -eq 2 ] && \
+			error 'Изменения заблокированы незавершённым cold test. Выполните mors test cold recover.' || \
+			error 'Другая операция изменения runtime Mors уже выполняется.'
+		exit 3
+	}
+	MORS_CLI_RUNTIME_LOCKED=true
+	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
+	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
+fi
+
 #clear_file_content "${MORS_LIST_FILE}"
 
-print_line
+[ "${1}" = test ] || print_line
 case "${1}" in
 	setup)
 							echo "Настройка пакета МОРС завершена!"
@@ -239,10 +276,10 @@ case "${1}" in
 		esac
 		;;
 
-	test | check) cmd_test_warning
-	;;
-	test_old | check_old) cmd_state_checker "${2}"
-	                      [ -n "${2}" ] && exit 0
+	test)
+		shift
+		cmd_test_cli "$@"
+		exit $?
 	;;
 
 	reset | init)	        cmd_mors_init
@@ -277,4 +314,8 @@ case "${1}" in
 		;;
 esac
 
-print_line
+if [ "${MORS_CLI_RUNTIME_LOCKED}" = true ]; then
+	runtime_mutation_lock__release >/dev/null 2>&1 || true
+	trap - 0 HUP INT TERM
+fi
+[ "${1}" = test ] || print_line

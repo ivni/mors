@@ -1,5 +1,6 @@
 #!/bin/sh
 source /opt/apps/mors/bin/libs/main
+source /opt/apps/mors/bin/libs/runtime_lock
 
 get_config_value(){
         grep "${1}" "${MORS_CONF_FILE}" | cut -d'=' -f2
@@ -80,6 +81,8 @@ test_ip(){
 }
 
 test_connection(){
+	runtime_mutation_lock__acquire 'mors vpn watchdog' || return $?
+	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
 
         if echo "${ENTWARE_INTERFACE}" | grep -q ezcfg ; then
         	ssr_ip=$(cat < "${SHADOWSOCKS_CONF}" | grep '"server"'| sed 's/.*:.*"\(.*\)".*/\1/')
@@ -94,9 +97,13 @@ test_connection(){
 					restart_vpn_connection
 			fi
 
-        fi
+	fi
+	runtime_mutation_lock__release >/dev/null 2>&1 || true
+	trap - 0
 
 
 }
 
-test_connection &
+# Cron already launches this helper out of band. Keep the worker in the script
+# process so the runtime lock PID remains the actual live owner.
+test_connection

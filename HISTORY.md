@@ -1,3 +1,13 @@
+## 1.3.0 beta 1 - 2026-07-12
+- `mors test` переделан из заглушки в активную IPv4 end-to-end проверку DNS, `MORS_LIST`, firewall/routing, тоннеля и внешнего HTTPS-выхода.
+- Добавлены режимы `--all`, client, транзакционный cold test и явное восстановление `mors test cold recover`.
+- Добавлены стабильные состояния, exit codes, versioned JSON, общий deadline/retries и privacy-контракт без вывода IP клиента, внешнего выхода и секретов.
+- Для VLESS, Shadowsocks и Keenetic VPN добавлены отдельные read-only adapters; Shadowsocks проверяется временным localhost-only `ss-local`.
+- Runtime-изменения CLI, setup/update, VLESS supervisor и NDM hooks сериализованы общим reentrant lock; незавершённый cold recovery блокирует дальнейшие изменения.
+- Удалены top-level `check`, `test_old`, `check_old` и старый repair-oriented state checker.
+- Добавлены зависимости `conntrack`, `coreutils-timeout` и `shadowsocks-libev-ss-local`; в шаблон новых установок добавлена резервная контрольная цель `api.ipify.org` без миграции пользовательских списков.
+- Функция имеет статус beta: автоматическая QA выполняется без тестового Keenetic, реальные router-smoke сценарии перечислены в документации как ограничение релиза.
+
 ## 1.2.0 - 2026-07-11
 - Добавлено управление одним-четырьмя именованными VLESS Reality соединениями через интерактивное меню и явные CLI-команды.
 - Реализован отдельный VLESS supervisor: адаптивная многоуровневая диагностика, подтверждение сбоев, выбор наиболее здорового резерва и отсутствие автоматического возврата.

@@ -16,7 +16,31 @@
 # ------------------------------------------------------------------------------------------
 # Подключаем основные функции
 . /opt/apps/mors/bin/libs/main
+. /opt/apps/mors/bin/libs/runtime_lock
 # ------------------------------------------------------------------------------------------
+
+ndm_runtime__begin() {
+	local waited=0 result
+	# Hooks synchronously caused by the current transaction join it and must not
+	# cancel their own cold workflow. Independent NDM events request cancellation.
+	runtime_mutation_lock__is_reentrant || \
+		runtime_lock__request_cold_cancel "${1:-ndm_event}" >/dev/null 2>&1 || true
+	while :; do
+		runtime_mutation_lock__acquire "ndm ${1:-event}"
+		result=$?
+		[ "${result}" -eq 0 ] && break
+		[ "${waited}" -lt "${MORS_NDM_LOCK_WAIT:-15}" ] || return "${result}"
+		waited=$((waited + 1))
+		sleep 1
+	done
+	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
+	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
+}
+
+ndm_runtime__end() {
+	runtime_mutation_lock__release >/dev/null 2>&1 || true
+	trap - 0 HUP INT TERM
+}
 
 
 ROUTE_TABLE_ID=1001

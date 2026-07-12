@@ -84,7 +84,33 @@ mors vless policy direct-fallback on --yes
 
 `mors vless status` отвечает за отображение данных. `mors vless check` предназначен для внешнего мониторинга: `0` означает исправное состояние, `1` - работа без готового резерва или запуск, `2` - недоступность либо прямой резерв, `3` - VLESS не настроен или приостановлен, `4` - неизвестное состояние.
 
-Подробные контракты описаны в [дизайн-системе CLI](docs/cli-design-system.md) и [архитектуре VLESS](docs/vless-architecture.md).
+### Диагностика Mors (beta)
+
+Команды диагностики имеют разные задачи:
+
+- status-подкоманды (`mors vpn status`, `mors vless status` и другие) показывают
+  состояние соответствующего компонента без активного end-to-end доказательства;
+- `mors test` выполняет активную IPv4 end-to-end проверку DNS → `MORS_LIST` → firewall/routing → tunnel → внешний HTTPS-выход;
+- `mors debug` собирает подробные технические свидетельства для ручного анализа.
+
+Основные режимы:
+
+```sh
+mors test
+mors test --all
+mors test --json
+mors test --client 192.0.2.10
+mors test cold
+mors test cold recover
+```
+
+Обычный test, `--all` и client не меняют постоянное состояние роутера. Cold — отдельная подтверждаемая транзакция: Mors сохраняет затрагиваемые записи `ipset` и состояние DNS, проверяет повторное заполнение и восстанавливает snapshot. После аварийного завершения дальнейшие runtime-изменения блокируются до `mors test cold recover`.
+
+Итоги и коды: `РАБОТАЕТ`/`0`, `ДЕГРАДАЦИЯ`/`1`, `ОШИБКА`/`2`, `НЕ ПРОВЕРЕНО` или `НЕ НАСТРОЕНО`/`3`; ошибка аргументов возвращает `64`. JSON имеет версионную схему и не содержит IP клиента/внешнего выхода или секретов.
+
+Новый workflow выпускается как beta: static/BATS/mocked/package проверки выполняются без реального Keenetic, а DNS restart, реальные firewall/conntrack, NDM cancellation и crash/reboot recovery требуют последующего smoke-теста на авторизованном роутере.
+
+Подробные контракты описаны в [дизайн-системе CLI](docs/cli-design-system.md), [архитектуре test](docs/test-architecture.md) и [архитектуре VLESS](docs/vless-architecture.md).
 
 ## Установка пакета 
 1. Скачайте актуальный пакет `mors_*_all.ipk` из [GitHub Releases](https://github.com/ivni/mors/releases) или соберите пакет самостоятельно.
@@ -99,6 +125,7 @@ mors vless policy direct-fallback on --yes
 ## Документация по проекту
 - [Перейти по ссылке](https://github.com/ivni/mors/wiki).
 - [Дизайн-система CLI](docs/cli-design-system.md).
+- [Архитектура end-to-end проверки](docs/test-architecture.md).
 - [Архитектура управляемых VLESS-соединений](docs/vless-architecture.md).
 
 ## Релизы проекта

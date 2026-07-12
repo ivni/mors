@@ -12,8 +12,8 @@ setup() {
 
 @test "install update and uninstall share one reentrant lifecycle lock" {
 	grep -q 'libs/lifecycle' "${REPO_ROOT}/opt/bin/main/setup"
-	grep -q 'lifecycle__run_locked setup__cmd_install_unlocked' "${REPO_ROOT}/opt/bin/main/setup"
-	grep -q 'lifecycle__run_locked setup__cmd_uninstall_unlocked' "${REPO_ROOT}/opt/bin/main/setup"
+	grep -q 'lifecycle__run_locked setup__cmd_install_with_runtime' "${REPO_ROOT}/opt/bin/main/setup"
+	grep -q 'lifecycle__run_locked setup__cmd_uninstall_with_runtime' "${REPO_ROOT}/opt/bin/main/setup"
 	grep -q 'lifecycle__guard_shell' "${REPO_ROOT}/opt/bin/main/upgrade"
 
 	local lock_dir="${BATS_TEST_TMPDIR}/lifecycle.lock"

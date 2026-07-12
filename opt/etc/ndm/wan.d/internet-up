@@ -2,8 +2,16 @@
 
 if [ "${1}" = "stop" ] ; then
 	. /opt/apps/mors/bin/libs/route
+	. /opt/apps/mors/bin/libs/runtime_lock
+	runtime_mutation_lock__is_reentrant || \
+		runtime_lock__request_cold_cancel wan_stop >/dev/null 2>&1 || true
+	runtime_mutation_lock__acquire 'ndm wan stop' || exit $?
+	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
+	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
 	log_error "Интернет соединение ${interface} прервано. Восстанавливаем доступ к сети: ip=${address}, mask=${mask}, gw=${gateway}."
 	ip4_up_net_default "${interface}" "${address}" "${mask}" "${gateway}"
+	runtime_mutation_lock__release >/dev/null 2>&1 || true
+	trap - 0 HUP INT TERM
 	exit 0
 else
 	exit 1

@@ -15,10 +15,12 @@ if [ "${1}" = "hook" ] ; then
 
 	# Подключаем библиотеку ndm_d
 	. /opt/apps/mors/bin/libs/ndm_d
+	ndm_runtime__begin iface_destroyed || exit $?
 
 	#	В случае, если созданное подключение уже есть т в списке интерфейсов,
 	#	то удаляем его из файла  /opt/etc/inface_equals
 
     grep -q "${id}" "${iface_file}" && sed -i '/'"${id}"'/d' "${iface_file}"
+	ndm_runtime__end
 
 fi

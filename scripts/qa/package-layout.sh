@@ -14,7 +14,13 @@ required_paths=(
 	opt/bin/libs/vless_config
 	opt/bin/libs/vless_runtime
 	opt/bin/libs/lifecycle
+	opt/bin/libs/runtime_lock
 	opt/bin/libs/check
+	opt/bin/libs/test
+	opt/bin/libs/test_result
+	opt/bin/libs/test_probe
+	opt/bin/libs/test_tunnel
+	opt/bin/libs/test_cold
 	opt/bin/main/vless-supervisor
 	opt/bin/main/vless-watchdog
 	opt/bin/main/setup
@@ -32,6 +38,8 @@ required_paths=(
 	opt/etc/ndm/iflayerchanged.d/100-mors-vpn
 	opt/etc/ndm/netfilter.d/100-dns-local
 	opt/etc/ndm/ndm
+	docs/test-architecture.md
+	scripts/qa/opkg-version-order.sh
 )
 
 missing=0

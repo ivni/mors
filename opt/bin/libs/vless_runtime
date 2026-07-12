@@ -5,6 +5,18 @@
 MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
 # shellcheck source=./vless_store
 . "${MORS_LIB_DIR}/vless_store"
+if [ -n "${VLESS_RUNTIME_ROOT:-}" ] && \
+	[ "${VLESS_RUNTIME_ROOT}" != /opt/var/run/mors/vless ] && \
+	[ -z "${MORS_LOCK_ROOT:-}" ]; then
+	# Router-independent tests provide a temporary VLESS runtime root. Keep the
+	# shared lock in the same sandbox instead of touching /opt.
+	MORS_LOCK_ROOT=${VLESS_RUNTIME_ROOT}/locks
+	MORS_RUNTIME_LOCK_DIR=${MORS_LOCK_ROOT}/mors-runtime.lock
+	MORS_RUNTIME_CANCEL_FILE=${VLESS_RUNTIME_ROOT}/cancel-cold
+	MORS_COLD_JOURNAL_DIR=${VLESS_RUNTIME_ROOT}/cold-recovery
+fi
+# shellcheck source=./runtime_lock
+. "${MORS_LIB_DIR}/runtime_lock"
 
 VLESS_STATE_ROOT=${VLESS_STATE_ROOT:-/opt/var/lib/mors/vless}
 VLESS_RUNTIME_ROOT=${VLESS_RUNTIME_ROOT:-/opt/var/run/mors/vless}
@@ -283,10 +295,15 @@ vless_runtime__release_decision_lock() {
 
 vless_runtime__with_decision_lock() {
 	local result
-	vless_runtime__acquire_decision_lock || return 1
+	runtime_mutation_lock__acquire 'vless decision' || return $?
+	if ! vless_runtime__acquire_decision_lock; then
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	fi
 	"$@"
 	result=$?
 	vless_runtime__release_decision_lock || true
+	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
 	return "${result}"
 }
 
@@ -335,6 +352,21 @@ vless_runtime__probe_connection() {
 	local probe_port="${1}"
 	local url="${2}"
 	vless_runtime__probe "${url}" "socks5h://127.0.0.1:${probe_port}"
+}
+
+# Read-only adapter boundary used by global diagnostics. It only reads the
+# managed registry and never starts a health cycle, changes state, or wakes the
+# supervisor.
+vless_runtime__connection_proxy() {
+	local id="${1}" probe_port
+	[ -r "${VLESS_REGISTRY_FILE}" ] || return 1
+	probe_port=$(jq -r --arg id "${id}" \
+		'.connections[] | select(.id == $id and .enabled == true) | .probe_port // empty' \
+		"${VLESS_REGISTRY_FILE}" 2>/dev/null)
+	case "${probe_port}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	printf 'socks5h://127.0.0.1:%s\n' "${probe_port}"
 }
 
 vless_runtime__best_standby() {

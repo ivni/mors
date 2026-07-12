@@ -8,8 +8,8 @@
 
 MINUS=10
 
-# Убираем ошибки связанные с отсутствием /opt/etc/hosts
-[ -f /opt/etc/hosts ] || touch /opt/etc/hosts
+# /opt/etc/hosts создаётся только явным setup/init workflow. Подключение
+# библиотеки должно оставаться read-only, в частности для `mors test`.
 # ------------------------------------------------------------------------------------------
 #
 # 	Добавляет хосты в белый список, доступ к сайтам которого
@@ -60,7 +60,10 @@ update_ipset(){
 	stage="${1}"
 
 	ready "${prefix}Заполняем ipset таблицу данными из защищенного списка"
-	/opt/apps/mors/bin/main/ipset &> /dev/null &
+	# Worker участвует в общей runtime-транзакции. Запускаем синхронно, чтобы
+	# унаследованный reentrant token не позволял ему менять ipset параллельно с
+	# оставшейся частью init workflow.
+	/opt/apps/mors/bin/main/ipset &> /dev/null
 	[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
 
 	if [ -f /opt/etc/init.d/S56dnsmasq ] ; then
@@ -147,6 +150,9 @@ reset_all_connection(){
 #	    initd		- обновить время при установке пакета
 # ------------------------------------------------------------------------------------------
 cmd_mors_init(){
+	# Убираем ошибки сервисов, связанные с отсутствием /opt/etc/hosts, только в
+	# явно изменяющем init workflow.
+	[ -f /opt/etc/hosts ] || touch /opt/etc/hosts
 
 	stage="${1:-no}"
 	prefix=''
@@ -2311,7 +2317,7 @@ start_vless(){
 		# Запуск xray в случае, если конфигурация xray не содержит ошибок
 		ready "Запускаем xray сервис..."
 		"${XRAY_INIT}" restart && when_ok "УСПЕШНО"
-		[ -f "${VLESS_SUPERVISOR_INIT}" ] && "${VLESS_SUPERVISOR_INIT}" restart &> /dev/null
+		[ -f "${VLESS_SUPERVISOR_INIT}" ] && vless_runtime__supervisor_service restart &> /dev/null
 		vpn_on "${_inface_entware}" &> /dev/null
 		# Тестируем работу proxy vless
 		test_vless_proxy
@@ -2335,7 +2341,7 @@ switch_vpn_on(){
 
 	# Останавливаем xray, если запушен
 	${XRAY_INIT} stop &> /dev/null
-	[ -f "${VLESS_SUPERVISOR_INIT}" ] && "${VLESS_SUPERVISOR_INIT}" stop &> /dev/null
+	[ -f "${VLESS_SUPERVISOR_INIT}" ] && vless_runtime__supervisor_service stop &> /dev/null
 
 	if [[ "${inface_entware}" =~ ${SSR_ENTWARE_TEMPL} ]]; then
 		vpn_off &> /dev/null

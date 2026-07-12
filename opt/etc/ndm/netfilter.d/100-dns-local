@@ -20,6 +20,8 @@
 # Роутинг DNS в nat
 if [ "${type}" = 'iptables' ] && [ "${table}" = 'nat' ] ; then
 	. /opt/apps/mors/bin/libs/ndm
+	ndm_runtime__begin netfilter_dns || exit $?
 
 	ip4__dns__add_routing_for_home &> /dev/null
+	ndm_runtime__end
 fi
