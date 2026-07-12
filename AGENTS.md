@@ -57,6 +57,7 @@ Use the original Kvas repository and wiki only as historical/reference material 
 - Use GitHub CLI (`gh`) for GitHub operations when it is available and authenticated. Prefer it for inspecting issues, pull requests, releases, forks, and repository metadata instead of hand-assembling API calls.
 - Default to `ivni/mors` for active development, issues, PRs, releases, and repository metadata. Use `qzeleza/kvas` only when explicitly comparing against historical upstream behavior.
 - Write Git and release-facing text in Russian: commit subjects and bodies, annotated tag messages, release titles, and release notes. Keep technical identifiers, commands, paths, and upstream names unchanged where translation would make them inaccurate.
+- Phrase commit subjects as completed results: use Russian forms such as `Добавлено ...`, `Исправлено ...`, `Обновлено ...`, or `Удалено ...`. Do not use imperative or infinitive subjects such as `Добавить ...`, `Исправить ...`, or `Игнорировать ...`.
 - Useful commands:
   - `gh auth status`
   - `gh repo view ivni/mors --web`
