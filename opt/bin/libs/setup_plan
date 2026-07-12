@@ -1,0 +1,188 @@
+#!/bin/sh
+
+MORS_SETUP_PLAN_RCI_URL=${MORS_SETUP_PLAN_RCI_URL:-http://127.0.0.1:79/rci/show/interface}
+
+setup_plan__inventory_json() {
+	local raw
+	if [ -n "${MORS_SETUP_PLAN_INTERFACE_JSON:-}" ]; then
+		raw=${MORS_SETUP_PLAN_INTERFACE_JSON}
+	else
+		raw=$(curl -fsS "${MORS_SETUP_PLAN_RCI_URL}") || return 1
+	fi
+	printf '%s\n' "${raw}" | jq -ce --arg managed_proxy "${PROXY_VLESS_NAME:-Proxy21}" '
+		[.[]
+		| select(.defaultgw != true)
+		| select(
+			.type == "OpenVPN" or .type == "Wireguard" or .type == "IKE" or
+			.type == "SSTP" or .type == "PPPOE" or .type == "L2TP" or
+			.type == "PPTP" or .type == "OpenConnect" or
+			(.type == "Proxy" and .id == $managed_proxy)
+		)
+		| select(.id != null and ."interface-name" != null)
+		| {
+			cli: .id,
+			entware: ."interface-name",
+			description: (.description // .id),
+			state: (.state // "unknown")
+		}]
+		| unique_by(.cli)
+	'
+}
+
+setup_plan__adguard_available() {
+	[ -x "${MORS_SETUP_ADGUARD_BIN:-/opt/bin/AdGuardHome}" ] &&
+		[ -x "${MORS_SETUP_ADGUARD_INIT:-/opt/etc/init.d/S99adguardhome}" ] &&
+		[ -r "${MORS_SETUP_ADGUARD_CONFIG:-/opt/etc/AdGuardHome/AdGuardHome.yaml}" ]
+}
+
+setup_plan__select() {
+	local selector dns inventory selected count
+	selector=${1:-}
+	dns=${2:-}
+	[ -n "${selector}" ] || return 64
+	case "${dns}" in
+		dnscrypt) ;;
+		adguard) setup_plan__adguard_available || return 3 ;;
+		*) return 64 ;;
+	esac
+	inventory=$(setup_plan__inventory_json) || return 2
+	selected=$(printf '%s\n' "${inventory}" | jq -ce --arg selector "${selector}" \
+		'[.[] | select(.cli == $selector or .entware == $selector)]') || return 2
+	count=$(printf '%s\n' "${selected}" | jq -r 'length') || return 2
+	[ "${count}" -eq 1 ] || return 3
+	MORS_SETUP_INTERFACE_CLI=$(printf '%s\n' "${selected}" | jq -r '.[0].cli')
+	MORS_SETUP_INTERFACE_ENTWARE=$(printf '%s\n' "${selected}" | jq -r '.[0].entware')
+	MORS_SETUP_INTERFACE_DESCRIPTION=$(printf '%s\n' "${selected}" | jq -r '.[0].description')
+	MORS_SETUP_INTERFACE_STATE=$(printf '%s\n' "${selected}" | jq -r '.[0].state')
+	MORS_SETUP_DNS_BACKEND=${dns}
+	export MORS_SETUP_INTERFACE_CLI MORS_SETUP_INTERFACE_ENTWARE
+	export MORS_SETUP_INTERFACE_DESCRIPTION MORS_SETUP_INTERFACE_STATE MORS_SETUP_DNS_BACKEND
+}
+
+setup_plan__validate_selected() {
+	local inventory count
+	[ -n "${MORS_SETUP_INTERFACE_CLI:-}" ] || return 64
+	[ -n "${MORS_SETUP_INTERFACE_ENTWARE:-}" ] || return 64
+	case "${MORS_SETUP_DNS_BACKEND:-}" in
+		dnscrypt) ;;
+		adguard) setup_plan__adguard_available || return 3 ;;
+		*) return 64 ;;
+	esac
+	inventory=$(setup_plan__inventory_json) || return 2
+	count=$(printf '%s\n' "${inventory}" | jq -r \
+		--arg cli "${MORS_SETUP_INTERFACE_CLI}" \
+		--arg entware "${MORS_SETUP_INTERFACE_ENTWARE}" \
+		'[.[] | select(.cli == $cli and .entware == $entware)] | length') || return 2
+	[ "${count}" -eq 1 ]
+}
+
+setup_plan__print() {
+	local format=${1:-human}
+	if [ "${format}" = json ]; then
+		jq -n \
+			--arg cli "${MORS_SETUP_INTERFACE_CLI}" \
+			--arg entware "${MORS_SETUP_INTERFACE_ENTWARE}" \
+			--arg description "${MORS_SETUP_INTERFACE_DESCRIPTION}" \
+			--arg state "${MORS_SETUP_INTERFACE_STATE}" \
+			--arg dns "${MORS_SETUP_DNS_BACKEND}" '
+			{
+				schema_version: 1,
+				command: "setup plan",
+				selected: {
+					interface: {cli: $cli, entware: $entware, description: $description, state: $state},
+					dns_backend: $dns
+				},
+				changes: ["dns", "firewall", "routing", "services", "ndm_hooks"],
+				preserved: ["mors_config", "mors_list", "tunnel_credentials"],
+				may_require_reboot: false,
+				recovery_command: "mors setup recover --yes"
+			}'
+		return
+	fi
+	cat <<EOF
+Mors: ПЛАН НАСТРОЙКИ
+
+VPN: ${MORS_SETUP_INTERFACE_DESCRIPTION} (${MORS_SETUP_INTERFACE_CLI} / ${MORS_SETUP_INTERFACE_ENTWARE})
+Состояние VPN: ${MORS_SETUP_INTERFACE_STATE}
+DNS: ${MORS_SETUP_DNS_BACKEND}
+Перезагрузка: не требуется
+
+Будут изменены DNS, Mors firewall/routes/ipset, сервисы и NDM-hooks.
+Будут сохранены конфигурация Mors, пользовательский список и настройки тоннеля.
+До финального подтверждения постоянные изменения не выполняются.
+EOF
+}
+
+setup_plan__print_inventory() {
+	local format=${1:-human} inventory adguard=false
+	inventory=$(setup_plan__inventory_json) || return 2
+	setup_plan__adguard_available && adguard=true
+	if [ "${format}" = json ]; then
+		jq -n --argjson interfaces "${inventory}" --argjson adguard "${adguard}" '
+			{
+				schema_version: 1,
+				command: "setup plan",
+				selected: null,
+				interfaces: $interfaces,
+				dns_backends: (["dnscrypt"] + (if $adguard then ["adguard"] else [] end)),
+				next_command: "mors setup plan --interface ID --dns dnscrypt"
+			}'
+		return
+	fi
+	echo 'Mors: ДОСТУПНЫЕ ВАРИАНТЫ НАСТРОЙКИ'
+	printf '%s\n' "${inventory}" | jq -r '.[] | "- \(.description): \(.cli) / \(.entware), \(.state)"'
+	echo '- DNS: dnscrypt'
+	[ "${adguard}" = true ] && echo '- DNS: существующий AdGuard Home'
+	echo
+	echo 'Для полного плана укажите --interface ID --dns BACKEND.'
+}
+
+setup_plan__interactive() {
+	local inventory count number selector dns_choice answer
+	inventory=$(setup_plan__inventory_json) || return 2
+	count=$(printf '%s\n' "${inventory}" | jq -r 'length') || return 2
+	[ "${count}" -gt 0 ] || return 3
+	echo 'Доступные VPN-интерфейсы:'
+	printf '%s\n' "${inventory}" | jq -r 'to_entries[] | "\(.key + 1). \(.value.description) [\(.value.cli)] — \(.value.state)"'
+	printf 'Выберите интерфейс [1-%s, Q-выход]: ' "${count}"
+	IFS= read -r number || return 64
+	case "${number}" in q|Q) return 64 ;; esac
+	printf '%s\n' "${number}" | grep -Eq '^[0-9]+$' || return 64
+	[ "${number}" -ge 1 ] && [ "${number}" -le "${count}" ] || return 64
+	selector=$(printf '%s\n' "${inventory}" | jq -r --argjson index "$((number - 1))" '.[$index].cli')
+
+	dns_choice=dnscrypt
+	if setup_plan__adguard_available; then
+		printf 'DNS backend: [1] dnscrypt (по умолчанию), [2] существующий AdGuard Home: '
+		IFS= read -r answer || return 64
+		[ "${answer}" = 2 ] && dns_choice=adguard
+	fi
+	setup_plan__select "${selector}" "${dns_choice}"
+}
+
+setup_plan__journal_store() {
+	local journal now
+	journal=$(lifecycle_transaction__journal_file) || return 1
+	now=$(lifecycle_state__now) || return 1
+	jq \
+		--arg cli "${MORS_SETUP_INTERFACE_CLI}" \
+		--arg entware "${MORS_SETUP_INTERFACE_ENTWARE}" \
+		--arg dns "${MORS_SETUP_DNS_BACKEND}" \
+		--arg now "${now}" '
+		.plan = {interface_cli: $cli, interface_entware: $entware, dns_backend: $dns}
+		| .updated_at = $now
+	' "${journal}" | lifecycle_state__atomic_write "${journal}"
+}
+
+setup_plan__journal_load() {
+	local journal
+	journal=$(lifecycle_transaction__journal_file) || return 1
+	MORS_SETUP_INTERFACE_CLI=$(jq -er '.plan.interface_cli' "${journal}") || return 1
+	MORS_SETUP_INTERFACE_ENTWARE=$(jq -er '.plan.interface_entware' "${journal}") || return 1
+	MORS_SETUP_DNS_BACKEND=$(jq -er '.plan.dns_backend' "${journal}") || return 1
+	MORS_SETUP_INTERFACE_DESCRIPTION=${MORS_SETUP_INTERFACE_CLI}
+	MORS_SETUP_INTERFACE_STATE=unknown
+	export MORS_SETUP_INTERFACE_CLI MORS_SETUP_INTERFACE_ENTWARE
+	export MORS_SETUP_INTERFACE_DESCRIPTION MORS_SETUP_INTERFACE_STATE MORS_SETUP_DNS_BACKEND
+	setup_plan__validate_selected
+}

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: Type install-mors to install the package on the configured test router.
+        description: Type install-mors-passive to verify a passive package installation on the configured test router.
         required: true
         default: ''
 
@@ -16,7 +16,7 @@ jobs:
     name: Build and smoke on router
     runs-on: ubuntu-latest
     timeout-minutes: 390
-    if: ${{ inputs.confirm == 'install-mors' }}
+    if: ${{ inputs.confirm == 'install-mors-passive' }}
 
     steps:
       - name: Checkout
@@ -72,7 +72,7 @@ jobs:
           ROUTER_HOST: ${{ secrets.MORS_ROUTER_HOST }}
           ROUTER_USER: ${{ secrets.MORS_ROUTER_USER }}
           ROUTER_PORT: ${{ secrets.MORS_ROUTER_PORT }}
-          MORS_ROUTER_SMOKE_CONFIRM: install-mors
+          MORS_ROUTER_SMOKE_CONFIRM: install-mors-passive
         run: |
           export ROUTER_USER="${ROUTER_USER:-root}"
           export ROUTER_PORT="${ROUTER_PORT:-22}"

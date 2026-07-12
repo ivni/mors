@@ -120,11 +120,11 @@ MINUS=9
 
 check_crypto_ssr_libs(){
 
-	[ -f /opt/lib/libmbedcrypto.so.16 ] || {
-		opkg install libmbedtls &> /dev/null
-		local libmbedcrypto=$(find /opt/lib/ -type f -name "libmbedcrypto.so*" | head -1)
-		[ -n "${libmbedcrypto}" ] && ln -sf "${libmbedcrypto}" /opt/lib/libmbedcrypto.so.16
-	}
+	local libmbedcrypto
+	[ -f /opt/lib/libmbedcrypto.so.16 ] && return 0
+	libmbedcrypto=$(find /opt/lib/ -type f -name 'libmbedcrypto.so*' | head -1)
+	[ -n "${libmbedcrypto}" ] || return 1
+	ln -sf "${libmbedcrypto}" /opt/lib/libmbedcrypto.so.16
 		
 }
 

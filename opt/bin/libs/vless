@@ -209,14 +209,12 @@ cmd_install_proxy_package() {
 #
 #-------------------------------------------------------------------------------
     if ! has_package_installed 'Proxy client' ; then
-
-        # Создаем запись в файле /opt/etc/profile для продолжения установки Proxy клиента
-        # DEBUG - восстановить после отладки
-        echo "mors vless" >> /opt/etc/profile
-        # echo "/opt/root/vless.dev" >> /opt/etc/profile
-
         #  Ставим пакет proxy в очередь на установку
-        system_packages_action install proxy opkg-kmod-netfilter opkg-kmod-netfilter-addons && create_proxy_interface || return 1
+        system_packages_action install proxy opkg-kmod-netfilter opkg-kmod-netfilter-addons
+        package_status=$?
+        [ "${package_status}" -eq 75 ] && return 75
+        [ "${package_status}" -eq 0 ] || return 1
+        create_proxy_interface || return 1
 
     else
 
@@ -264,11 +262,6 @@ create_proxy_interface(){
 
     # создаем интерфейс для Proxy клиента и задает ему его свойства по умолчанию
     api_post_query "${data}" "" &> /dev/null
-
-    # удаляем запись в файле /opt/etc/profile, чтобы прекратить повторную установку Proxy клиента
-    # DEBUG - восстановить после отладки
-    sed -i '/mors vless/d' /opt/etc/profile
-    # sed -i '/\/opt\/root\/vless.dev/d' /opt/etc/profile
 
 }
 
@@ -387,13 +380,20 @@ set +xeu
             }
         done
 
+        # Публикуем reboot boundary до commit: отключение питания или
+        # перезагрузка не должны потерять точку явного resume.
+        if command -v lifecycle_state__active_id >/dev/null 2>&1 && \
+            lifecycle_state__active_id >/dev/null 2>&1; then
+            lifecycle_transaction__phase awaiting_reboot || return 1
+        fi
+
         # Подтверждаем установку или удаление пакетов
         api_post_query '[{"components": {"commit": true}}]' &> /dev/null
 
         # Отрисовываем индикатор процесса установки пакетов
         # и ожидаем его завершения
         proxy_package_progress "${action}"
-        return 1
+        return 75
     else 
         return 0
     fi

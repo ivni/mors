@@ -1,6 +1,9 @@
 #!/bin/sh
 source /opt/apps/mors/bin/libs/main
 source /opt/apps/mors/bin/libs/runtime_lock
+source /opt/apps/mors/bin/libs/lifecycle_state
+
+lifecycle_state__runtime_allowed || exit 0
 
 get_config_value(){
         grep "${1}" "${MORS_CONF_FILE}" | cut -d'=' -f2

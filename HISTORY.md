@@ -1,3 +1,11 @@
+## 1.3.0 beta 4 - 2026-07-12
+- Установка IPK стала пассивной: init/NDM hooks активируются только в commit-фазе подтверждённого `mors setup`; `mors`, `help` и `version` не запускают скрытую настройку.
+- Setup разделён на read-only RCI inventory/plan и неинтерактивный apply: интерфейс и DNS выбираются до transaction begin, сохраняются в journal и больше не запрашиваются во время мутаций.
+- Добавлены durable lifecycle state, атомарный transaction journal, защищённый snapshot, boot recovery и единый порядок блокировок setup/update/rollback/uninstall.
+- Setup больше не переустанавливает обязательные зависимости и не меняет их opkg ownership; установка Keenetic Proxy не продолжается через shell profile.
+- Uninstall очищает и проверяет runtime до `opkg remove`, восстанавливает штатный DNS и не использует опасный `--autoremove`; `prerm` блокирует прямое небезопасное удаление.
+- Update выполняется in-place, проверяет SHA-256 candidate/rollback IPK и восстанавливает предыдущий пакет и snapshot при ошибке.
+
 ## 1.3.0 beta 3 - 2026-07-12
 - Host `opkg` version-order gate изолирован от отсутствующего на build runner файла `/etc/opkg.conf` явной пустой конфигурацией.
 

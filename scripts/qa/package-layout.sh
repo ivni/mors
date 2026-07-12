@@ -14,6 +14,9 @@ required_paths=(
 	opt/bin/libs/vless_config
 	opt/bin/libs/vless_runtime
 	opt/bin/libs/lifecycle
+	opt/bin/libs/lifecycle_state
+	opt/bin/libs/lifecycle_snapshot
+	opt/bin/libs/setup_plan
 	opt/bin/libs/runtime_lock
 	opt/bin/libs/check
 	opt/bin/libs/test
@@ -39,6 +42,8 @@ required_paths=(
 	opt/etc/ndm/netfilter.d/100-dns-local
 	opt/etc/ndm/ndm
 	docs/test-architecture.md
+	docs/lifecycle-architecture.md
+	tests/setup_plan.bats
 	scripts/qa/opkg-version-order.sh
 )
 
@@ -62,6 +67,12 @@ fi
 
 if ! grep -q '^define Package/mors/postrm$' Makefile; then
 	echo "Makefile does not define Package/mors/postrm" >&2
+	missing=1
+fi
+
+if grep -Fq '$(INSTALL_BIN) opt/etc/ndm/' Makefile || \
+	grep -Fq '$(INSTALL_BIN) opt/etc/init.d/S96mors' Makefile; then
+	echo "IPK must not install active Mors hooks before setup commit" >&2
 	missing=1
 fi
 

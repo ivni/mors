@@ -1,6 +1,8 @@
 #!/bin/sh
 
 if [ "${1}" = 'start' ] ; then
+	. /opt/apps/mors/bin/libs/lifecycle_state
+	lifecycle_state__boot_gate || exit 0
 	. /opt/apps/mors/bin/libs/ndm
 	. /opt/apps/mors/bin/libs/test_cold
 	MORS_TEST_IPSET=/opt/sbin/ipset

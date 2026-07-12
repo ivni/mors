@@ -67,6 +67,18 @@ setup() {
 		"${REPO_ROOT}/scripts/qa/entware-build.sh"
 }
 
+@test "package workflow reuses only locked Entware state" {
+	local workflow=${REPO_ROOT}/.github/workflows/package.yml
+
+	grep -q 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0' "${workflow}"
+	grep -q 'runs-on: ubuntu-24.04' "${workflow}"
+	grep -q 'entware-v2-ubuntu-24.04-${{ runner.arch }}-aarch64-3.10-' "${workflow}"
+	grep -q "hashFiles('scripts/qa/entware.lock')" "${workflow}"
+	grep -q 'ENTWARE_CACHE_HIT:' "${workflow}"
+	grep -q 'make package/mors/clean' "${REPO_ROOT}/scripts/qa/entware-build.sh"
+	grep -q 'rm -f package/mors' "${REPO_ROOT}/scripts/qa/entware-build.sh"
+}
+
 @test "release publication depends on QA package and artifact gates" {
 	local workflow=${REPO_ROOT}/.github/workflows/release.yml
 	local artifact_line tag_line

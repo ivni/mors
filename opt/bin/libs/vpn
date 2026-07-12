@@ -1635,11 +1635,13 @@ vpn_on() {
 		# Производим замену в библиотеке ndm основных значения интерфейсов
 		ndm_interface_change "${inface_entware}" "${inface_cli}"
 
-		cp "/opt/apps/${APP_NAME}/etc/ndm/netfilter.d/100-vpn-mark" "/opt/etc/ndm/netfilter.d/100-vpn-mark"
-		chmod +x "/opt/etc/ndm/netfilter.d/100-vpn-mark"
+		if [ "${MORS_DEFER_SYSTEM_HOOKS:-false}" != true ]; then
+			cp "/opt/apps/${APP_NAME}/etc/ndm/netfilter.d/100-vpn-mark" "/opt/etc/ndm/netfilter.d/100-vpn-mark"
+			chmod +x "/opt/etc/ndm/netfilter.d/100-vpn-mark"
 
-		cp "/opt/apps/${APP_NAME}/etc/ndm/iflayerchanged.d/100-mors-vpn" "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn"
-		chmod +x "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn"
+			cp "/opt/apps/${APP_NAME}/etc/ndm/iflayerchanged.d/100-mors-vpn" "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn"
+			chmod +x "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn"
+		fi
 
 		state=$(get_value_interface_field "${inface_cli}" state)
 
@@ -1656,7 +1658,7 @@ vpn_on() {
 			when_bad "ОШИБКА"
 			error "Возникла ошибка при подключении интерфейса ${inface_entware}!"
 			error "Проверьте доступность сервера и настройки клиента!"
-			exit 1
+			return 1
 		else
 			update_iptables
 		fi
@@ -1975,8 +1977,10 @@ shadowsocks_on() {
 	inface=$(get_inface_by_ip "${local_ip}")
 
 	#	настройка файла 100-proxy-redirect
-	cp "/opt/apps/${APP_NAME}/etc/ndm/netfilter.d/100-proxy-redirect" "/opt/etc/ndm/netfilter.d/100-proxy-redirect"
-	chmod +x "/opt/etc/ndm/netfilter.d/100-proxy-redirect"
+	if [ "${MORS_DEFER_SYSTEM_HOOKS:-false}" != true ]; then
+		cp "/opt/apps/${APP_NAME}/etc/ndm/netfilter.d/100-proxy-redirect" "/opt/etc/ndm/netfilter.d/100-proxy-redirect"
+		chmod +x "/opt/etc/ndm/netfilter.d/100-proxy-redirect"
+	fi
 
 	ndm_interface_change "$(get_ssr_entware_interface)" "shadowsocks"
 
@@ -2019,7 +2023,7 @@ shadowsocks_on() {
 		when_bad "ОШИБКА"
 		error "Возникла ошибка при подключении shadowsocks интерфейса!"
 		error "Проверьте доступность сервера и настройки клиента!"
-		exit 1
+		return 1
 	fi
 }
 
@@ -2328,7 +2332,7 @@ start_vless(){
 		echo -e "${BLUE}В файле ${VLESS_CONFIG_FILE} обнаружены следующие ошибки:${NOCL}"
 		print_line
 		echo -e "${RED}${check_xray_config}${NOCL}"
-		exit 1
+		return 1
 	fi
 }
 
@@ -2374,7 +2378,9 @@ switch_vpn_on(){
 		done
 	}
 
-	if [ "${cli_inface}" = "${PROXY_VLESS_NAME}" ]; then
+	if [ "${MORS_DEFER_SYSTEM_HOOKS:-false}" = true ]; then
+		:
+	elif [ "${cli_inface}" = "${PROXY_VLESS_NAME}" ]; then
 		rm -f /opt/etc/cron.5mins/check_vpn
 		[ -f /opt/etc/cron.5mins/vless-watchdog ] || \
 			ln -s /opt/apps/mors/bin/main/vless-watchdog /opt/etc/cron.5mins/vless-watchdog
@@ -2598,7 +2604,7 @@ dns_crypt_install() {
 					error "Пакет dnscrypt-proxy2 был установлен с ошибками или поврежден!"
 					error "Файл запуска пакета /opt/etc/init.d/S09dnscrypt-proxy2 отсутствует!"
 					warning "Удалите Морс и затем переустановите пакет dnscrypt-proxy2"
-					exit 1
+					return 1
 				fi
 			fi
 

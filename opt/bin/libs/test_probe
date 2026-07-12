@@ -68,14 +68,21 @@ test_probe__canonical_ipv4() {
 }
 
 test_probe__configuration() {
-	local setup_finished
-	if [ ! -r "${MORS_CONF_FILE}" ]; then
-		test_probe__set unconfigured setup_incomplete 'Файл конфигурации Mors не найден.'
+	local lifecycle_state
+	if ! command -v lifecycle_state__read >/dev/null 2>&1; then
+		test_probe__set error lifecycle_state_unavailable 'Библиотека lifecycle Mors недоступна.'
 		return 1
 	fi
-	setup_finished=$(grep '^SETUP_FINISHED=' "${MORS_CONF_FILE}" | head -n 1 | cut -d= -f2-)
-	if [ "${setup_finished}" != true ]; then
+	lifecycle_state=$(lifecycle_state__read 2>/dev/null) || {
+		test_probe__set error lifecycle_state_invalid 'Состояние lifecycle Mors повреждено.'
+		return 1
+	}
+	if [ "${lifecycle_state}" != ready ]; then
 		test_probe__set unconfigured setup_incomplete 'Начальная настройка Mors не завершена.'
+		return 1
+	fi
+	if [ ! -r "${MORS_CONF_FILE}" ]; then
+		test_probe__set unconfigured setup_incomplete 'Файл конфигурации Mors не найден.'
 		return 1
 	fi
 	if [ ! -r "${MORS_LIST_FILE}" ]; then

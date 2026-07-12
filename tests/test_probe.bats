@@ -2,6 +2,16 @@
 
 setup() {
 	REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+	MORS_LIFECYCLE_ROOT=${BATS_TEST_TMPDIR}/lifecycle
+	MORS_LIFECYCLE_STATE_FILE=${MORS_LIFECYCLE_ROOT}/state.json
+	MORS_LIFECYCLE_TRANSACTION_ROOT=${MORS_LIFECYCLE_ROOT}/transactions
+	MORS_LIFECYCLE_ACTIVE_FILE=${MORS_LIFECYCLE_ROOT}/active
+	MORS_LIFECYCLE_CONF_FILE=${BATS_TEST_TMPDIR}/mors.conf
+	MORS_LIFECYCLE_LEGACY_START_FILE=${BATS_TEST_TMPDIR}/S96mors
+	export MORS_LIFECYCLE_ROOT MORS_LIFECYCLE_STATE_FILE
+	export MORS_LIFECYCLE_TRANSACTION_ROOT MORS_LIFECYCLE_ACTIVE_FILE
+	export MORS_LIFECYCLE_CONF_FILE MORS_LIFECYCLE_LEGACY_START_FILE
+	. "${REPO_ROOT}/opt/bin/libs/lifecycle_state"
 	. "${REPO_ROOT}/opt/bin/libs/test_probe"
 	MORS_CONF_FILE=${BATS_TEST_TMPDIR}/mors.conf
 	MORS_LIST_FILE=${BATS_TEST_TMPDIR}/mors.list
@@ -22,12 +32,12 @@ setup() {
 	[ "$(cat "${MORS_CONF_FILE}")" = 'SETUP_FINISHED=' ]
 }
 
-@test "configuration accepts only the completed setup marker" {
-	printf '%s\n' 'SETUP_FINISHED=false' >"${MORS_CONF_FILE}"
+@test "configuration accepts only lifecycle ready" {
+	printf '%s\n' 'SETUP_FINISHED=true' >"${MORS_CONF_FILE}"
 	printf '%s\n' ifconfig.me >"${MORS_LIST_FILE}"
 	! test_probe__configuration
-	[ "${MORS_PROBE_STATUS}" = unconfigured ]
-	printf '%s\n' 'SETUP_FINISHED=true' >"${MORS_CONF_FILE}"
+	[ "${MORS_PROBE_STATUS}" = unconfigured ] || [ "${MORS_PROBE_STATUS}" = error ]
+	lifecycle_state__write ready test
 	test_probe__configuration
 }
 

@@ -3,6 +3,9 @@
 . /opt/apps/mors/bin/libs/vpn
 . /opt/apps/mors/bin/libs/vless
 . /opt/apps/mors/bin/libs/lifecycle
+. /opt/apps/mors/bin/libs/lifecycle_state
+. /opt/apps/mors/bin/libs/lifecycle_snapshot
+. /opt/apps/mors/bin/libs/setup_plan
 . /opt/apps/mors/bin/libs/runtime_lock
 
 # В случае проблем с инсталляцией пакета ставим в значение true
@@ -68,33 +71,27 @@ setup_print_welcome(){
 	log_in_file line
 }
 setup_adguard(){
-
-	if cmd_adguardhome_status | grep -qE "(ВКЛЮЧЕН|ОТКЛЮЧЕН)" ; then
-		warning "На роутере обнаружен AdGuard Home "
-		read_ynq_timer "Установить AdGuard Home, как основной DNS сервер" ANSWER_AGH Y 10
-		if [ "${ANSWER_AGH}" = q ] ; then exit_q; print_line; exit 1; fi
-		if echo "${ANSWER_AGH}" | grep -qi y; then
-			cmd_adguardhome_on
-			log_in_file "AdGuard Home НАСТРОЕН, как основной DNS сервер"
-		else
-			log_in_file "AdGuard Home пропущен."
-			cmd_adguardhome_status | grep -q "ВКЛЮЧЕН" && {
-				ready "Останавливаем сервис AdGuard Home..."
-				/opt/etc/init.d/S99adguardhome stop &> /dev/null
-				if /opt/etc/init.d/S99adguardhome status | grep -q dead; then
-					when_ok "УСПЕШНО"
-				else
-					when_bad "ОШИБКА"
-					mess="Невозможно остановить сервис AdGuard Home"
-					error "${mess}"
-					log_in_file "ОШИБКА: ${mess}"
-					exit 1
-				fi
-			}
-			cp /opt/etc/AdGuardHome/AdGuardHome.yaml "${MORS_BACKUP_PATH}"/AdGuardHome.yaml
-		fi
-		print_line
-	fi
+	case "${MORS_SETUP_DNS_BACKEND:-}" in
+		adguard)
+			setup_plan__adguard_available || return 1
+			ANSWER_AGH=y
+			adguardhome_setup || return 1
+			"${ADGUARDHOME_DEMON}" restart >/dev/null 2>&1 || return 1
+			log_in_file 'Существующий AdGuard Home настроен как основной DNS сервер.'
+			;;
+		dnscrypt)
+			ANSWER_AGH=n
+			if [ -x "${ADGUARDHOME_DEMON}" ] && \
+				"${ADGUARDHOME_DEMON}" status 2>/dev/null | grep -q alive; then
+				"${ADGUARDHOME_DEMON}" stop >/dev/null 2>&1 || return 1
+			fi
+			if [ -r "${ADGUARDHOME_CONFIG}" ]; then
+				cp -p "${ADGUARDHOME_CONFIG}" "${MORS_BACKUP_PATH}/AdGuardHome.yaml" || return 1
+			fi
+			log_in_file 'AdGuard Home не выбран; используется dnsmasq + dnscrypt-proxy2.'
+			;;
+		*) return 1 ;;
+	esac
 }
 
 #
@@ -597,8 +594,11 @@ setup__cmd_install_unlocked(){
 
 #	Если режим обновления, то не спрашиваем про выбор соединения,
 #	а просто берем его из файла конфигурации Морса
-	update_mode=${1:-false}
 	setup_require_supported_os || return 1
+	setup_plan__validate_selected || {
+		error 'Выбранный setup plan больше не соответствует состоянию роутера.'
+		return 1
+	}
 
 	log_warning 'Установка пакета МОРС начата...'
 
@@ -610,44 +610,31 @@ setup__cmd_install_unlocked(){
 	echo 'Очищаем сетевые правила предыдущих версий'
 	clear_previous_version_net_rules
 
-	# стартуем ipset'ы, используемые DNS-серверами
-	# до старта самих DNS-серверов
+	# Стартуем ipset'ы, используемые DNS-серверами, до старта DNS.
 	ip4__ipset__create_list
 
-#	обновляем itpables
-	opkg update &> /dev/null
-	opkg list-installed | grep -q 'nano' && opkg remove nano &> /dev/null
-	opkg list-installed | grep -q 'dnsmasq-full' && opkg remove dnsmasq-full --force-depends &> /dev/null
-	opkg install dnsmasq-full --force-maintainer &>/dev/null
-	opkg install iptables nano-full &>/dev/null
+	# Обязательные пакеты принадлежат dependency graph opkg. Setup не меняет
+	# их user/auto-installed ownership и не переустанавливает конфиги.
+	for required_command in jq ipset iptables; do
+		command -v "${required_command}" >/dev/null 2>&1 || {
+			error "Отсутствует обязательная зависимость: ${required_command}. Переустановите пакет mors через opkg."
+			return 1
+		}
+	done
 
-	# Устанавливаем прокси пакет
-	cmd_install_proxy_package || return 1
-
-	[ "${update_mode}" ] || setup_print_welcome
+	setup_print_welcome
 	mkdir -p "${MORS_BACKUP_PATH}"
 	cat /dev/null > "${INSTALL_LOG}"
 
-	[ -d "/opt/etc/ndm/iflayerchanged.d" ] || mkdir -p /opt/etc/ndm/iflayerchanged.d
-	home_dir=/opt/apps/mors
-	ln -sf "${home_dir}/etc/ndm/iflayerchanged.d/100-mors-vpn" "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn"
-	ln -sf "${home_dir}/etc/ndm/ifcreated.d/mors-iface-add" "/opt/etc/ndm/ifcreated.d/mors-iface-add"
-	ln -sf "${home_dir}/etc/ndm/ifdestroyed.d/mors-iface-del" "/opt/etc/ndm/ifdestroyed.d/mors-iface-del"
-
-	check_crypto_ssr_libs
-
-	[ -f "${MORS_START_FILE}" ] || cp -f /opt/apps/mors/etc/init.d/S96mors "${MORS_START_FILE}"
-	chmod +x "${MORS_START_FILE}"
+	check_crypto_ssr_libs || warning 'Совместимая libmbedcrypto не найдена; Shadowsocks будет недоступен.'
 
 	# Xray нужен только для VLESS: проблемы с ним не должны блокировать
 	# настройку Mors для OpenVPN/WireGuard и других интерфейсов.
-	xray_install_and_check || warning "VLESS будет недоступен до установки совместимой версии Xray."
+	xray_version_check || warning "VLESS будет недоступен до установки совместимой версии Xray."
 	# Создаем ссылку на наш скрипт для запуска xray в /opt/etc/init.d
 	[ -f "${XRAY_INIT}" ] || ln -s /opt/apps/mors/etc/init.d/S97xray ${XRAY_INIT}
 	ln -sf /opt/apps/mors/etc/init.d/S25mors-vless "${VLESS_SUPERVISOR_INIT}"
 	chmod +x "${VLESS_SUPERVISOR_INIT}"
-	mkdir -p /opt/etc/cron.5mins
-	ln -sf /opt/apps/mors/bin/main/vless-watchdog /opt/etc/cron.5mins/vless-watchdog
 
 	# Код отключения IPv6 не помогает
 	#if [ "$(ipv6_status)" = 0 ]; then
@@ -661,60 +648,19 @@ setup__cmd_install_unlocked(){
 	local_ip=$(get_router_ip)
 	set_config_value DNSMASQ_LISTEN_IP "${local_ip}"
 
-	#------------------------------------------------------
-	# Сейчас необходимо выбрать VPN интерфейс для работы пакета
-	#------------------------------------------------------
-	if [ "${update_mode}" ]; then
-
-		#------------------------------------------------------
-		# меняем номер старой версии пакета на новый
-		#------------------------------------------------------
-		new_ver=$(get_config_value APP_VERSION)
-		new_rel=$(get_config_value APP_RELEASE)
-
-		#------------------------------------------------------
-		# ВОССТАНАВЛИВАЕМ ФАЙЛ СО СПИСКОМ РАЗБЛОКИРОВКИ
-		#------------------------------------------------------
-		restore_backups || return 1
-		if [ -f "${VLESS_REGISTRY_FILE}" ]; then
-			vless_store__ensure && \
-				vless_domain__apply_generated "$(vless_runtime__active_id)" || \
-				warning "Не удалось восстановить runtime-конфигурацию VLESS. Выполните 'mors vless status'."
-		elif [ -f "${VLESS_CONFIG_FILE}" ]; then
-			mv -f "${VLESS_CONFIG_FILE}" "${VLESS_CONFIG_FILE}.legacy-1.1.9" || return 1
-			warning "Прежняя одиночная VLESS-конфигурация сохранена как ${VLESS_CONFIG_FILE}.legacy-1.1.9, но не активирована. Настройте VLESS заново через 'mors vless'."
-			vless_store__ensure && vless_domain__apply_generated '' || return 1
-		fi
-
-		set_config_value APP_VERSION "${new_ver}"
-		set_config_value APP_RELEASE "${new_rel}"
-		#------------------------------------------------------
-
-		inface_entware=$(get_config_value INFACE_ENT)
-		cli_inface=$(get_config_value INFACE_CLI)
-
-#		Проверяем были ли внесены изменения в файл конфигурации
-		if [ -z "${inface_entware}" ] || [ -z "${cli_inface}" ] ; then
-			echo -e "${BLUE}Информация об интерфейсах отсутствует!${NOCL}"
-			echo -e "${BLUE}Запускаем процедуру выбора интерфейсов...${NOCL}"
-			print_line
-			#	производим сканирование интерфейсов
-			cmd_interface_change no install
-		else
-#			Если изменений не было, то восстанавливаем соединение
-			switch_vpn_on "${inface_entware}" "${cli_inface}"
-		fi
-
-	else
-#		производим сканирование интерфейсов
-		cmd_interface_change yes install
-	fi
+	# Все решения получены и проверены до transaction begin. Apply не задаёт
+	# вопросов и использует ровно тот интерфейс, который показан в плане.
+	is_install_stage=install
+	MORS_DEFER_SYSTEM_HOOKS=true
+	export MORS_DEFER_SYSTEM_HOOKS
+	switch_vpn_on "${MORS_SETUP_INTERFACE_ENTWARE}" "${MORS_SETUP_INTERFACE_CLI}" || return 1
+	unset MORS_DEFER_SYSTEM_HOOKS
 	log_in_file "$(cmd_vpn_status)"
 	print_line
 	#------------------------------------------------------
 	# AdGuard Home
 	#------------------------------------------------------
-	setup_adguard
+	setup_adguard || return 1
 
 	#----------------------------------------------------------
 	#
@@ -736,11 +682,11 @@ setup__cmd_install_unlocked(){
 		#------------------------------------------------------
 		# DNSMASQ
 		#------------------------------------------------------
-		dnsmasq_install 'install'
+		dnsmasq_install 'install' || return 1
 		#------------------------------------------------------
 		# DNSCRYPT-PROXY2
 		#------------------------------------------------------
-		dns_crypt_install
+		dns_crypt_install 'install' || return 1
 		log_in_file "Шифрование DNS трафика (dnscrypt-proxy2) ВКЛЮЧЕНО."
 		#------------------------------------------------------
 		# Блокировка рекламы
@@ -771,6 +717,8 @@ setup__cmd_install_unlocked(){
 	#------------------------------------------------------
 	# 	Запускаем МОРС в работу
 	#------------------------------------------------------
+	setup__activate_core_hooks || return 1
+
 	ready "Запускаем МОРС в работу"
 	if cmd_mors_init &> /dev/null ; then
 		when_ok "УСПЕШНО"
@@ -787,7 +735,6 @@ setup__cmd_install_unlocked(){
 		fi
 	fi
 
-	set_config_value 'SETUP_FINISHED' 'true'
 	log_warning 'Установка пакета МОРС завершена'
 
 	print_line
@@ -895,6 +842,18 @@ setup__cmd_uninstall_unlocked() {
 	fi
 
 	if echo "${answer}" | grep -qi y ; then
+		if [ "${MORS_UNINSTALL_PREVIOUS_STATE:-}" = unconfigured ]; then
+			ready 'Проверяем пассивное состояние Mors перед удалением...'
+			setup__verify_runtime_removed && when_ok 'УСПЕШНО' || {
+				when_bad 'ОШИБКА'
+				error 'Удаление остановлено: unconfigured-установка содержит активный runtime или hooks.'
+				return 1
+			}
+			setup__remove_package "${rm_type}" || return 1
+			print_line
+			echo 'Пассивная установка Mors удалена.'
+			return 0
+		fi
 		if [ "${rm_type}" = full ]; then
 			mess="Удаляем все архивные данные и все зависимые пакеты..."
 			rm -f /opt/etc/init/K56dnsmasq  /opt/etc/init/K09dnscrypt-proxy2
@@ -918,7 +877,9 @@ setup__cmd_uninstall_unlocked() {
 			/opt/etc/init.d/S22shadowsocks stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
 			config__restore_from_opkg "${SHADOWSOCKS_CONF}"
 		fi
+		uninstall_dns_backend=dnsmasq
 		if cmd_adguardhome_status | grep -q 'ВКЛЮЧЕН' ; then
+			uninstall_dns_backend=adguard
 			ready 'Останавливаем службу AdGuardHome '
 			${ADGUARDHOME_DEMON} stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
 			config__restore_from_opkg "${ADGUARDHOME_CONFIG}"
@@ -959,56 +920,551 @@ setup__cmd_uninstall_unlocked() {
 		#ip4__flush &> /dev/null
 		#if [ $? = 0 ]; then when_ok 'УСПЕШНО'; else when_bad 'ОШИБКА'; fi
 
-		ready 'Удаляем пакет Морс...'
-		opkg remove mors --autoremove &> /dev/null
-		when_ok 'УСПЕШНО'
-
-		ready 'Удаляем интегрированные в систему файлы...'
-		rm_package_files "${rm_type}" &> /dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
-
 		ready 'Очищаем всевозможные сетевые правила...'
-		# т.к. файлы уже подчищены, то можем использовать лишь не "интеллектуальную" очистку
 		clear_previous_version_net_rules &> /dev/null
 		if [ $? = 0 ]; then when_ok 'УСПЕШНО'; else when_bad 'ОШИБКА'; fi
 
-		if [ -f /opt/etc/init.d/S99adguardhome ]; then
-			restore_adguard
+		ready 'Восстанавливаем штатный DNS после очистки Mors...'
+		if [ "${uninstall_dns_backend}" = adguard ] && [ -x /opt/etc/init.d/S99adguardhome ]; then
+			restore_adguard >/dev/null 2>&1 || true
+			/opt/etc/init.d/S99adguardhome restart >/dev/null 2>&1 || {
+				when_bad 'ОШИБКА'
+				error 'Удаление остановлено: штатный AdGuard Home не запустился.'
+				return 1
+			}
+		elif [ -x /opt/etc/init.d/S56dnsmasq ]; then
+			/opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1 || {
+				when_bad 'ОШИБКА'
+				error 'Удаление остановлено: штатный DNSMasq не запустился.'
+				return 1
+			}
+			if [ -x /opt/etc/init.d/S09dnscrypt-proxy2 ]; then
+				/opt/etc/init.d/S09dnscrypt-proxy2 restart >/dev/null 2>&1 || true
+			fi
+		else
+			when_bad 'ОШИБКА'
+			error 'Удаление остановлено: штатный DNS-сервис не найден.'
+			return 1
 		fi
+		when_ok 'УСПЕШНО'
 
-		if [ -f /opt/etc/init.d/S56dnsmasq ] ; then
-			stop_dnsmasq
-		fi
-		if [ -f /opt/etc/init.d/S09dnscrypt-proxy2 ]; then
-			stop_crypt
-		fi
+		ready 'Отключаем init- и NDM-интеграции Mors...'
+		setup__deactivate_core_hooks && when_ok 'УСПЕШНО' || {
+			when_bad 'ОШИБКА'
+			error 'Удаление остановлено: не удалось отключить системные hooks Mors.'
+			return 1
+		}
+
+		ready 'Проверяем очистку runtime перед удалением пакета...'
+		setup__verify_runtime_removed && when_ok 'УСПЕШНО' || {
+			when_bad 'ОШИБКА'
+			error 'Удаление остановлено: в firewall или ipset остались активные объекты Mors.'
+			return 1
+		}
+
+		# Не используем --autoremove: dnsmasq/ipset/iptables могут обслуживать
+		# сам роутер и другие пакеты даже если когда-то были auto-installed.
+		setup__remove_package "${rm_type}" || return 1
 
 		print_line
 		echo "Удаление МОРСа завершено."
 	fi
 }
 
+setup__deactivate_core_hooks() {
+	rm_file /opt/etc/ndm/netfilter.d/100-dns-local
+	rm_file /opt/etc/ndm/netfilter.d/100-vpn-mark
+	rm_file /opt/etc/ndm/netfilter.d/100-proxy-redirect
+	rm_file /opt/etc/ndm/fs.d/15-mors-start.sh
+	rm_file /opt/etc/ndm/ifcreated.d/mors-iface-add
+	rm_file /opt/etc/ndm/ifdestroyed.d/mors-iface-del
+	rm_file /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
+	rm_file /opt/etc/init.d/S96mors
+	rm_file /opt/etc/init.d/S25mors-vless
+	rm_file /opt/etc/init.d/S97xray
+	rm_file /opt/etc/cron.5mins/vless-watchdog
+	rm_file /opt/etc/cron.5mins/check_vpn
+}
+
+setup__verify_runtime_removed() {
+	local iptables_state ipset_state
+	iptables_state=$(save_iptables 2>/dev/null) || return 1
+	printf '%s\n' "${iptables_state}" | grep -qE '(^|[[:space:]:])MORS(_|[[:space:]])' && return 1
+	if command -v ipset >/dev/null 2>&1; then
+		ipset_state=$(ipset list -n 2>/dev/null) || return 1
+	elif [ -x /opt/sbin/ipset ]; then
+		ipset_state=$(/opt/sbin/ipset list -n 2>/dev/null) || return 1
+	else
+		return 1
+	fi
+	printf '%s\n' "${ipset_state:-}" | grep -qE '^MORS($|_)' && return 1
+	for path in \
+		/opt/etc/init.d/S96mors \
+		/opt/etc/init.d/S25mors-vless \
+		/opt/etc/init.d/S97xray \
+		/opt/etc/ndm/fs.d/15-mors-start.sh \
+		/opt/etc/ndm/netfilter.d/100-dns-local \
+		/opt/etc/ndm/netfilter.d/100-vpn-mark \
+		/opt/etc/ndm/netfilter.d/100-proxy-redirect \
+		/opt/etc/ndm/ifcreated.d/mors-iface-add \
+		/opt/etc/ndm/ifdestroyed.d/mors-iface-del \
+		/opt/etc/ndm/iflayerchanged.d/100-mors-vpn \
+		/opt/etc/cron.5mins/vless-watchdog \
+		/opt/etc/cron.5mins/check_vpn; do
+		[ ! -e "${path}" ] && [ ! -L "${path}" ] || return 1
+	done
+}
+
+setup__activate_core_hooks() {
+	mkdir -p /opt/etc/init.d /opt/etc/ndm/fs.d /opt/etc/ndm/netfilter.d \
+		/opt/etc/ndm/ifcreated.d /opt/etc/ndm/ifdestroyed.d \
+		/opt/etc/ndm/iflayerchanged.d /opt/etc/cron.5mins || return 1
+	cp -f /opt/apps/mors/etc/init.d/S96mors /opt/etc/init.d/S96mors || return 1
+	ln -sf /opt/apps/mors/etc/init.d/S25mors-vless /opt/etc/init.d/S25mors-vless || return 1
+	ln -sf /opt/apps/mors/etc/init.d/S97xray /opt/etc/init.d/S97xray || return 1
+	cp -f /opt/apps/mors/etc/ndm/fs.d/15-mors-start.sh /opt/etc/ndm/fs.d/15-mors-start.sh || return 1
+	cp -f /opt/apps/mors/etc/ndm/netfilter.d/100-dns-local /opt/etc/ndm/netfilter.d/100-dns-local || return 1
+	ln -sf /opt/apps/mors/etc/ndm/ifcreated.d/mors-iface-add /opt/etc/ndm/ifcreated.d/mors-iface-add || return 1
+	ln -sf /opt/apps/mors/etc/ndm/ifdestroyed.d/mors-iface-del /opt/etc/ndm/ifdestroyed.d/mors-iface-del || return 1
+	ln -sf /opt/apps/mors/etc/ndm/iflayerchanged.d/100-mors-vpn /opt/etc/ndm/iflayerchanged.d/100-mors-vpn || return 1
+	rm -f /opt/etc/ndm/netfilter.d/100-vpn-mark /opt/etc/ndm/netfilter.d/100-proxy-redirect || return 1
+	if [[ "${MORS_SETUP_INTERFACE_ENTWARE:-}" =~ ${SSR_ENTWARE_TEMPL} ]]; then
+		cp -f /opt/apps/mors/etc/ndm/netfilter.d/100-proxy-redirect /opt/etc/ndm/netfilter.d/100-proxy-redirect || return 1
+		chmod 755 /opt/etc/ndm/netfilter.d/100-proxy-redirect || return 1
+	else
+		cp -f /opt/apps/mors/etc/ndm/netfilter.d/100-vpn-mark /opt/etc/ndm/netfilter.d/100-vpn-mark || return 1
+		chmod 755 /opt/etc/ndm/netfilter.d/100-vpn-mark || return 1
+	fi
+	if [ "${MORS_SETUP_INTERFACE_CLI:-}" = "${PROXY_VLESS_NAME}" ]; then
+		rm -f /opt/etc/cron.5mins/check_vpn || return 1
+		ln -sf /opt/apps/mors/bin/main/vless-watchdog /opt/etc/cron.5mins/vless-watchdog || return 1
+	else
+		rm -f /opt/etc/cron.5mins/vless-watchdog || return 1
+		ln -sf /opt/apps/mors/bin/main/check_vpn /opt/etc/cron.5mins/check_vpn || return 1
+	fi
+	chmod 755 /opt/etc/init.d/S96mors \
+		/opt/etc/ndm/fs.d/15-mors-start.sh \
+		/opt/etc/ndm/netfilter.d/100-dns-local || return 1
+}
+
+setup__service_running() {
+	local service output
+	service=${1}
+	[ -x "${service}" ] || return 1
+	output=$("${service}" status 2>/dev/null || true)
+	printf '%s\n' "${output}" | grep -qiE 'dead|not[[:space:]]+running|stopped' && return 1
+	printf '%s\n' "${output}" | grep -qiE '(^|[[:space:]])(alive|running)([[:space:].]|$)'
+}
+
+setup__verify_committed() {
+	local expected_cli expected_entware dns_backend iptables_state ipset_state ip_binary rule_state route_state path
+	expected_cli=${MORS_SETUP_INTERFACE_CLI:-$(get_config_value INFACE_CLI)}
+	expected_entware=${MORS_SETUP_INTERFACE_ENTWARE:-$(get_config_value INFACE_ENT)}
+	[ -n "${expected_cli}" ] && [ -n "${expected_entware}" ] || return 1
+	[ "$(get_config_value INFACE_CLI)" = "${expected_cli}" ] || return 1
+	[ "$(get_config_value INFACE_ENT)" = "${expected_entware}" ] || return 1
+	[ -x /opt/etc/init.d/S96mors ] || return 1
+	[ -x /opt/etc/ndm/fs.d/15-mors-start.sh ] || return 1
+	[ -x /opt/etc/ndm/netfilter.d/100-dns-local ] || return 1
+	[ -x /opt/etc/ndm/ifcreated.d/mors-iface-add ] || return 1
+	[ -x /opt/etc/ndm/ifdestroyed.d/mors-iface-del ] || return 1
+	[ -x /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ] || return 1
+	dns_backend=${MORS_SETUP_DNS_BACKEND:-}
+	if [ -z "${dns_backend}" ]; then
+		has_adguard_enable && dns_backend=adguard || dns_backend=dnscrypt
+	fi
+	case "${dns_backend}" in
+		adguard)
+			[ -r "${ADGUARDHOME_CONFIG}" ] || return 1
+			setup__service_running "${ADGUARDHOME_DEMON}" || return 1
+			;;
+		dnscrypt)
+			[ -r "${DNSMASQ_CONFIG}" ] && [ -r "${DNSCRYPT_CONFIG}" ] || return 1
+			setup__service_running "${DNSMASQ_DEMON}" || return 1
+			setup__service_running "${DNSCRYPT_DEMON}" || return 1
+			;;
+		*) return 1 ;;
+	esac
+	iptables_state=$(save_iptables 2>/dev/null) || return 1
+	printf '%s\n' "${iptables_state}" | grep -qE '(^|[[:space:]:])MORS(_|[[:space:]])' || return 1
+	if command -v ipset >/dev/null 2>&1; then
+		ipset_state=$(ipset list -n 2>/dev/null) || return 1
+	elif [ -x /opt/sbin/ipset ]; then
+		ipset_state=$(/opt/sbin/ipset list -n 2>/dev/null) || return 1
+	else
+		return 1
+	fi
+	printf '%s\n' "${ipset_state}" | grep -qE '^MORS($|_)' || return 1
+	if ! [[ "${expected_entware}" =~ ${SSR_ENTWARE_TEMPL} ]]; then
+		if command -v ip >/dev/null 2>&1; then
+			ip_binary=$(command -v ip)
+		elif [ -x /opt/sbin/ip ]; then
+			ip_binary=/opt/sbin/ip
+		else
+			return 1
+		fi
+		rule_state=$("${ip_binary}" rule show 2>/dev/null) || return 1
+		printf '%s\n' "${rule_state}" | grep -qE "lookup[[:space:]]+${ROUTE_TABLE_ID:-1001}([[:space:]]|$)" || return 1
+		route_state=$("${ip_binary}" route show table "${ROUTE_TABLE_ID:-1001}" 2>/dev/null) || return 1
+		[ -n "${route_state}" ] || return 1
+	fi
+}
+
+setup__rollback_transaction() {
+	local previous_state phase result=0
+	previous_state=$(jq -er '.previous_state' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
+	phase=$(jq -er '.phase' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
+	if [ "${phase}" = completed ]; then
+		lifecycle_transaction__reconcile_completed
+		return $?
+	fi
+	if [ "${phase}" = planning ]; then
+		lifecycle_transaction__rollback_finish
+		return $?
+	fi
+	lifecycle_transaction__phase rolling_back || return 1
+	MORS_LIFECYCLE_APPLY=true
+	export MORS_LIFECYCLE_APPLY
+	clear_previous_version_net_rules >/dev/null 2>&1 || true
+	setup__deactivate_core_hooks || result=1
+	[ "${result}" -ne 0 ] || lifecycle_snapshot__restore || result=1
+	if [ "${result}" -eq 0 ] && [ "${previous_state}" = ready ]; then
+		(
+			export MORS_LIFECYCLE_APPLY
+			cmd_mors_init no
+		) >/dev/null 2>&1 || result=1
+		[ "${result}" -ne 0 ] || setup__verify_committed || result=1
+	elif [ "${result}" -eq 0 ]; then
+		setup__verify_runtime_removed || result=1
+	fi
+	[ "${result}" -ne 0 ] || lifecycle_transaction__rollback_finish || result=1
+	unset MORS_LIFECYCLE_APPLY
+	return "${result}"
+}
+
+setup__remove_package() {
+	local rm_type
+	rm_type=${1:-}
+	lifecycle_transaction__phase package_remove_ready || return 1
+	if [ "${rm_type}" = full ]; then
+		: >"${MORS_LIFECYCLE_ROOT}/purge-requested" || return 1
+		chmod 600 "${MORS_LIFECYCLE_ROOT}/purge-requested" || return 1
+	fi
+	ready 'Удаляем пакет Морс...'
+	if opkg remove mors &> /dev/null; then
+		when_ok 'УСПЕШНО'
+	else
+		when_bad 'ОШИБКА'
+		error 'opkg не подтвердил удаление пакета. Lifecycle journal сохранён.'
+		return 1
+	fi
+}
+
+setup__has_yes() {
+	local argument
+	for argument in "$@"; do
+		[ "${argument}" = --yes ] && return 0
+	done
+	return 1
+}
+
+setup_cli__parse_options() {
+	MORS_SETUP_CLI_INTERFACE=''
+	MORS_SETUP_CLI_DNS=''
+	MORS_SETUP_CLI_JSON=false
+	MORS_SETUP_CLI_YES=false
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--interface)
+				shift
+				[ "$#" -gt 0 ] || return 64
+				MORS_SETUP_CLI_INTERFACE=$1
+				;;
+			--dns)
+				shift
+				[ "$#" -gt 0 ] || return 64
+				MORS_SETUP_CLI_DNS=$1
+				;;
+			--json) MORS_SETUP_CLI_JSON=true ;;
+			--yes) MORS_SETUP_CLI_YES=true ;;
+			*) return 64 ;;
+		esac
+		shift
+	done
+}
+
+cmd_setup_cli() {
+	local action answer phase operation format plan_status
+	action=${1:-interactive}
+	case "${action}" in
+		plan)
+			shift
+			setup_cli__parse_options "$@" || return 64
+			[ "${MORS_SETUP_CLI_YES}" = false ] || return 64
+			format=human
+			[ "${MORS_SETUP_CLI_JSON}" = true ] && format=json
+			if [ -z "${MORS_SETUP_CLI_INTERFACE}" ] && [ -z "${MORS_SETUP_CLI_DNS}" ]; then
+				setup_plan__print_inventory "${format}"
+			else
+				[ -n "${MORS_SETUP_CLI_INTERFACE}" ] && [ -n "${MORS_SETUP_CLI_DNS}" ] || return 64
+				setup_plan__select "${MORS_SETUP_CLI_INTERFACE}" "${MORS_SETUP_CLI_DNS}" || return $?
+				setup_plan__print "${format}"
+			fi
+			;;
+		apply)
+			shift
+			setup_cli__parse_options "$@" || return 64
+			[ "${MORS_SETUP_CLI_JSON}" = false ] || return 64
+			[ "${MORS_SETUP_CLI_YES}" = true ] || {
+				error 'Для неинтерактивной настройки требуется --yes.'
+				return 64
+			}
+			[ -n "${MORS_SETUP_CLI_INTERFACE}" ] && [ -n "${MORS_SETUP_CLI_DNS}" ] || {
+				error 'Для apply обязательны --interface и --dns.'
+				return 64
+			}
+			setup_plan__select "${MORS_SETUP_CLI_INTERFACE}" "${MORS_SETUP_CLI_DNS}" || return $?
+			setup_plan__print human
+			cmd_install
+			;;
+		resume)
+			setup__has_yes "$@" || {
+				error 'Для продолжения настройки требуется --yes.'
+				return 64
+			}
+			phase=$(jq -er '.phase' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 3
+			operation=$(jq -er '.operation' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 3
+			[ "${operation}" = setup ] && [ "${phase}" = awaiting_reboot ] || {
+				error 'Нет настройки, ожидающей продолжения после перезагрузки.'
+				return 3
+			}
+			MORS_SETUP_RESUME=true
+			export MORS_SETUP_RESUME
+			cmd_install
+			;;
+		recover)
+			setup__has_yes "$@" || {
+				error 'Для восстановления требуется --yes.'
+				return 64
+			}
+			cmd_setup_recover
+			;;
+		interactive)
+			[ -t 0 ] && [ -t 1 ] || {
+				error 'В неинтерактивном режиме используйте mors setup apply --interface ID --dns BACKEND --yes.'
+				return 64
+			}
+			setup_plan__interactive
+			plan_status=$?
+			[ "${plan_status}" -eq 0 ] || {
+				error 'Не удалось выбрать безопасный setup plan.'
+				return "${plan_status}"
+			}
+			setup_plan__print human
+			printf 'Продолжить настройку? [y/N]: '
+			IFS= read -r answer || return 64
+			case "${answer}" in
+				y|Y|yes|YES|Yes|да|Да|ДА) cmd_install ;;
+				*) echo 'Настройка отменена. Изменения не выполнены.' ;;
+			esac
+			;;
+		*)
+			error "Неизвестное действие setup: ${action}."
+			return 64
+			;;
+	esac
+}
+
 cmd_install() {
 	lifecycle__run_locked setup__cmd_install_with_runtime "$@"
+}
+
+cmd_setup_recover() {
+	lifecycle__run_locked setup__recover_with_runtime
+}
+
+setup__recover_with_runtime() {
+	local result operation phase
+	operation=$(jq -er '.operation' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 3
+	phase=$(jq -er '.phase' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 4
+	case "${operation}" in
+		setup|uninstall) ;;
+		*) error "Для транзакции ${operation} требуется recovery обновления."; return 3 ;;
+	esac
+	runtime_mutation_lock__acquire 'mors setup recover' || return $?
+	setup__rollback_transaction
+	result=$?
+	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
+	if [ "${result}" -eq 0 ]; then
+		if [ "${phase}" = completed ]; then
+			echo 'Завершённое lifecycle-состояние согласовано и проверено.'
+		else
+			echo 'Исходное состояние восстановлено и проверено.'
+		fi
+	else
+		lifecycle_transaction__mark_recovery_required setup_recovery_failed 2>/dev/null || true
+		error 'Не удалось подтвердить восстановление. Journal и snapshot сохранены.'
+	fi
+	return "${result}"
 }
 
 cmd_uninstall() {
 	lifecycle__run_locked setup__cmd_uninstall_with_runtime "$@"
 }
 
+cmd_uninstall_cli() {
+	local purge=false confirmed=false argument answer
+	# Deprecated compatibility for the previous package/MOLOT contract.
+	[ "${1:-}" = full ] && purge=true
+	[ "${2:-}" = yes ] && confirmed=true
+	for argument in "$@"; do
+		case "${argument}" in
+			--purge) purge=true ;;
+			--yes) confirmed=true ;;
+			full|yes|'') ;;
+			recover)
+				setup__has_yes "$@" || return 64
+				cmd_setup_recover
+				return $?
+				;;
+			*) error "Неизвестный аргумент uninstall: ${argument}."; return 64 ;;
+		esac
+	done
+	if [ "${confirmed}" != true ]; then
+		[ -t 0 ] && [ -t 1 ] || {
+			error 'В неинтерактивном режиме для удаления требуется --yes.'
+			return 64
+		}
+		printf 'Удалить Mors%s? [y/N]: ' "$([ "${purge}" = true ] && printf ' вместе с пользовательскими данными')"
+		IFS= read -r answer || return 64
+		case "${answer}" in
+			y|Y|yes|YES|Yes|да|Да|ДА) confirmed=true ;;
+			*) echo 'Удаление отменено. Изменения не выполнены.'; return 0 ;;
+		esac
+	fi
+	[ "${purge}" = true ] && cmd_uninstall full yes || cmd_uninstall '' yes
+}
+
 setup__cmd_install_with_runtime() {
-	local result
+	local result state operation phase new_transaction
+	state=$(lifecycle_state__read) || return 4
+	new_transaction=false
+	if lifecycle_state__has_active_marker; then
+		[ "${MORS_SETUP_RESUME:-false}" = true ] || return 3
+		operation=$(jq -er '.operation' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 4
+		phase=$(jq -er '.phase' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 4
+		[ "${operation}" = setup ] && [ "${phase}" = awaiting_reboot ] || return 3
+		setup_plan__journal_load || return 4
+	else
+		[ "${state}" = unconfigured ] || {
+			error 'Повторный setup для работающей установки не выполняется автоматически.'
+			return 3
+		}
+		setup_plan__validate_selected || return $?
+		new_transaction=true
+	fi
 	runtime_mutation_lock__acquire 'mors setup' || return $?
-	setup__cmd_install_unlocked "$@"
+	if [ "${new_transaction}" = true ]; then
+		lifecycle_transaction__begin setup "${state}" ready >/dev/null || {
+			result=$?
+			runtime_mutation_lock__release >/dev/null 2>&1 || true
+			return "${result}"
+		}
+		setup_plan__journal_store || {
+			result=$?
+			lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
+			runtime_mutation_lock__release >/dev/null 2>&1 || true
+			return "${result}"
+		}
+		lifecycle_snapshot__capture || {
+			result=$?
+			lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
+			runtime_mutation_lock__release >/dev/null 2>&1 || true
+			return "${result}"
+		}
+		lifecycle_transaction__phase prepared || {
+			runtime_mutation_lock__release >/dev/null 2>&1 || true
+			return 1
+		}
+	fi
+	lifecycle_transaction__phase applying || {
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	}
+	(
+		MORS_LIFECYCLE_APPLY=true
+		export MORS_LIFECYCLE_APPLY
+		setup__cmd_install_unlocked "$@"
+	)
 	result=$?
+	if [ "${result}" -eq 75 ]; then
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		warning 'Для продолжения настройки после перезагрузки выполните mors setup resume --yes.'
+		return 0
+	fi
+	if [ "${result}" -eq 0 ]; then
+		lifecycle_transaction__phase verifying || result=1
+		setup__verify_committed || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		lifecycle_transaction__finish || result=1
+	else
+		if setup__rollback_transaction; then
+			error 'Настройка не завершена. Исходное состояние восстановлено.'
+			result=2
+		else
+			lifecycle_transaction__mark_recovery_required setup_failed 2>/dev/null || true
+			error 'Настройка не завершена. Новые изменения заблокированы до восстановления.'
+		fi
+	fi
 	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
 	return "${result}"
 }
 
 setup__cmd_uninstall_with_runtime() {
-	local result
+	local result state
+	state=$(lifecycle_state__read) || return 4
+	if lifecycle_state__has_active_marker; then
+		error 'Другая lifecycle-транзакция не завершена.'
+		return 3
+	fi
 	runtime_mutation_lock__acquire 'mors uninstall' || return $?
-	setup__cmd_uninstall_unlocked "$@"
+	lifecycle_transaction__begin uninstall "${state}" unconfigured >/dev/null || {
+		result=$?
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return "${result}"
+	}
+	lifecycle_snapshot__capture || {
+		result=$?
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return "${result}"
+	}
+	lifecycle_transaction__phase prepared || {
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	}
+	lifecycle_transaction__phase cleanup || {
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	}
+	MORS_UNINSTALL_PREVIOUS_STATE=${state}
+	export MORS_UNINSTALL_PREVIOUS_STATE
+	(
+		MORS_LIFECYCLE_APPLY=true
+		export MORS_LIFECYCLE_APPLY
+		setup__cmd_uninstall_unlocked "$@"
+	)
 	result=$?
+	unset MORS_UNINSTALL_PREVIOUS_STATE
+	if [ "${result}" -ne 0 ]; then
+		if setup__rollback_transaction; then
+			error 'Удаление не завершено. Рабочее состояние восстановлено.'
+			result=2
+		else
+			lifecycle_transaction__mark_recovery_required uninstall_failed 2>/dev/null || true
+		fi
+	fi
 	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
 	return "${result}"
 }

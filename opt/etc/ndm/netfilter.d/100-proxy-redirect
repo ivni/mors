@@ -22,6 +22,8 @@
 # Роутинг прокси и DNS в nat
 # В идеале UDP унести в mangle, но этого пока не сделано
 if [ "${type}" = 'iptables' ] && [ "${table}" = 'nat' ] ; then
+	. /opt/apps/mors/bin/libs/lifecycle_state
+	lifecycle_state__runtime_allowed || exit 0
 	. /opt/apps/mors/bin/libs/ndm
 	ndm_runtime__begin netfilter_proxy || exit $?
 

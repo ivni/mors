@@ -10,12 +10,19 @@ permissions:
 jobs:
   build:
     name: Build .ipk
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
 
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Restore Entware build cache
+        id: entware-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}.entware-build
+          key: entware-v2-ubuntu-24.04-${{ runner.arch }}-aarch64-3.10-${{ hashFiles('scripts/qa/entware.lock') }}
 
       - name: Install Entware build dependencies
         run: |
@@ -50,6 +57,8 @@ jobs:
           python3 -m pip install --user pyelftools pyOpenSSL service_identity
 
       - name: Build package
+        env:
+          ENTWARE_CACHE_HIT: ${{ steps.entware-cache.outputs.cache-hit }}
         run: bash scripts/qa/entware-build.sh
 
       - name: Upload package artifacts

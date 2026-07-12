@@ -21,6 +21,32 @@
 
 case ${1} in
 	start|restart)
+		. /opt/apps/mors/bin/libs/lifecycle_state
+		if lifecycle_state__active_id >/dev/null 2>&1; then
+			lifecycle_journal=$(lifecycle_transaction__journal_file)
+			lifecycle_operation=$(jq -er '.operation' "${lifecycle_journal}" 2>/dev/null || true)
+			lifecycle_phase=$(jq -er '.phase' "${lifecycle_journal}" 2>/dev/null || true)
+			case "${lifecycle_operation}:${lifecycle_phase}" in
+				*:completed)
+					# boot_gate replays the committed stable state idempotently.
+					:
+					;;
+				setup:awaiting_reboot)
+					# Explicit resume owns this boundary; boot remains passive.
+					exit 0
+					;;
+				setup:*|uninstall:*)
+					. /opt/apps/mors/bin/main/setup
+					cmd_setup_recover >/dev/null 2>&1 || exit 0
+					;;
+				upgrade:*|rollback:*)
+					sh /opt/apps/mors/bin/main/upgrade recover --yes >/dev/null 2>&1 || exit 0
+					;;
+			esac
+		fi
+		# Package installation is passive. Runtime starts only after a verified
+		# setup and never crosses an unfinished lifecycle transaction.
+		lifecycle_state__boot_gate || exit 0
 		start_vless=false
 		. /opt/apps/mors/bin/libs/vpn
 		. /opt/apps/mors/bin/libs/runtime_lock

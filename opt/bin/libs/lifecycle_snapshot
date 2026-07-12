@@ -1,0 +1,192 @@
+#!/bin/sh
+
+# Exact file/service snapshot for lifecycle operations. Runtime firewall/ipset
+# cleanup remains the responsibility of the owning operation adapter.
+
+lifecycle_snapshot__files() {
+	cat <<'EOF'
+/opt/etc/mors.conf
+/opt/etc/mors.list
+/opt/etc/dnsmasq.conf
+/opt/etc/dnscrypt-proxy.toml
+/opt/etc/AdGuardHome/AdGuardHome.yaml
+/opt/etc/shadowsocks.json
+/opt/etc/xray/mors.json
+/opt/etc/xray/mors.json.legacy-1.1.9
+/opt/etc/dnsmasq.d/mors.dnsmasq
+/opt/etc/adblock/sources.list
+/opt/etc/adblock/exception.list
+/opt/etc/adblock/ads.mors.list
+/opt/etc/inface_equals
+/opt/etc/init.d/S96mors
+/opt/etc/init.d/S25mors-vless
+/opt/etc/init.d/S97xray
+/opt/etc/ndm/fs.d/15-mors-start.sh
+/opt/etc/ndm/netfilter.d/100-dns-local
+/opt/etc/ndm/netfilter.d/100-vpn-mark
+/opt/etc/ndm/netfilter.d/100-proxy-redirect
+/opt/etc/ndm/ifcreated.d/mors-iface-add
+/opt/etc/ndm/ifdestroyed.d/mors-iface-del
+/opt/etc/ndm/iflayerchanged.d/100-mors-vpn
+/opt/etc/cron.5mins/vless-watchdog
+/opt/etc/cron.5mins/check_vpn
+/opt/lib/libmbedcrypto.so.16
+EOF
+}
+
+lifecycle_snapshot__directories() {
+	cat <<'EOF'
+/opt/etc/mors/vless
+EOF
+}
+
+lifecycle_snapshot__known_path() {
+	local expected
+	expected=${1}
+	{
+		lifecycle_snapshot__files
+		lifecycle_snapshot__directories
+	} | while IFS= read -r path; do
+		[ "${path}" = "${expected}" ] && exit 0
+	done
+}
+
+lifecycle_snapshot__services() {
+	cat <<'EOF'
+/opt/etc/init.d/S56dnsmasq
+/opt/etc/init.d/S09dnscrypt-proxy2
+/opt/etc/init.d/S99adguardhome
+/opt/etc/init.d/S22shadowsocks
+/opt/etc/init.d/S97xray
+/opt/etc/init.d/S25mors-vless
+EOF
+}
+
+lifecycle_snapshot__capture() {
+	local snapshot manifest services path index backup state target status_output
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	manifest="${snapshot}/files.tsv"
+	services="${snapshot}/services.tsv"
+	umask 077
+	: >"${manifest}.tmp" || return 1
+	index=0
+	{
+		lifecycle_snapshot__files
+		lifecycle_snapshot__directories
+	} | while IFS= read -r path; do
+		index=$((index + 1))
+		backup=$(printf 'file-%03d' "${index}")
+		if [ -L "${path}" ]; then
+			target=$(readlink "${path}") || exit 1
+			printf '%s\n' "${target}" >"${snapshot}/${backup}.link" || exit 1
+			chmod 600 "${snapshot}/${backup}.link" || exit 1
+			printf '%s\tsymlink\t%s\n' "${backup}" "${path}"
+		elif [ -d "${path}" ]; then
+			cp -pR "${path}" "${snapshot}/${backup}" || exit 1
+			printf '%s\tdirectory\t%s\n' "${backup}" "${path}"
+		elif [ -e "${path}" ]; then
+			cp -p "${path}" "${snapshot}/${backup}" || exit 1
+			printf '%s\tfile\t%s\n' "${backup}" "${path}"
+		else
+			printf '%s\tmissing\t%s\n' "${backup}" "${path}"
+		fi
+	done >"${manifest}.tmp" || {
+		rm -f "${manifest}.tmp"
+		return 1
+	}
+	chmod 600 "${manifest}.tmp" || return 1
+	mv -f "${manifest}.tmp" "${manifest}" || return 1
+
+	: >"${services}.tmp" || return 1
+	lifecycle_snapshot__services | while IFS= read -r path; do
+		if [ ! -x "${path}" ]; then
+			state=missing
+		else
+			status_output=$("${path}" status 2>/dev/null || true)
+			if printf '%s\n' "${status_output}" | grep -qiE 'dead|not[[:space:]]+running|stopped'; then
+				state=stopped
+			elif printf '%s\n' "${status_output}" | grep -qiE '(^|[[:space:]])(alive|running)([[:space:].]|$)'; then
+				state=running
+			else
+				state=stopped
+			fi
+		fi
+		printf '%s\t%s\n' "${state}" "${path}"
+	done >"${services}.tmp" || {
+		rm -f "${services}.tmp"
+		return 1
+	}
+	chmod 600 "${services}.tmp" || return 1
+	mv -f "${services}.tmp" "${services}" || return 1
+	sync
+}
+
+lifecycle_snapshot__restore_files() {
+	local snapshot manifest backup presence path parent target
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	manifest="${snapshot}/files.tsv"
+	[ -r "${manifest}" ] || return 1
+	while IFS="$(printf '\t')" read -r backup presence path; do
+		[ -n "${path}" ] || return 1
+		lifecycle_snapshot__known_path "${path}" || return 1
+		case "${presence}" in
+			file)
+				[ -e "${snapshot}/${backup}" ] || [ -L "${snapshot}/${backup}" ] || return 1
+				parent=$(dirname "${path}")
+				mkdir -p "${parent}" || return 1
+				rm -f "${path}" || return 1
+				cp -p "${snapshot}/${backup}" "${path}" || return 1
+				;;
+			symlink)
+				[ -r "${snapshot}/${backup}.link" ] || return 1
+				target=$(cat "${snapshot}/${backup}.link") || return 1
+				[ -n "${target}" ] || return 1
+				parent=$(dirname "${path}")
+				mkdir -p "${parent}" || return 1
+				rm -f "${path}" || return 1
+				ln -s "${target}" "${path}" || return 1
+				;;
+			directory)
+				[ -d "${snapshot}/${backup}" ] || return 1
+				parent=$(dirname "${path}")
+				mkdir -p "${parent}" || return 1
+				rm -rf "${path}" || return 1
+				cp -pR "${snapshot}/${backup}" "${path}" || return 1
+				;;
+			missing)
+				if [ -d "${path}" ] && [ ! -L "${path}" ]; then
+					rm -rf "${path}" || return 1
+				else
+					rm -f "${path}" || return 1
+				fi
+				;;
+			*) return 1 ;;
+		esac
+	done <"${manifest}"
+}
+
+lifecycle_snapshot__restore_services() {
+	local snapshot services state path
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	services="${snapshot}/services.tsv"
+	[ -r "${services}" ] || return 1
+	while IFS="$(printf '\t')" read -r state path; do
+		case "${state}" in
+			running)
+				[ -x "${path}" ] || return 1
+				"${path}" restart >/dev/null 2>&1 || return 1
+				;;
+			stopped)
+				[ ! -x "${path}" ] || "${path}" stop >/dev/null 2>&1 || return 1
+				;;
+			missing) ;;
+			*) return 1 ;;
+		esac
+	done <"${services}"
+}
+
+lifecycle_snapshot__restore() {
+	lifecycle_snapshot__restore_files || return 1
+	lifecycle_snapshot__restore_services || return 1
+	sync
+}

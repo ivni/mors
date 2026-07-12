@@ -29,6 +29,8 @@ bats tests
 
 Workflow готовит Entware buildroot, подключает этот репозиторий как `package/mors`, явно собирает host `opkg`, с изолированной пустой host-конфигурацией проверяет, что prerelease-версия сортируется ниже соответствующей стабильной версии, собирает `.ipk` и публикует `packages/mors_*_all.ipk` как artifact. Ожидаемое имя вычисляется из `PKG_VERSION` и `PKG_RELEASE`; отдельной жёстко заданной копии версии в build-скрипте нет.
 
+Ревизии Entware buildroot и всех feeds закреплены в `scripts/qa/entware.lock`. Перед индексацией существующие feeds проверяются на отсутствие локальных изменений и переключаются на точные lock-ревизии, после индексации все HEAD проверяются повторно. GitHub Actions на закреплённом образе `ubuntu-24.04` кеширует buildroot по хешу lock-файла, архитектуре runner и версии схемы кеша: при cache miss выполняется полная холодная сборка, а при cache hit повторно используются tools, toolchain и собранные зависимости. Результат `package/mors` перед каждым запуском принудительно очищается и не сохраняется в кеше, поэтому `.ipk` всегда создаётся из текущего SHA Mors. При обновлении Entware измените ревизии в lock-файле; это автоматически создаст новый изолированный кеш.
+
 Локальный запуск на Linux:
 
 ```sh
@@ -39,6 +41,8 @@ bash scripts/qa/entware-build.sh
 
 - `ENTWARE_DIR` - каталог buildroot, по умолчанию соседний с репозиторием `.entware-build`;
 - `ENTWARE_REPO_URL` - URL репозитория Entware;
+- `ENTWARE_REVISION` - 40-символьная ревизия buildroot; по умолчанию берётся из lock-файла;
+- `ENTWARE_LOCK_FILE` - путь к альтернативному lock-файлу buildroot и feeds;
 - `ENTWARE_CONFIG` - целевой config, по умолчанию `configs/aarch64-3.10.config`;
 - `JOBS` - число параллельных make-задач.
 
@@ -65,7 +69,8 @@ Workflow на одном `github.sha` выполняет:
 
 ## Router Smoke
 
-`.github/workflows/router-smoke.yml` запускается только вручную и требует ввести `install-mors`.
+`.github/workflows/router-smoke.yml` запускается только вручную и требует ввести
+`install-mors-passive`.
 
 Нужные repository secrets:
 
@@ -74,9 +79,13 @@ Workflow на одном `github.sha` выполняет:
 - опционально `MORS_ROUTER_USER`, по умолчанию `root`;
 - опционально `MORS_ROUTER_PORT`, по умолчанию `22`.
 
-Smoke job собирает пакет, загружает его в `/opt/tmp/mors-qa`, устанавливает через `opkg` и запускает базовые CLI-проверки. Используйте его только на disposable или специально подготовленном тестовом Keenetic.
+Smoke job собирает пакет, загружает его в `/opt/tmp/mors-qa`, устанавливает через
+`opkg`, подтверждает отсутствие Mors hooks/dataplane, затем выполняет пассивный
+`mors uninstall --yes` и сравнивает DNS services/configs, firewall и ipset с
+состоянием непосредственно после установки. Используйте его только на
+disposable или специально подготовленном тестовом Keenetic.
 
-Для `1.3.0~beta3` отсутствие такого стенда не блокирует beta, но должно быть явно указано при публикации. До стабильного релиза на авторизованном роутере необходимо проверить:
+Для `1.3.0~beta4` отсутствие такого стенда не блокирует beta, но должно быть явно указано при публикации. До стабильного релиза на авторизованном роутере необходимо проверить:
 
 - cold restart/restore для dnsmasq и Entware-managed AdGuard Home;
 - реальные `iptables` counters и conntrack correlation;

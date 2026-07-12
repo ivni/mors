@@ -1,0 +1,339 @@
+#!/bin/sh
+
+# Durable lifecycle state and transaction metadata. Network mutations and
+# component snapshots are implemented by lifecycle operation adapters.
+
+MORS_LIFECYCLE_ROOT=${MORS_LIFECYCLE_ROOT:-/opt/etc/.mors/lifecycle}
+MORS_LIFECYCLE_STATE_FILE=${MORS_LIFECYCLE_STATE_FILE:-${MORS_LIFECYCLE_ROOT}/state.json}
+MORS_LIFECYCLE_TRANSACTION_ROOT=${MORS_LIFECYCLE_TRANSACTION_ROOT:-${MORS_LIFECYCLE_ROOT}/transactions}
+MORS_LIFECYCLE_ACTIVE_FILE=${MORS_LIFECYCLE_ACTIVE_FILE:-${MORS_LIFECYCLE_ROOT}/active}
+MORS_LIFECYCLE_CONF_FILE=${MORS_LIFECYCLE_CONF_FILE:-${MORS_CONF_FILE:-/opt/etc/mors.conf}}
+MORS_LIFECYCLE_LEGACY_START_FILE=${MORS_LIFECYCLE_LEGACY_START_FILE:-/opt/etc/init.d/S96mors}
+
+lifecycle_state__now() {
+	date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+lifecycle_state__valid_state() {
+	case "${1:-}" in
+		unconfigured|ready|recovery_required) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+lifecycle_state__valid_operation() {
+	case "${1:-}" in
+		setup|upgrade|rollback|uninstall) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+lifecycle_state__valid_phase() {
+	case "${1:-}" in
+		planning|prepared|awaiting_reboot|applying|verifying|rolling_back|cleanup|package_remove_ready|completed) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+lifecycle_state__valid_id() {
+	[ -n "${1:-}" ] && ! printf '%s' "${1}" | grep -q '[^a-zA-Z0-9._-]'
+}
+
+lifecycle_state__prepare_root() {
+	umask 077
+	mkdir -p "${MORS_LIFECYCLE_TRANSACTION_ROOT}" || return 1
+	chmod 700 "${MORS_LIFECYCLE_ROOT}" "${MORS_LIFECYCLE_TRANSACTION_ROOT}" 2>/dev/null || return 1
+}
+
+lifecycle_state__atomic_write() {
+	local destination directory temporary
+	destination=${1}
+	directory=$(dirname "${destination}")
+	temporary="${destination}.tmp.$$"
+	umask 077
+	mkdir -p "${directory}" || return 1
+	if ! cat >"${temporary}"; then
+		rm -f "${temporary}"
+		return 1
+	fi
+	chmod 600 "${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	mv -f "${temporary}" "${destination}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	# Lifecycle changes are rare. Persist metadata before a network commit or
+	# reporting the operation as completed.
+	sync
+}
+
+lifecycle_state__write() {
+	local state source now
+	state=${1}
+	source=${2:-lifecycle}
+	lifecycle_state__valid_state "${state}" || return 1
+	lifecycle_state__prepare_root || return 1
+	now=$(lifecycle_state__now) || return 1
+	jq -n \
+		--arg state "${state}" \
+		--arg updated_at "${now}" \
+		--arg source "${source}" \
+		'{schema_version: 1, state: $state, updated_at: $updated_at, source: $source}' | \
+		lifecycle_state__atomic_write "${MORS_LIFECYCLE_STATE_FILE}"
+}
+
+lifecycle_state__legacy_value() {
+	[ -r "${MORS_LIFECYCLE_CONF_FILE}" ] || return 1
+	grep '^SETUP_FINISHED=' "${MORS_LIFECYCLE_CONF_FILE}" | head -n 1 | cut -d= -f2-
+}
+
+lifecycle_state__legacy_interface() {
+	[ -r "${MORS_LIFECYCLE_CONF_FILE}" ] || return 1
+	grep '^INFACE_CLI=' "${MORS_LIFECYCLE_CONF_FILE}" | head -n 1 | cut -d= -f2-
+}
+
+lifecycle_state__legacy_ready_evidence() {
+	[ "$(lifecycle_state__legacy_value 2>/dev/null || true)" = true ] || return 1
+	[ -n "$(lifecycle_state__legacy_interface 2>/dev/null || true)" ] || return 1
+	[ -f "${MORS_LIFECYCLE_LEGACY_START_FILE}" ] || return 1
+}
+
+lifecycle_state__migrate_legacy() {
+	local legacy_state
+	[ ! -e "${MORS_LIFECYCLE_STATE_FILE}" ] || return 0
+	legacy_state=$(lifecycle_state__legacy_value 2>/dev/null || true)
+	case "${legacy_state}" in
+		true)
+			if lifecycle_state__legacy_ready_evidence; then
+				lifecycle_state__write ready legacy_migration
+			else
+				lifecycle_state__write recovery_required legacy_validation_failed
+			fi
+			;;
+		*) lifecycle_state__write unconfigured legacy_migration ;;
+	esac
+}
+
+lifecycle_state__read() {
+	local state schema
+	[ -e "${MORS_LIFECYCLE_STATE_FILE}" ] || lifecycle_state__migrate_legacy || return 1
+	[ -r "${MORS_LIFECYCLE_STATE_FILE}" ] || return 1
+	schema=$(jq -er '.schema_version' "${MORS_LIFECYCLE_STATE_FILE}" 2>/dev/null) || return 1
+	[ "${schema}" = 1 ] || return 1
+	state=$(jq -er '.state' "${MORS_LIFECYCLE_STATE_FILE}" 2>/dev/null) || return 1
+	lifecycle_state__valid_state "${state}" || return 1
+	printf '%s\n' "${state}"
+}
+
+lifecycle_state__active_id() {
+	local id
+	[ -s "${MORS_LIFECYCLE_ACTIVE_FILE}" ] || return 1
+	id=$(tr -d '\r\n' <"${MORS_LIFECYCLE_ACTIVE_FILE}")
+	lifecycle_state__valid_id "${id}" || return 1
+	printf '%s\n' "${id}"
+}
+
+lifecycle_state__has_active_marker() {
+	[ -e "${MORS_LIFECYCLE_ACTIVE_FILE}" ] || [ -L "${MORS_LIFECYCLE_ACTIVE_FILE}" ]
+}
+
+lifecycle_transaction__directory() {
+	local id
+	id=${1:-$(lifecycle_state__active_id)}
+	lifecycle_state__valid_id "${id}" || return 1
+	printf '%s/%s\n' "${MORS_LIFECYCLE_TRANSACTION_ROOT}" "${id}"
+}
+
+lifecycle_transaction__journal_file() {
+	printf '%s/journal.json\n' "$(lifecycle_transaction__directory "${1:-}")"
+}
+
+lifecycle_transaction__snapshot_directory() {
+	printf '%s/snapshot\n' "$(lifecycle_transaction__directory "${1:-}")"
+}
+
+lifecycle_transaction__begin() {
+	local operation previous_state target_state id temporary directory now
+	operation=${1}
+	previous_state=${2:-$(lifecycle_state__read)}
+	target_state=${3:-ready}
+	lifecycle_state__valid_operation "${operation}" || return 1
+	lifecycle_state__valid_state "${previous_state}" || return 1
+	lifecycle_state__valid_state "${target_state}" || return 1
+	! lifecycle_state__has_active_marker || return 3
+	lifecycle_state__prepare_root || return 1
+	id="${operation}-$(date +%s)-$$"
+	directory="${MORS_LIFECYCLE_TRANSACTION_ROOT}/${id}"
+	temporary="${MORS_LIFECYCLE_TRANSACTION_ROOT}/.${id}.tmp"
+	[ ! -e "${directory}" ] && [ ! -e "${temporary}" ] || return 1
+	umask 077
+	mkdir -p "${temporary}/snapshot" || return 1
+	chmod 700 "${temporary}" "${temporary}/snapshot" || return 1
+	now=$(lifecycle_state__now) || return 1
+	jq -n \
+		--arg id "${id}" \
+		--arg operation "${operation}" \
+		--arg previous_state "${previous_state}" \
+		--arg target_state "${target_state}" \
+		--arg now "${now}" \
+		'{schema_version: 1, id: $id, operation: $operation, phase: "planning", previous_state: $previous_state, target_state: $target_state, started_at: $now, updated_at: $now, reboot_marker: null, last_error: null, outcome: null}' | \
+		lifecycle_state__atomic_write "${temporary}/journal.json" || {
+		rm -f "${temporary}/journal.json"
+		rmdir "${temporary}/snapshot" "${temporary}" 2>/dev/null || true
+		return 1
+	}
+	mv "${temporary}" "${directory}" || {
+		rm -f "${temporary}/journal.json"
+		rmdir "${temporary}/snapshot" "${temporary}" 2>/dev/null || true
+		return 1
+	}
+	printf '%s\n' "${id}" | lifecycle_state__atomic_write "${MORS_LIFECYCLE_ACTIVE_FILE}" || return 1
+	printf '%s\n' "${id}"
+}
+
+lifecycle_transaction__phase() {
+	local phase id journal now
+	phase=${1}
+	lifecycle_state__valid_phase "${phase}" || return 1
+	id=$(lifecycle_state__active_id) || return 1
+	journal=$(lifecycle_transaction__journal_file "${id}") || return 1
+	[ -r "${journal}" ] || return 1
+	now=$(lifecycle_state__now) || return 1
+	jq --arg phase "${phase}" --arg now "${now}" \
+		'.phase = $phase | .updated_at = $now' "${journal}" | \
+		lifecycle_state__atomic_write "${journal}"
+}
+
+lifecycle_transaction__error() {
+	local reason id journal now
+	reason=${1:-operation_failed}
+	case "${reason}" in
+		*[!a-zA-Z0-9._-]*) return 1 ;;
+	esac
+	id=$(lifecycle_state__active_id) || return 1
+	journal=$(lifecycle_transaction__journal_file "${id}") || return 1
+	now=$(lifecycle_state__now) || return 1
+	jq --arg reason "${reason}" --arg now "${now}" \
+		'.last_error = $reason | .updated_at = $now' "${journal}" | \
+		lifecycle_state__atomic_write "${journal}"
+}
+
+lifecycle_transaction__finish() {
+	local id journal now
+	id=$(lifecycle_state__active_id) || return 1
+	journal=$(lifecycle_transaction__journal_file "${id}") || return 1
+	now=$(lifecycle_state__now) || return 1
+	jq --arg now "${now}" '.phase = "completed" | .outcome = "success" | .updated_at = $now' "${journal}" | \
+		lifecycle_state__atomic_write "${journal}" || return 1
+	lifecycle_transaction__reconcile_completed
+}
+
+lifecycle_transaction__rollback_finish() {
+	local id journal now
+	id=$(lifecycle_state__active_id) || return 1
+	journal=$(lifecycle_transaction__journal_file "${id}") || return 1
+	now=$(lifecycle_state__now) || return 1
+	jq --arg now "${now}" '.phase = "completed" | .outcome = "rolled_back" | .updated_at = $now' "${journal}" | \
+		lifecycle_state__atomic_write "${journal}" || return 1
+	lifecycle_transaction__reconcile_completed
+}
+
+lifecycle_transaction__reconcile_completed() {
+	local id journal phase outcome operation stable_state source
+	id=$(lifecycle_state__active_id) || return 1
+	journal=$(lifecycle_transaction__journal_file "${id}") || return 1
+	phase=$(jq -er '.phase' "${journal}" 2>/dev/null) || return 1
+	[ "${phase}" = completed ] || return 1
+	outcome=$(jq -er '.outcome' "${journal}" 2>/dev/null) || return 1
+	operation=$(jq -er '.operation' "${journal}" 2>/dev/null) || return 1
+	lifecycle_state__valid_operation "${operation}" || return 1
+	case "${outcome}" in
+		success)
+			stable_state=$(jq -er '.target_state' "${journal}" 2>/dev/null) || return 1
+			source=${operation}_completed
+			;;
+		rolled_back)
+			stable_state=$(jq -er '.previous_state' "${journal}" 2>/dev/null) || return 1
+			source=${operation}_rolled_back
+			;;
+		*) return 1 ;;
+	esac
+	lifecycle_state__valid_state "${stable_state}" || return 1
+	# A completed journal is the durable commit marker. Replaying these writes is
+	# safe after power loss at any point between journal, state and active.
+	lifecycle_state__write "${stable_state}" "${source}" || return 1
+	rm -f "${MORS_LIFECYCLE_ACTIVE_FILE}" || return 1
+	sync
+}
+
+lifecycle_transaction__mark_recovery_required() {
+	local reason
+	reason=${1:-transaction_incomplete}
+	lifecycle_transaction__error "${reason}" 2>/dev/null || true
+	lifecycle_state__write recovery_required "${reason}"
+}
+
+lifecycle_state__boot_gate() {
+	local state id phase
+	state=$(lifecycle_state__read) || return 4
+	if lifecycle_state__has_active_marker; then
+		id=$(lifecycle_state__active_id 2>/dev/null) || {
+			lifecycle_state__write recovery_required invalid_active_marker || return 4
+			return 4
+		}
+		phase=$(jq -er '.phase' "$(lifecycle_transaction__journal_file "${id}")" 2>/dev/null) || return 4
+		if [ "${phase}" = completed ]; then
+			lifecycle_transaction__reconcile_completed || return 4
+			state=$(lifecycle_state__read) || return 4
+		elif [ "${phase}" = awaiting_reboot ]; then
+			# Resume is an explicit user action. Boot must neither start runtime nor
+			# turn an intentional reboot boundary into a failed transaction.
+			return 3
+		else
+			lifecycle_transaction__mark_recovery_required transaction_incomplete || return 4
+			return 3
+		fi
+	fi
+	[ "${state}" = ready ] || return 3
+}
+
+lifecycle_state__require_ready() {
+	local state
+	state=$(lifecycle_state__read) || return 4
+	[ "${state}" = ready ] || return 3
+	! lifecycle_state__has_active_marker || return 3
+}
+
+lifecycle_state__runtime_allowed() {
+	local id journal operation phase
+	if [ "${MORS_LIFECYCLE_APPLY:-false}" = true ]; then
+		id=$(lifecycle_state__active_id 2>/dev/null || true)
+		if [ -n "${id}" ]; then
+			journal=$(lifecycle_transaction__journal_file "${id}") || return 3
+			operation=$(jq -er '.operation' "${journal}" 2>/dev/null) || return 3
+			phase=$(jq -er '.phase' "${journal}" 2>/dev/null) || return 3
+			case "${operation}:${phase}" in
+				setup:applying|setup:verifying|setup:rolling_back|uninstall:rolling_back|upgrade:applying|upgrade:verifying|rollback:applying|rollback:verifying|upgrade:rolling_back|rollback:rolling_back)
+					return 0
+					;;
+			esac
+		fi
+	fi
+	lifecycle_state__require_ready
+}
+
+lifecycle_state__status_json() {
+	local state id journal
+	state=$(lifecycle_state__read) || return 4
+	if lifecycle_state__has_active_marker; then
+		id=$(lifecycle_state__active_id 2>/dev/null) || return 4
+		journal=$(lifecycle_transaction__journal_file "${id}") || return 4
+		jq -n --arg state "${state}" --slurpfile transaction "${journal}" \
+			'{schema_version: 1, command: "lifecycle status", state: $state, transaction: $transaction[0], status: "ok", exit_code: 0, message: "Состояние lifecycle прочитано.", recovery_command: (if $state == "recovery_required" then "mors setup recover --yes" else null end)}'
+	else
+		jq -n --arg state "${state}" \
+			'{schema_version: 1, command: "lifecycle status", state: $state, transaction: null, status: "ok", exit_code: 0, message: "Состояние lifecycle прочитано.", recovery_command: (if $state == "recovery_required" then "mors setup recover --yes" else null end)}'
+	fi
+}
