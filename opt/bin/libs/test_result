@@ -59,7 +59,8 @@ test_result__exit_code() {
 test_result__add() {
 	local id="${1}" status="${2}" reason_code="${3}" message="${4}"
 	local required="${5:-true}" blocks_cold="${6:-true}"
-	local duration_ms="${7:-0}" attempts="${8:-1}" evidence="${9:-{}}"
+	local duration_ms="${7:-0}" attempts="${8:-1}" evidence="${9:-}"
+	[ -n "${evidence}" ] || evidence='{}'
 
 	printf '%s' "${evidence}" | jq -e 'type == "object"' >/dev/null 2>&1 || evidence='{}'
 	jq -nc \

@@ -35,7 +35,7 @@ test__stage() {
 	finished=$(test_result__now_ms)
 	test_result__add "${id}" "${MORS_PROBE_STATUS}" "${MORS_PROBE_REASON}" \
 		"${MORS_PROBE_MESSAGE}" "${required}" "${blocks_cold}" \
-		$((finished - started)) "${MORS_TEST_HTTP_ATTEMPTS:-1}" "${MORS_PROBE_EVIDENCE:-{}}"
+		$((finished - started)) "${MORS_TEST_HTTP_ATTEMPTS:-1}" "${MORS_PROBE_EVIDENCE:-}"
 	unset MORS_TEST_HTTP_ATTEMPTS
 	return "${result}"
 }

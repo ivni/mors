@@ -13,7 +13,8 @@ test_probe__set() {
 	MORS_PROBE_STATUS=${1}
 	MORS_PROBE_REASON=${2}
 	MORS_PROBE_MESSAGE=${3}
-	MORS_PROBE_EVIDENCE=${4:-{}}
+	MORS_PROBE_EVIDENCE=${4:-}
+	[ -n "${MORS_PROBE_EVIDENCE}" ] || MORS_PROBE_EVIDENCE='{}'
 }
 
 test_probe__now_seconds() {
