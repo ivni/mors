@@ -77,7 +77,7 @@ make -j"${jobs}" toolchain/install || make toolchain/install V=sc
 make -j"${jobs}" tools/go-src/compile || make tools/go-src/compile V=sc
 make -j"${jobs}" package/mors/compile || make package/mors/compile V=sc
 
-find bin/targets -type f -name 'mors_1.3.0~beta2-1_all.ipk' -print -quit | grep -q .
+find bin/targets -type f -name 'mors_1.3.0~beta3-1_all.ipk' -print -quit | grep -q .
 mkdir -p "${repo_root}/packages"
 find bin/targets -type f -name 'mors_*_all.ipk' -exec cp -f {} "${repo_root}/packages/" \;
 

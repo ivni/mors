@@ -24,7 +24,7 @@ bats tests
 
 ## Сборка Пакета
 
-`.github/workflows/package.yml` запускается вручную и по тегам `v*`. Workflow готовит Entware buildroot, подключает этот репозиторий как `package/mors`, явно собирает host `opkg`, проверяет порядок `1.2.0 < 1.3.0~beta2 < 1.3.0`, собирает `.ipk` и публикует `packages/mors_*_all.ipk` как artifact. Для beta дополнительно проверяется точное имя `mors_1.3.0~beta2-1_all.ipk`.
+`.github/workflows/package.yml` запускается вручную и по тегам `v*`. Workflow готовит Entware buildroot, подключает этот репозиторий как `package/mors`, явно собирает host `opkg`, проверяет порядок `1.2.0 < 1.3.0~beta3 < 1.3.0` с изолированной пустой host-конфигурацией, собирает `.ipk` и публикует `packages/mors_*_all.ipk` как artifact. Для beta дополнительно проверяется точное имя `mors_1.3.0~beta3-1_all.ipk`.
 
 Локальный запуск на Linux:
 
@@ -52,7 +52,7 @@ bash scripts/qa/entware-build.sh
 
 Smoke job собирает пакет, загружает его в `/opt/tmp/mors-qa`, устанавливает через `opkg` и запускает базовые CLI-проверки. Используйте его только на disposable или специально подготовленном тестовом Keenetic.
 
-Для `1.3.0~beta2` отсутствие такого стенда не блокирует beta, но должно быть явно указано при публикации. До стабильного релиза на авторизованном роутере необходимо проверить:
+Для `1.3.0~beta3` отсутствие такого стенда не блокирует beta, но должно быть явно указано при публикации. До стабильного релиза на авторизованном роутере необходимо проверить:
 
 - cold restart/restore для dnsmasq и Entware-managed AdGuard Home;
 - реальные `iptables` counters и conntrack correlation;

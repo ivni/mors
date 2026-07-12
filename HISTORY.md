@@ -1,3 +1,6 @@
+## 1.3.0 beta 3 - 2026-07-12
+- Host `opkg` version-order gate изолирован от отсутствующего на build runner файла `/etc/opkg.conf` явной пустой конфигурацией.
+
 ## 1.3.0 beta 2 - 2026-07-12
 - Исправлена сериализация непустого JSON evidence в результатах `mors test`.
 - Package QA теперь явно собирает host `opkg`, проверяет его наличие и выполняет version-order gate до долгой Entware toolchain-сборки.
