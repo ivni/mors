@@ -1,3 +1,7 @@
+## 1.3.0 beta 2 - 2026-07-12
+- Исправлена сериализация непустого JSON evidence в результатах `mors test`.
+- Package QA теперь явно собирает host `opkg`, проверяет его наличие и выполняет version-order gate до долгой Entware toolchain-сборки.
+
 ## 1.3.0 beta 1 - 2026-07-12
 - `mors test` переделан из заглушки в активную IPv4 end-to-end проверку DNS, `MORS_LIST`, firewall/routing, тоннеля и внешнего HTTPS-выхода.
 - Добавлены режимы `--all`, client, транзакционный cold test и явное восстановление `mors test cold recover`.

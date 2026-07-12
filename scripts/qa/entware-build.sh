@@ -64,16 +64,20 @@ fi
 
 make defconfig
 make -j"${jobs}" tools/install || make tools/install V=sc
-make -j"${jobs}" toolchain/install || make toolchain/install V=sc
-make -j"${jobs}" tools/go-src/compile || make tools/go-src/compile V=sc
+make -j"${jobs}" package/opkg/host/compile || make package/opkg/host/compile V=sc
 
 host_opkg=$(find -L staging_dir/host/bin -maxdepth 1 -type f -name opkg -print -quit)
-test -n "${host_opkg}" && test -x "${host_opkg}"
+if [ -z "${host_opkg}" ] || [ ! -x "${host_opkg}" ]; then
+	echo 'Entware host opkg was not built.' >&2
+	exit 1
+fi
 bash "${repo_root}/scripts/qa/opkg-version-order.sh" "${host_opkg}"
 
+make -j"${jobs}" toolchain/install || make toolchain/install V=sc
+make -j"${jobs}" tools/go-src/compile || make tools/go-src/compile V=sc
 make -j"${jobs}" package/mors/compile || make package/mors/compile V=sc
 
-find bin/targets -type f -name 'mors_1.3.0~beta1-1_all.ipk' -print -quit | grep -q .
+find bin/targets -type f -name 'mors_1.3.0~beta2-1_all.ipk' -print -quit | grep -q .
 mkdir -p "${repo_root}/packages"
 find bin/targets -type f -name 'mors_*_all.ipk' -exec cp -f {} "${repo_root}/packages/" \;
 

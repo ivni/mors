@@ -25,8 +25,13 @@ setup() {
 }
 
 @test "beta package declares E2E runtime dependencies" {
-	grep -q 'PKG_VERSION:=1.3.0~beta1' "${REPO_ROOT}/Makefile"
+	grep -q 'PKG_VERSION:=1.3.0~beta2' "${REPO_ROOT}/Makefile"
 	grep -q '+conntrack' "${REPO_ROOT}/Makefile"
 	grep -q '+coreutils-timeout' "${REPO_ROOT}/Makefile"
 	grep -q '+shadowsocks-libev-ss-local' "${REPO_ROOT}/Makefile"
+}
+
+@test "package QA builds host opkg before the version gate" {
+	grep -q 'package/opkg/host/compile' "${REPO_ROOT}/scripts/qa/entware-build.sh"
+	grep -q 'Entware host opkg was not built' "${REPO_ROOT}/scripts/qa/entware-build.sh"
 }
