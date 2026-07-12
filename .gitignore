@@ -6,6 +6,7 @@
 .builded
 .devices
 .qa/
+.codex-remote-attachments/
 packages/
 .molot/
 
