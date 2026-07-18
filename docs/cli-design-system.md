@@ -321,6 +321,8 @@ IPK. Каждый artifact сопровождается файлом `.sha256`; 
 
 - `help`, `version` и lifecycle status разрешены всегда и являются read-only;
 - `test` в `unconfigured` не запускает probes и возвращает `3`;
+- `update apply` и `rollback` разрешены в `unconfigured`, но сохраняют пассивное
+  состояние и проверяют отсутствие runtime до commit;
 - runtime-mutator разрешён только в `ready` и при отсутствии незавершённой
   lifecycle-транзакции;
 - `setup resume` и `setup recover` разрешают только соответствующее действие

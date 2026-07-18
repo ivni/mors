@@ -127,7 +127,9 @@ define Package/mors/prerm
 operation=$$1
 case "$$operation" in
 	remove)
-		active=$$(tr -d '\r\n' </opt/etc/.mors/lifecycle/active 2>/dev/null)
+		active=''
+		[ ! -r /opt/etc/.mors/lifecycle/active ] || \
+			active=$$(tr -d '\r\n' </opt/etc/.mors/lifecycle/active)
 		journal=/opt/etc/.mors/lifecycle/transactions/$$active/journal.json
 		if [ -z "$$active" ] || [ ! -r "$$journal" ] || \
 			[ "$$(jq -r '.operation // empty' "$$journal" 2>/dev/null)" != uninstall ] || \
@@ -137,7 +139,9 @@ case "$$operation" in
 		fi
 		;;
 	upgrade)
-		active=$$(tr -d '\r\n' </opt/etc/.mors/lifecycle/active 2>/dev/null)
+		active=''
+		[ ! -r /opt/etc/.mors/lifecycle/active ] || \
+			active=$$(tr -d '\r\n' </opt/etc/.mors/lifecycle/active)
 		journal=/opt/etc/.mors/lifecycle/transactions/$$active/journal.json
 		transaction_operation=$$(jq -r '.operation // empty' "$$journal" 2>/dev/null)
 		if [ -z "$$active" ] || [ ! -r "$$journal" ] || \
@@ -183,7 +187,9 @@ else
 	umask 077
 	mkdir -p /opt/etc/.mors/lifecycle/transactions
 	now=$$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-	active=$$(tr -d '\r\n' </opt/etc/.mors/lifecycle/active 2>/dev/null)
+	active=''
+	[ ! -r /opt/etc/.mors/lifecycle/active ] || \
+		active=$$(tr -d '\r\n' </opt/etc/.mors/lifecycle/active)
 	journal=/opt/etc/.mors/lifecycle/transactions/$$active/journal.json
 	commit_ok=true
 	if [ -z "$$active" ] || [ ! -r "$$journal" ] || \

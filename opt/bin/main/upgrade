@@ -109,6 +109,13 @@ upgrade__restart_and_verify() {
 	setup__verify_committed
 }
 
+upgrade__verify_unconfigured() {
+	[ "$(lifecycle_state__read)" = unconfigured ] || return 1
+	/opt/bin/mors version >/dev/null 2>&1 || return 1
+	opkg status mors 2>/dev/null | grep -q '^Status: install .* installed$' || return 1
+	setup__verify_runtime_removed
+}
+
 upgrade__parse_apply() {
 	local argument
 	MORS_UPDATE_ARTIFACT=''
@@ -134,7 +141,8 @@ upgrade__parse_apply() {
 }
 
 upgrade__rollback_failed_apply() {
-	local result
+	local result previous_state
+	previous_state=$(jq -er '.previous_state' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
 	lifecycle_transaction__phase rolling_back || return 1
 	opkg install "${MORS_UPDATE_ROLLBACK}" >/dev/null 2>&1 || return 1
 	upgrade__reload_installed_runtime || return 1
@@ -142,9 +150,13 @@ upgrade__rollback_failed_apply() {
 		MORS_LIFECYCLE_APPLY=true
 		export MORS_LIFECYCLE_APPLY
 		lifecycle_snapshot__restore || exit 1
-		upgrade__load_committed_plan || exit 1
-		cmd_mors_init no || exit 1
-		setup__verify_committed
+		if [ "${previous_state}" = ready ]; then
+			upgrade__load_committed_plan || exit 1
+			cmd_mors_init no || exit 1
+			setup__verify_committed
+		else
+			upgrade__verify_unconfigured
+		fi
 	) >/dev/null 2>&1 || return 1
 	lifecycle_transaction__rollback_finish
 	result=$?
@@ -152,15 +164,21 @@ upgrade__rollback_failed_apply() {
 }
 
 upgrade__restore_pre_apply() {
+	local previous_state
+	previous_state=$(jq -er '.previous_state' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
 	lifecycle_transaction__phase rolling_back || return 1
 	upgrade__reload_installed_runtime || return 1
 	(
 		MORS_LIFECYCLE_APPLY=true
 		export MORS_LIFECYCLE_APPLY
 		lifecycle_snapshot__restore || exit 1
-		upgrade__load_committed_plan || exit 1
-		cmd_mors_init no || exit 1
-		setup__verify_committed
+		if [ "${previous_state}" = ready ]; then
+			upgrade__load_committed_plan || exit 1
+			cmd_mors_init no || exit 1
+			setup__verify_committed
+		else
+			upgrade__verify_unconfigured
+		fi
 	) >/dev/null 2>&1 || return 1
 	lifecycle_transaction__rollback_finish
 }
@@ -169,16 +187,13 @@ upgrade__apply_locked() {
 	local operation state result
 	operation=${1}
 	state=$(lifecycle_state__read) || return 4
-	[ "${state}" = ready ] || {
-		error 'Обновление разрешено только для состояния РАБОТАЕТ.'
-		return 3
-	}
+	case "${state}" in ready|unconfigured) ;; *) return 3 ;; esac
 	! lifecycle_state__has_active_marker || return 3
 	upgrade__verify_artifact "${MORS_UPDATE_ARTIFACT}" || return 64
 	upgrade__verify_artifact "${MORS_UPDATE_ROLLBACK}" || return 64
 
 	runtime_mutation_lock__acquire "mors ${operation}" || return $?
-	lifecycle_transaction__begin "${operation}" ready ready >/dev/null || {
+	lifecycle_transaction__begin "${operation}" "${state}" "${state}" >/dev/null || {
 		result=$?
 		runtime_mutation_lock__release >/dev/null 2>&1 || true
 		return "${result}"
@@ -207,7 +222,12 @@ upgrade__apply_locked() {
 			upgrade__run_migrations || result=1
 		fi
 		if [ "${result:-0}" -eq 0 ]; then
-			upgrade__restart_and_verify || result=1
+			if [ "${state}" = ready ]; then
+				upgrade__restart_and_verify || result=1
+			else
+				lifecycle_transaction__phase verifying || result=1
+				[ "${result:-0}" -ne 0 ] || upgrade__verify_unconfigured || result=1
+			fi
 		fi
 		if [ "${result:-0}" -eq 0 ]; then
 			lifecycle_transaction__finish || result=1

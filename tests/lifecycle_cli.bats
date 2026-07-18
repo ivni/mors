@@ -80,6 +80,21 @@ setup() {
 	grep -q 'setup__verify_committed' "${updater}"
 }
 
+@test "update preserves an unconfigured installation without starting runtime" {
+	local upgrade=${REPO_ROOT}/opt/bin/main/upgrade
+	grep -q 'case "${state}" in ready|unconfigured)' "${upgrade}"
+	grep -q 'lifecycle_transaction__begin "${operation}" "${state}" "${state}"' "${upgrade}"
+	grep -q 'upgrade__verify_unconfigured' "${upgrade}"
+	grep -q 'setup__verify_runtime_removed' "${upgrade}"
+}
+
+@test "maintainer scripts read a missing active marker without shell redirection errors" {
+	local makefile=${REPO_ROOT}/Makefile
+	run grep -q 'lifecycle/active 2>/dev/null' "${makefile}"
+	[ "${status}" -eq 1 ]
+	grep -q '\[ ! -r /opt/etc/.mors/lifecycle/active \]' "${makefile}"
+}
+
 @test "package maintainer scripts gate remove and upgrade transactions" {
 	local prerm postrm
 	prerm=$(sed -n '/^define Package\/mors\/prerm/,/^endef/p' "${REPO_ROOT}/Makefile" | tr -d '\r')

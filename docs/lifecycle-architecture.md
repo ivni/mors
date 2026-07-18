@@ -166,6 +166,12 @@ upgrade выполняются migration и health verification. Ошибка з
 выполняет migrations, обновляет активные копии hooks, перезапускает runtime и
 только после полной lifecycle verification записывает успешный commit.
 
+Для стабильного состояния `unconfigured` update использует тот же проверенный
+artifact и rollback, но сохраняет target `unconfigured`: hooks и сервисы не
+активируются, а commit требует подтверждённого отсутствия Mors dataplane.
+Rollback также ветвится по `previous_state` и не пытается запускать runtime,
+которого до операции не было.
+
 Первое обновление с legacy-версии не имеет старого journal. Новый `preinst`
 создаёт bootstrap snapshot до замены файлов. Если старый IPK недоступен,
 гарантируется восстановление конфигурации и безопасного dataplane, но не
