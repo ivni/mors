@@ -100,6 +100,33 @@ setup() {
 	[ "${status}" -eq 0 ]
 }
 
+@test "live unrelated PID does not block stale supervisor lock recovery" {
+	sleep 30 &
+	unrelated_pid=$!
+	mkdir -p "${VLESS_SUPERVISOR_LOCK_DIR}"
+	printf '%s\n' "${unrelated_pid}" >"${VLESS_SUPERVISOR_PID_FILE}"
+
+	run vless_supervisor__acquire_lock
+	result=${status}
+	kill -0 "${unrelated_pid}"
+	kill "${unrelated_pid}"
+	wait "${unrelated_pid}" 2>/dev/null || true
+	[ "${result}" -eq 0 ]
+}
+
+@test "wake never signals a live unrelated PID from a stale file" {
+	sleep 30 &
+	unrelated_pid=$!
+	printf '%s\n' "${unrelated_pid}" >"${VLESS_SUPERVISOR_PID_FILE}"
+
+	run vless_runtime__wake_supervisor
+	result=${status}
+	kill -0 "${unrelated_pid}"
+	kill "${unrelated_pid}"
+	wait "${unrelated_pid}" 2>/dev/null || true
+	[ "${result}" -ne 0 ]
+}
+
 @test "health endpoint must return exactly HTTP 204" {
 	fake_curl() { printf '%s\n' '200|0.010'; }
 	VLESS_CURL=fake_curl

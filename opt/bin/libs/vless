@@ -1394,7 +1394,7 @@ vless_domain__pause() { vless_runtime__with_decision_lock vless_domain__pause_lo
 vless_domain__resume() { vless_runtime__with_decision_lock vless_domain__resume_locked "$@"; }
 
 cmd_vless_check() {
-	local json=false status previous_cycle current_cycle pid waited=0 completed=false
+	local json=false status previous_cycle current_cycle waited=0 completed=false
 	case "$#" in
 		0) ;;
 		1) [ "${1}" = '--json' ] || return 64; json=true ;;
@@ -1405,10 +1405,8 @@ cmd_vless_check() {
 	else
 		previous_cycle=0
 	fi
-	pid=''
-	[ -s "${VLESS_SUPERVISOR_PID_FILE}" ] && pid=$(tr -d '\r\n' <"${VLESS_SUPERVISOR_PID_FILE}")
-	if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
-		kill -USR1 "${pid}" 2>/dev/null || true
+	if vless_runtime__wake_supervisor || \
+		vless_process__pid_from_file "${VLESS_SUPERVISOR_PID_FILE}" program >/dev/null 2>&1; then
 		while [ "${waited}" -lt "${VLESS_CHECK_WAIT_SECONDS:-120}" ]; do
 			current_cycle=$(jq -r '.cycle // 0' "${VLESS_STATE_FILE}")
 			if [ "${current_cycle}" -gt "${previous_cycle}" ]; then

@@ -254,7 +254,7 @@ vless_supervisor__acquire_lock() {
 			sleep 1
 			[ -s "${VLESS_SUPERVISOR_PID_FILE}" ] && existing_pid=$(tr -d '\r\n' <"${VLESS_SUPERVISOR_PID_FILE}")
 		fi
-		if [ -n "${existing_pid}" ] && kill -0 "${existing_pid}" 2>/dev/null; then
+		if [ -n "${existing_pid}" ] && vless_process__pid_is_program "${existing_pid}"; then
 			printf '%s\n' 'VLESS supervisor уже запущен.' >&2
 			return 1
 		fi

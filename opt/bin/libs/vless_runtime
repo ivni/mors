@@ -5,6 +5,8 @@
 MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
 # shellcheck source=./vless_store
 . "${MORS_LIB_DIR}/vless_store"
+# shellcheck source=./vless_process
+. "${MORS_LIB_DIR}/vless_process"
 if [ -n "${VLESS_RUNTIME_ROOT:-}" ] && \
 	[ "${VLESS_RUNTIME_ROOT}" != /opt/var/run/mors/vless ] && \
 	[ -z "${MORS_LOCK_ROOT:-}" ]; then
@@ -248,9 +250,7 @@ vless_runtime__remove_override() {
 
 vless_runtime__wake_supervisor() {
 	local pid
-	[ -s "${VLESS_SUPERVISOR_PID_FILE}" ] || return 1
-	pid=$(tr -d '\r\n' <"${VLESS_SUPERVISOR_PID_FILE}")
-	[ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null || return 1
+	pid=$(vless_process__pid_from_file "${VLESS_SUPERVISOR_PID_FILE}" service) || return 1
 	kill -USR1 "${pid}" 2>/dev/null
 }
 

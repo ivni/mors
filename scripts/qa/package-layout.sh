@@ -13,6 +13,7 @@ required_paths=(
 	opt/bin/libs/vless_store
 	opt/bin/libs/vless_config
 	opt/bin/libs/vless_runtime
+	opt/bin/libs/vless_process
 	opt/bin/libs/lifecycle
 	opt/bin/libs/lifecycle_state
 	opt/bin/libs/lifecycle_snapshot
