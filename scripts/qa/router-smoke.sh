@@ -33,8 +33,8 @@ set -eu
 snapshot() {
 	prefix=$1
 	(opkg list-installed 2>/dev/null || true) | sort >"${prefix}.packages"
-	(iptables-save 2>/dev/null || true) | grep 'MORS_' >"${prefix}.iptables"
-	(ipset list -n 2>/dev/null || true) | grep '^MORS' >"${prefix}.ipset"
+	(iptables-save 2>/dev/null || true) | grep 'MORS_' >"${prefix}.iptables" || true
+	(ipset list -n 2>/dev/null || true) | grep '^MORS' >"${prefix}.ipset" || true
 	for path in \
 		/opt/etc/init.d/S96mors \
 		/opt/etc/ndm/fs.d/15-mors-start.sh \
