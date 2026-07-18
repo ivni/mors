@@ -60,6 +60,8 @@ setup() {
 
 	[ "${MORS_SETUP_INTERFACE_CLI}" = Wireguard0 ]
 	[ "${MORS_SETUP_INTERFACE_ENTWARE}" = nwg0 ]
+	[ "${MORS_SETUP_INTERFACE_DESCRIPTION}" = "Рабочий VPN" ]
+	[ "${MORS_SETUP_INTERFACE_STATE}" = up ]
 	[ "${MORS_SETUP_DNS_BACKEND}" = dnscrypt ]
 	[ "$(find "${empty}" -mindepth 1 -print)" = "${before}" ]
 }
@@ -137,5 +139,23 @@ setup() {
 	! grep -q 'cmd_interface_change\|read_ynq\|read -r' <<<"${install_body}"
 	! grep -q 'cmd_install_proxy_package' <<<"${install_body}"
 	grep -q 'setup__prepare_selected_interface' <<<"${install_body}"
+	grep -q 'setup__record_selected_interface_mapping' <<<"${install_body}"
 	grep -q 'switch_vpn_on "${MORS_SETUP_INTERFACE_ENTWARE}"' <<<"${install_body}"
+}
+
+@test "setup records the selected interface atomically and replaces stale aliases" {
+	local setup_file=${REPO_ROOT}/opt/bin/main/setup
+	source <(sed -n '/^setup__record_selected_interface_mapping()/,/^}/p' "${setup_file}")
+	INFACE_NAMES_FILE=${BATS_TEST_TMPDIR}/inface_equals
+	MORS_SETUP_INTERFACE_CLI=Proxy21
+	MORS_SETUP_INTERFACE_ENTWARE=Proxy21
+	MORS_SETUP_INTERFACE_DESCRIPTION='Mors|VLESS'
+	printf 'Proxy21|old21|old\nWireguard0|nwg0|Рабочий VPN\n' >"${INFACE_NAMES_FILE}"
+
+	setup__record_selected_interface_mapping
+
+	[ "$(grep -c '^Proxy21|' "${INFACE_NAMES_FILE}")" -eq 1 ]
+	grep -q '^Proxy21|Proxy21|Mors VLESS$' "${INFACE_NAMES_FILE}"
+	grep -q '^Wireguard0|nwg0|Рабочий VPN$' "${INFACE_NAMES_FILE}"
+	[ "$(stat -c '%a' "${INFACE_NAMES_FILE}")" = 600 ]
 }

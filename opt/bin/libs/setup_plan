@@ -200,12 +200,16 @@ setup_plan__journal_store() {
 	jq \
 		--arg cli "${MORS_SETUP_INTERFACE_CLI}" \
 		--arg entware "${MORS_SETUP_INTERFACE_ENTWARE}" \
+		--arg description "${MORS_SETUP_INTERFACE_DESCRIPTION}" \
+		--arg state "${MORS_SETUP_INTERFACE_STATE}" \
 		--arg dns "${MORS_SETUP_DNS_BACKEND}" \
 		--arg provisioning "${MORS_SETUP_INTERFACE_PROVISIONING}" \
 		--arg now "${now}" '
 		.plan = {
 			interface_cli: $cli,
 			interface_entware: $entware,
+			interface_description: $description,
+			interface_state: $state,
 			dns_backend: $dns,
 			provisioning: $provisioning,
 			provision_state: "none"
@@ -231,8 +235,8 @@ setup_plan__journal_load() {
 	MORS_SETUP_INTERFACE_ENTWARE=$(jq -er '.plan.interface_entware' "${journal}") || return 1
 	MORS_SETUP_DNS_BACKEND=$(jq -er '.plan.dns_backend' "${journal}") || return 1
 	MORS_SETUP_INTERFACE_PROVISIONING=$(jq -er '.plan.provisioning // "existing"' "${journal}") || return 1
-	MORS_SETUP_INTERFACE_DESCRIPTION=${MORS_SETUP_INTERFACE_CLI}
-	MORS_SETUP_INTERFACE_STATE=unknown
+	MORS_SETUP_INTERFACE_DESCRIPTION=$(jq -er '.plan.interface_description // .plan.interface_cli' "${journal}") || return 1
+	MORS_SETUP_INTERFACE_STATE=$(jq -er '.plan.interface_state // "unknown"' "${journal}") || return 1
 	export MORS_SETUP_INTERFACE_CLI MORS_SETUP_INTERFACE_ENTWARE
 	export MORS_SETUP_INTERFACE_DESCRIPTION MORS_SETUP_INTERFACE_STATE
 	export MORS_SETUP_INTERFACE_PROVISIONING MORS_SETUP_DNS_BACKEND

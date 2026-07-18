@@ -604,6 +604,10 @@ setup__cmd_install_unlocked(){
 		error 'Подготовленный VPN-интерфейс не соответствует setup plan.'
 		return 1
 	}
+	setup__record_selected_interface_mapping || {
+		error 'Не удалось сохранить соответствие выбранного VPN-интерфейса.'
+		return 1
+	}
 
 	log_warning 'Установка пакета МОРС начата...'
 
@@ -740,32 +744,6 @@ setup__cmd_install_unlocked(){
 		fi
 	fi
 
-	log_warning 'Установка пакета МОРС завершена'
-
-	print_line
-	echo 'Установка пакета МОРС завершена.'
-	echo -e "Для справки по командам введите ${BLUE}mors help${NOCL}."
-
-	local output
-
-	output="$(hint__if_ndnproxy_disabled)"
-	if [ -n "${output}" ] ; then
-		echo
-		echo "${output}"
-
-		log_in_file 'Показан совет включить системный DNS.'
-	fi
-
-	output="$(hint__if_dns_ipv6)"
-	if [ -n "${output}" ] ; then
-		echo
-		echo "${output}"
-
-		log_in_file 'Показан совет отключить DHCPv6.'
-	fi
-
-	log_in_file line
-	log_in_file "Установка завершена $(date "${DATE_FORMAT}")"
 }
 
 # WGET='/opt/bin/wget -q --no-check-certificate'
@@ -1058,6 +1036,66 @@ setup__managed_vless_live() {
 		| select(.id == $id and .type == "Proxy" and ."interface-name" != null)
 		| {cli: .id, entware: ."interface-name"}
 	'
+}
+
+setup__record_selected_interface_mapping() {
+	local parent temporary description
+	[ -n "${MORS_SETUP_INTERFACE_CLI:-}" ] || return 1
+	[ -n "${MORS_SETUP_INTERFACE_ENTWARE:-}" ] || return 1
+	parent=$(dirname "${INFACE_NAMES_FILE}") || return 1
+	temporary="${INFACE_NAMES_FILE}.setup.$$"
+	description=$(printf '%s' "${MORS_SETUP_INTERFACE_DESCRIPTION:-${MORS_SETUP_INTERFACE_CLI}}" | tr '\r\n|' '   ') || return 1
+	[ -n "${description}" ] || description=${MORS_SETUP_INTERFACE_CLI}
+	umask 077
+	mkdir -p "${parent}" || return 1
+	if [ -r "${INFACE_NAMES_FILE}" ]; then
+		awk -F '|' \
+			-v cli="${MORS_SETUP_INTERFACE_CLI}" \
+			-v entware="${MORS_SETUP_INTERFACE_ENTWARE}" \
+			'$1 != cli && $2 != entware' "${INFACE_NAMES_FILE}" >"${temporary}" || {
+			rm -f "${temporary}"
+			return 1
+		}
+	else
+		: >"${temporary}" || return 1
+	fi
+	printf '%s|%s|%s\n' \
+		"${MORS_SETUP_INTERFACE_CLI}" \
+		"${MORS_SETUP_INTERFACE_ENTWARE}" \
+		"${description}" >>"${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	chmod 600 "${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	mv -f "${temporary}" "${INFACE_NAMES_FILE}"
+}
+
+setup__print_install_completed() {
+	local output
+	log_warning 'Установка пакета МОРС завершена'
+	print_line
+	echo 'Установка пакета МОРС завершена.'
+	echo -e "Для справки по командам введите ${BLUE}mors help${NOCL}."
+
+	output="$(hint__if_ndnproxy_disabled)"
+	if [ -n "${output}" ] ; then
+		echo
+		echo "${output}"
+		log_in_file 'Показан совет включить системный DNS.'
+	fi
+
+	output="$(hint__if_dns_ipv6)"
+	if [ -n "${output}" ] ; then
+		echo
+		echo "${output}"
+		log_in_file 'Показан совет отключить DHCPv6.'
+	fi
+
+	log_in_file line
+	log_in_file "Установка завершена $(date "${DATE_FORMAT}")"
 }
 
 setup__prepare_selected_interface() {
@@ -1475,6 +1513,7 @@ setup__cmd_install_with_runtime() {
 	fi
 	if [ "${result}" -eq 0 ]; then
 		lifecycle_transaction__finish || result=1
+		[ "${result}" -ne 0 ] || setup__print_install_completed || true
 	else
 		if setup__rollback_transaction; then
 			error 'Настройка не завершена. Исходное состояние восстановлено.'

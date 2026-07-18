@@ -2648,10 +2648,17 @@ dns_crypt_install() {
 		config__restore_from_opkg "${DNSCRYPT_CONFIG}"
 	fi
 
-#	Настраиваем сервис
+	#	Настраиваем сервис
 	ready "Настраиваем dnscrypt-proxy2..."
+	local activation_result
 	cmd_dns_crypt_on 1> /dev/null 2> "${ERROR_LOG_FILE}"
-	ready_status "${?}" "Проблема при активации шифрования DNS трафика"
+	activation_result=$?
+	if [ "${activation_result}" -ne 0 ] || [ -s "${ERROR_LOG_FILE}" ]; then
+		ready_status 1 "Проблема при активации шифрования DNS трафика"
+		return 1
+	fi
+	ready_status 0 "Проблема при активации шифрования DNS трафика"
+	return 0
 }
 # ------------------------------------------------------------------------------------------
 #

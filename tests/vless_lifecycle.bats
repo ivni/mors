@@ -95,3 +95,23 @@ setup() {
 	grep -q 'cmd_mors_init "no" || return 1' <<<"${body}"
 	grep -q '^[[:space:]]*return 0$' <<<"${body}"
 }
+
+@test "dnscrypt activation errors fail setup instead of only printing a warning" {
+	local vpn=${REPO_ROOT}/opt/bin/libs/vpn
+	local body
+	body=$(sed -n '/^dns_crypt_install()/,/^}/p' "${vpn}" | tr -d '\r')
+	grep -q 'activation_result=\$?' <<<"${body}"
+	grep -q '\[ "${activation_result}" -ne 0 \].*\[ -s "${ERROR_LOG_FILE}" \]' <<<"${body}"
+	grep -A2 'ready_status 1' <<<"${body}" | grep -q 'return 1'
+}
+
+@test "setup reports completion only after lifecycle verification is committed" {
+	local setup=${REPO_ROOT}/opt/bin/main/setup
+	local install_body wrapper finish_line completed_line
+	install_body=$(sed -n '/^setup__cmd_install_unlocked()/,/^}/p' "${setup}" | tr -d '\r')
+	wrapper=$(sed -n '/^setup__cmd_install_with_runtime()/,/^}/p' "${setup}" | tr -d '\r')
+	! grep -q 'Установка пакета МОРС завершена' <<<"${install_body}"
+	finish_line=$(grep -n 'lifecycle_transaction__finish' <<<"${wrapper}" | cut -d: -f1)
+	completed_line=$(grep -n 'setup__print_install_completed' <<<"${wrapper}" | cut -d: -f1)
+	[ "${finish_line}" -lt "${completed_line}" ]
+}
