@@ -170,13 +170,29 @@ setup() {
 	[ "$(tail -n 1 "${VLESS_EVENTS_FILE}" | jq -r '.result')" = error ]
 }
 
-@test "TERM exits supervisor and releases process lock" {
-	vless_supervisor__once() { return 0; }
+@test "USR1 wakes and TERM promptly stops supervisor during interval sleep" {
+	local cycles="${BATS_TEST_TMPDIR}/cycles" stopped=false
+	vless_supervisor__once() { printf '%s\n' cycle >>"${cycles}"; }
+	cycle_count() {
+		[ -f "${cycles}" ] && wc -l <"${cycles}" || printf '%s\n' 0
+	}
 	VLESS_SUPERVISOR_INTERVAL=30
 	vless_supervisor__run &
 	process_id=$!
-	for _ in 1 2 3 4 5; do [ -f "${VLESS_SUPERVISOR_PID_FILE}" ] && break; sleep 0.1; done
+	for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(cycle_count)" -ge 1 ] && break; sleep 0.1; done
+	kill -USR1 "${process_id}"
+	for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(cycle_count)" -ge 2 ] && break; sleep 0.1; done
+	[ "$(cycle_count)" -ge 2 ]
 	kill -TERM "${process_id}"
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		if ! kill -0 "${process_id}" 2>/dev/null; then stopped=true; break; fi
+		sleep 0.1
+	done
+	if [ "${stopped}" != true ]; then
+		kill -KILL "${process_id}" 2>/dev/null || true
+		wait "${process_id}" 2>/dev/null || true
+		false
+	fi
 	wait "${process_id}"
 	[ ! -e "${VLESS_SUPERVISOR_PID_FILE}" ]
 	[ ! -d "${VLESS_SUPERVISOR_LOCK_DIR}" ]
