@@ -14,15 +14,17 @@ setup_plan__managed_vless_available() {
 }
 
 setup_plan__inventory_json() {
-	local raw managed_vless_available=false
+	local raw managed_vless_available=false managed_vless_entware
 	if [ -n "${MORS_SETUP_PLAN_INTERFACE_JSON:-}" ]; then
 		raw=${MORS_SETUP_PLAN_INTERFACE_JSON}
 	else
 		raw=$(curl -fsS "${MORS_SETUP_PLAN_RCI_URL}") || return 1
 	fi
 	setup_plan__managed_vless_available && managed_vless_available=true
+	managed_vless_entware=${PROXY_VLESS_ENTWARE:-t2s21}
 	printf '%s\n' "${raw}" | jq -ce \
 		--arg managed_proxy "${PROXY_VLESS_NAME:-Proxy21}" \
+		--arg managed_entware "${managed_vless_entware}" \
 		--argjson managed_vless_available "${managed_vless_available}" '
 		[.[]
 		| select(.defaultgw != true)
@@ -35,7 +37,7 @@ setup_plan__inventory_json() {
 		| select(.id != null and ."interface-name" != null)
 		| {
 			cli: .id,
-			entware: ."interface-name",
+			entware: (if .type == "Proxy" and .id == $managed_proxy then $managed_entware else ."interface-name" end),
 			description: (.description // .id),
 			state: (.state // "unknown"),
 			provisioning: "existing"
@@ -44,7 +46,7 @@ setup_plan__inventory_json() {
 		| if $managed_vless_available and (any(.[]; .cli == $managed_proxy) | not) then
 			. + [{
 				cli: $managed_proxy,
-				entware: $managed_proxy,
+				entware: $managed_entware,
 				description: "Mors VLESS",
 				state: "not_configured",
 				provisioning: "managed_vless"

@@ -115,3 +115,25 @@ setup() {
 	completed_line=$(grep -n 'setup__print_install_completed' <<<"${wrapper}" | cut -d: -f1)
 	[ "${finish_line}" -lt "${completed_line}" ]
 }
+
+@test "managed Proxy21 uses its Keenetic system interface for policy routing" {
+	grep -q '^PROXY_VLESS_ENTWARE=t2s${PROXY_INFACE_NUMEBER}$' "${REPO_ROOT}/opt/bin/libs/main"
+	grep -q 'managed_entware' "${REPO_ROOT}/opt/bin/libs/setup_plan"
+	grep -q 'PROXY_VLESS_ENTWARE:-t2s21' "${REPO_ROOT}/opt/bin/main/setup"
+}
+
+@test "route creation failures propagate through VPN activation" {
+	local ndm=${REPO_ROOT}/opt/etc/ndm/ndm
+	local vpn=${REPO_ROOT}/opt/bin/libs/vpn
+	grep -q 'ip4__route__add_table || return 1' "${ndm}"
+	grep -A2 'Ошибка при добавлении ${submessage}' "${ndm}" | grep -q 'return 1'
+	grep -q 'net_interface.*PROXY_VLESS_ENTWARE:-t2s21' "${ndm}"
+	grep -A5 'if ip4_firewall_set_all_rules' "${vpn}" | grep -q 'return 1'
+	grep -A3 'operation_result=\$?' "${vpn}" | grep -q 'return 1'
+}
+
+@test "lifecycle verifier reports the exact failed invariant" {
+	local setup=${REPO_ROOT}/opt/bin/main/setup
+	grep -q '^setup__verify_failed()' "${setup}"
+	grep -q 'таблица ${ROUTE_TABLE_ID:-1001} пуста' "${setup}"
+}

@@ -11,7 +11,8 @@ setup() {
 	]'
 	export MORS_SETUP_PLAN_INTERFACE_JSON
 	PROXY_VLESS_NAME=Proxy21
-	export PROXY_VLESS_NAME
+	PROXY_VLESS_ENTWARE=t2s21
+	export PROXY_VLESS_NAME PROXY_VLESS_ENTWARE
 	. "${REPO_ROOT}/opt/bin/libs/setup_plan"
 }
 
@@ -20,6 +21,7 @@ setup() {
 	[ "${status}" -eq 0 ]
 	[ "$(jq -r 'length' <<<"${output}")" -eq 2 ]
 	[ "$(jq -r '.[0].cli' <<<"${output}")" = Proxy21 ]
+	[ "$(jq -r '.[0].entware' <<<"${output}")" = t2s21 ]
 	[ "$(jq -r '.[1].cli' <<<"${output}")" = Wireguard0 ]
 	! grep -q 'Proxy7\|ISP\|Bridge0' <<<"${output}"
 }
@@ -36,7 +38,7 @@ setup() {
 	[ "${status}" -eq 0 ]
 	[ "$(jq -r 'length' <<<"${output}")" -eq 1 ]
 	[ "$(jq -r '.[0].cli' <<<"${output}")" = Proxy21 ]
-	[ "$(jq -r '.[0].entware' <<<"${output}")" = Proxy21 ]
+	[ "$(jq -r '.[0].entware' <<<"${output}")" = t2s21 ]
 	[ "$(jq -r '.[0].provisioning' <<<"${output}")" = managed_vless ]
 }
 
@@ -129,6 +131,7 @@ setup() {
 	setup_plan__journal_provision_state creating
 
 	[ "$(jq -r '.plan.provisioning' "$(lifecycle_transaction__journal_file)")" = managed_vless ]
+	[ "$(jq -r '.plan.interface_entware' "$(lifecycle_transaction__journal_file)")" = t2s21 ]
 	[ "$(jq -r '.plan.provision_state' "$(lifecycle_transaction__journal_file)")" = creating ]
 }
 
@@ -148,14 +151,14 @@ setup() {
 	source <(sed -n '/^setup__record_selected_interface_mapping()/,/^}/p' "${setup_file}")
 	INFACE_NAMES_FILE=${BATS_TEST_TMPDIR}/inface_equals
 	MORS_SETUP_INTERFACE_CLI=Proxy21
-	MORS_SETUP_INTERFACE_ENTWARE=Proxy21
+	MORS_SETUP_INTERFACE_ENTWARE=t2s21
 	MORS_SETUP_INTERFACE_DESCRIPTION='Mors|VLESS'
 	printf 'Proxy21|old21|old\nWireguard0|nwg0|Рабочий VPN\n' >"${INFACE_NAMES_FILE}"
 
 	setup__record_selected_interface_mapping
 
 	[ "$(grep -c '^Proxy21|' "${INFACE_NAMES_FILE}")" -eq 1 ]
-	grep -q '^Proxy21|Proxy21|Mors VLESS$' "${INFACE_NAMES_FILE}"
+	grep -q '^Proxy21|t2s21|Mors VLESS$' "${INFACE_NAMES_FILE}"
 	grep -q '^Wireguard0|nwg0|Рабочий VPN$' "${INFACE_NAMES_FILE}"
 	[ "$(stat -c '%a' "${INFACE_NAMES_FILE}")" = 600 ]
 }

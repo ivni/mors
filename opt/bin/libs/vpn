@@ -35,13 +35,28 @@ CMD_LIST="address prefix name-servers"
 update_iptables(){
 	ready "${prefix}Очищаем все ранее созданные iptables правила."
 	# возможно чистить цепочки и роутинг — лишнее
-	ip4__flush 'chain table' &>/dev/null && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+	if ip4__flush 'chain table' &>/dev/null; then
+		when_ok "УСПЕШНО"
+	else
+		when_bad "ОШИБКА"
+		return 1
+	fi
 
 	ready "${prefix}Создаем перехват DNS для домашней сети."
-	ip4__dns__add_routing_for_home &> /dev/null && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+	if ip4__dns__add_routing_for_home &>/dev/null; then
+		when_ok "УСПЕШНО"
+	else
+		when_bad "ОШИБКА"
+		return 1
+	fi
 
 	ready "${prefix}Создаем iptables правила."
-	ip4_firewall_set_all_rules &> /dev/null && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+	if ip4_firewall_set_all_rules &>/dev/null; then
+		when_ok "УСПЕШНО"
+	else
+		when_bad "ОШИБКА"
+		return 1
+	fi
 }
 
 # ------------------------------------------------------------------------------------------
@@ -1628,6 +1643,7 @@ ndm_gateway_change() {
 # ------------------------------------------------------------------------------------------
 
 vpn_on() {
+	local operation_result
 
 	inface_entware="${1}"
 	inface_cli=$(grep "${inface_entware}" "${INFACE_NAMES_FILE}" | cut -d '|' -f1 )
@@ -1666,7 +1682,13 @@ vpn_on() {
 			update_iptables
 		fi
 	} 1> /dev/null 2> "${ERROR_LOG_FILE}"
-	ready_status "${?}" "Возникла ошибка при подключении VPN соединения [${inface_cli_desc}]" "УСПЕШНО"
+	operation_result=$?
+	if [ "${operation_result}" -ne 0 ] || [ -s "${ERROR_LOG_FILE}" ]; then
+		ready_status 1 "Возникла ошибка при подключении VPN соединения [${inface_cli_desc}]" "УСПЕШНО"
+		return 1
+	fi
+	ready_status 0 "Возникла ошибка при подключении VPN соединения [${inface_cli_desc}]" "УСПЕШНО"
+	return 0
 
 }
 

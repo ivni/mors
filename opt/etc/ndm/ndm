@@ -503,7 +503,7 @@ ip4__mark__create_chain() {
 
 		# т.к. мы начнём маркировать трафик, то заранее
 		# стартанём таблицы для него и повесим правило захвата
-		ip4__route__add_table
+		ip4__route__add_table || return 1
 		ip4__rule__add_mark_to_table
 
 		# Ещё есть 2 варианта цепочки, если проблемы.
@@ -534,7 +534,10 @@ ip4__mark__create_chain() {
 		fi
 		/opt/sbin/iptables -w -t "${TABLE_MARK}" -A "${CHAIN_MARK}" -j MARK --set-mark ${MARK_NUM}
 		/opt/sbin/iptables -w -t "${TABLE_MARK}" -A "${CHAIN_MARK}" -j CONNMARK --save-mark
-	} &>/dev/null || error "[${FUNCNAME}] Возникли ошибки во время маркировки трафика для VPN"
+	} &>/dev/null || {
+		error "[${FUNCNAME}] Возникли ошибки во время маркировки трафика для VPN"
+		return 1
+	}
 }
 
 
@@ -908,7 +911,7 @@ ip4__add_routing_for_ip_from_config() {
 
 ip4_mark_vpn_network() {
 	{
-		ip4__mark__create_chain
+		ip4__mark__create_chain || return 1
 
 		# Сначала правила по IP, затем по сетям.
 		ip4__add_routing_for_ip_from_config
@@ -1151,19 +1154,21 @@ ip4__route__add_table() {
 	if [ -z "${route_show}" ] ; then
 		log_warning "Добавление ${submessage}"
 
-		/opt/sbin/ip route add table "${ROUTE_TABLE_ID}" $(echo "${subroute}") \
-		 || {
+		if ! /opt/sbin/ip route add table "${ROUTE_TABLE_ID}" $(echo "${subroute}") ; then
 			error "[${FUNCNAME}] Ошибка при добавлении ${submessage}"
-		}
+			return 1
+		fi
 
 		is_need_flush='2'
 	fi
 
-	# если не gateway, то нужны 2 роута
-	if [ -z "${gateway_ip}" ] ; then
+	# Обычному VPN без явного gateway нужен маршрут к сети gateway. Keenetic
+	# Proxy — point-to-point интерфейс: для него достаточно default dev t2sN.
+	if [ -z "${gateway_ip}" ] && [ "${net_interface}" != "${PROXY_VLESS_ENTWARE:-t2s21}" ] ; then
 		gateway_ip=$(get_ip_by_inface "${net_interface}")
 		if [ -z "${gateway_ip}" ] ; then
 			error "[${FUNCNAME}] При добавлении в таблицу маршрутизации ${ROUTE_TABLE_ID} не удалось определить IP шлюза для ${net_interface}"
+			return 1
 		else
 			local gateway_net=$(get_net_by_ip "${gateway_ip}")
 			subroute="${gateway_net} via ${gateway_ip}" # dev ${net_interface}
@@ -1172,10 +1177,10 @@ ip4__route__add_table() {
 			if ! echo "${route_show}" | grep -Fq "${subroute}" ; then
 				log_warning "Добавление ${submessage}"
 
-				/opt/sbin/ip route add $(echo "${subroute}") table "${ROUTE_TABLE_ID}" \
-				 || {
+				if ! /opt/sbin/ip route add $(echo "${subroute}") table "${ROUTE_TABLE_ID}" ; then
 					error "[${FUNCNAME}] Ошибка при добавлении ${submessage}"
-				}
+					return 1
+				fi
 
 				is_need_flush='3'
 			fi

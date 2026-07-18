@@ -82,6 +82,7 @@ MORS_START_FILE=/opt/etc/init.d/S96mors
 # VLESS over Proxy
 PROXY_INFACE_NUMEBER=21
 PROXY_VLESS_NAME=Proxy${PROXY_INFACE_NUMEBER}
+PROXY_VLESS_ENTWARE=t2s${PROXY_INFACE_NUMEBER}
 
 # Файл с сетями, запросы к которым не должны попадать в тоннель
 # Данный файл постоянен, не доступен пользователям на редактирование

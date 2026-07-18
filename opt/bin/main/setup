@@ -1031,10 +1031,12 @@ setup__activate_core_hooks() {
 }
 
 setup__managed_vless_live() {
-	curl -fsS "${INFACE_REQUEST}" | jq -ce --arg id "${PROXY_VLESS_NAME}" '
+	curl -fsS "${INFACE_REQUEST}" | jq -ce \
+		--arg id "${PROXY_VLESS_NAME}" \
+		--arg entware "${PROXY_VLESS_ENTWARE:-t2s21}" '
 		.[]
 		| select(.id == $id and .type == "Proxy" and ."interface-name" != null)
-		| {cli: .id, entware: ."interface-name"}
+		| {cli: .id, entware: $entware}
 	'
 }
 
@@ -1156,61 +1158,82 @@ setup__service_running() {
 	printf '%s\n' "${output}" | grep -qiE '(^|[[:space:]])(alive|running)([[:space:].]|$)'
 }
 
+setup__verify_failed() {
+	error "Lifecycle verification: ${1}"
+	return 1
+}
+
 setup__verify_committed() {
 	local expected_cli expected_entware dns_backend iptables_state ipset_state ip_binary rule_state route_state path
 	expected_cli=${MORS_SETUP_INTERFACE_CLI:-$(get_config_value INFACE_CLI)}
 	expected_entware=${MORS_SETUP_INTERFACE_ENTWARE:-$(get_config_value INFACE_ENT)}
-	[ -n "${expected_cli}" ] && [ -n "${expected_entware}" ] || return 1
-	[ "$(get_config_value INFACE_CLI)" = "${expected_cli}" ] || return 1
-	[ "$(get_config_value INFACE_ENT)" = "${expected_entware}" ] || return 1
-	[ -x /opt/etc/init.d/S96mors ] || return 1
-	[ -x /opt/etc/ndm/fs.d/15-mors-start.sh ] || return 1
-	[ -x /opt/etc/ndm/netfilter.d/100-dns-local ] || return 1
-	[ -x /opt/etc/ndm/ifcreated.d/mors-iface-add ] || return 1
-	[ -x /opt/etc/ndm/ifdestroyed.d/mors-iface-del ] || return 1
-	[ -x /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ] || return 1
+	if [ -z "${expected_cli}" ] || [ -z "${expected_entware}" ]; then
+		setup__verify_failed 'не определён выбранный интерфейс'
+		return 1
+	fi
+	[ "$(get_config_value INFACE_CLI)" = "${expected_cli}" ] || \
+		setup__verify_failed "INFACE_CLI не равен ${expected_cli}" || return 1
+	[ "$(get_config_value INFACE_ENT)" = "${expected_entware}" ] || \
+		setup__verify_failed "INFACE_ENT не равен ${expected_entware}" || return 1
+	for path in \
+		/opt/etc/init.d/S96mors \
+		/opt/etc/ndm/fs.d/15-mors-start.sh \
+		/opt/etc/ndm/netfilter.d/100-dns-local \
+		/opt/etc/ndm/ifcreated.d/mors-iface-add \
+		/opt/etc/ndm/ifdestroyed.d/mors-iface-del \
+		/opt/etc/ndm/iflayerchanged.d/100-mors-vpn; do
+		[ -x "${path}" ] || setup__verify_failed "не активирован ${path}" || return 1
+	done
 	dns_backend=${MORS_SETUP_DNS_BACKEND:-}
 	if [ -z "${dns_backend}" ]; then
 		has_adguard_enable && dns_backend=adguard || dns_backend=dnscrypt
 	fi
 	case "${dns_backend}" in
 		adguard)
-			[ -r "${ADGUARDHOME_CONFIG}" ] || return 1
-			setup__service_running "${ADGUARDHOME_DEMON}" || return 1
+			[ -r "${ADGUARDHOME_CONFIG}" ] || setup__verify_failed 'не читается конфигурация AdGuard Home' || return 1
+			setup__service_running "${ADGUARDHOME_DEMON}" || setup__verify_failed 'AdGuard Home не запущен' || return 1
 			;;
 		dnscrypt)
-			[ -r "${DNSMASQ_CONFIG}" ] && [ -r "${DNSCRYPT_CONFIG}" ] || return 1
-			setup__service_running "${DNSMASQ_DEMON}" || return 1
-			setup__service_running "${DNSCRYPT_DEMON}" || return 1
+			if [ ! -r "${DNSMASQ_CONFIG}" ] || [ ! -r "${DNSCRYPT_CONFIG}" ]; then
+				setup__verify_failed 'не читается конфигурация dnsmasq или DNSCrypt'
+				return 1
+			fi
+			setup__service_running "${DNSMASQ_DEMON}" || setup__verify_failed 'dnsmasq не запущен' || return 1
+			setup__service_running "${DNSCRYPT_DEMON}" || setup__verify_failed 'DNSCrypt не запущен' || return 1
 			;;
-		*) return 1 ;;
+		*) setup__verify_failed "неизвестный DNS backend ${dns_backend}"; return 1 ;;
 	esac
 	if [ "${expected_cli}" = "${PROXY_VLESS_NAME}" ]; then
-		setup__managed_vless_live >/dev/null 2>&1 || return 1
-		setup__service_running "${XRAY_INIT}" || return 1
+		setup__managed_vless_live >/dev/null 2>&1 || setup__verify_failed 'Proxy21 не опубликован Keenetic' || return 1
+		setup__service_running "${XRAY_INIT}" || setup__verify_failed 'Xray не запущен' || return 1
 	fi
-	iptables_state=$(save_iptables 2>/dev/null) || return 1
-	printf '%s\n' "${iptables_state}" | grep -qE '(^|[[:space:]:])MORS(_|[[:space:]])' || return 1
+	iptables_state=$(save_iptables 2>/dev/null) || setup__verify_failed 'не удалось прочитать iptables' || return 1
+	printf '%s\n' "${iptables_state}" | grep -qE '(^|[[:space:]:])MORS(_|[[:space:]])' || \
+		setup__verify_failed 'отсутствуют цепочки MORS в iptables' || return 1
 	if command -v ipset >/dev/null 2>&1; then
-		ipset_state=$(ipset list -n 2>/dev/null) || return 1
+		ipset_state=$(ipset list -n 2>/dev/null) || setup__verify_failed 'не удалось прочитать ipset' || return 1
 	elif [ -x /opt/sbin/ipset ]; then
-		ipset_state=$(/opt/sbin/ipset list -n 2>/dev/null) || return 1
+		ipset_state=$(/opt/sbin/ipset list -n 2>/dev/null) || setup__verify_failed 'не удалось прочитать ipset' || return 1
 	else
+		setup__verify_failed 'команда ipset недоступна'
 		return 1
 	fi
-	printf '%s\n' "${ipset_state}" | grep -qE '^MORS($|_)' || return 1
+	printf '%s\n' "${ipset_state}" | grep -qE '^MORS($|_)' || setup__verify_failed 'отсутствуют таблицы MORS в ipset' || return 1
 	if ! [[ "${expected_entware}" =~ ${SSR_ENTWARE_TEMPL} ]]; then
 		if command -v ip >/dev/null 2>&1; then
 			ip_binary=$(command -v ip)
 		elif [ -x /opt/sbin/ip ]; then
 			ip_binary=/opt/sbin/ip
 		else
+			setup__verify_failed 'команда ip недоступна'
 			return 1
 		fi
-		rule_state=$("${ip_binary}" rule show 2>/dev/null) || return 1
-		printf '%s\n' "${rule_state}" | grep -qE "lookup[[:space:]]+${ROUTE_TABLE_ID:-1001}([[:space:]]|$)" || return 1
-		route_state=$("${ip_binary}" route show table "${ROUTE_TABLE_ID:-1001}" 2>/dev/null) || return 1
-		[ -n "${route_state}" ] || return 1
+		rule_state=$("${ip_binary}" rule show 2>/dev/null) || setup__verify_failed 'не удалось прочитать policy rules' || return 1
+		printf '%s\n' "${rule_state}" | grep -qE "lookup[[:space:]]+${ROUTE_TABLE_ID:-1001}([[:space:]]|$)" || \
+			setup__verify_failed "отсутствует policy rule для таблицы ${ROUTE_TABLE_ID:-1001}" || return 1
+		route_state=$("${ip_binary}" route show table "${ROUTE_TABLE_ID:-1001}" 2>/dev/null) || \
+			setup__verify_failed "не удалось прочитать таблицу ${ROUTE_TABLE_ID:-1001}" || return 1
+		[ -n "${route_state}" ] || setup__verify_failed "таблица ${ROUTE_TABLE_ID:-1001} пуста" || return 1
 	fi
 }
 

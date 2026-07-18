@@ -350,7 +350,7 @@ NDM-hook. `adguard` доступен в плане только для уже у
 AdGuard Home выполняются отдельным workflow и не скрываются внутри setup.
 
 Для VLESS inventory может показать детерминированный управляемый target
-`Proxy21 / Proxy21`, даже если сам интерфейс ещё не создан. Такой target
+`Proxy21 / t2s21`, даже если сам интерфейс ещё не создан. Такой target
 доступен только при уже установленных системных компонентах Keenetic `proxy`,
 `opkg-kmod-netfilter` и `opkg-kmod-netfilter-addons`; plan явно помечает его как
 требующий provisioning. Подтверждённый setup создаёт только этот интерфейс
