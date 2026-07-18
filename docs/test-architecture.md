@@ -141,6 +141,11 @@ Runtime mutator никогда не получает test lock. Busy возвр�
 восстанавливает snapshot и освобождает runtime lock, после чего hook продолжает
 изменение.
 
+Если read-only test попал в промежуточный health-state активного VLESS под
+decision lock supervisor, он ограниченно ждёт завершения уже идущего решения и
+только затем фиксирует active connection. Временный `unstable` внутри cycle не
+должен превращать рабочий active tunnel и все registry entries в резервы.
+
 ## 9. Cold transaction и recovery
 
 Cold сначала выполняет read-only baseline. Ошибка любого `blocks_cold` этапа

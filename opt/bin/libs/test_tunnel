@@ -22,8 +22,19 @@ test_tunnel__detect_active() {
 	export MORS_TEST_ACTIVE_KIND MORS_TEST_ACTIVE_ID MORS_TEST_ACTIVE_DEVICE
 }
 
+test_tunnel__vless_active_snapshot() {
+	local active_id state
+	active_id=$(vless_runtime__active_id 2>/dev/null)
+	[ -n "${active_id}" ] || active_id=$(jq -r '.active_id // empty' "${VLESS_STATE_FILE}" 2>/dev/null)
+	[ -n "${active_id}" ] || return 1
+	state=$(jq -r --arg id "${active_id}" '.connections[$id].status // empty' \
+		"${VLESS_STATE_FILE}" 2>/dev/null)
+	[ -n "${state}" ] || return 1
+	printf '%s|%s\n' "${active_id}" "${state}"
+}
+
 test_tunnel__active_status() {
-	local state active_id rci_timeout
+	local state active_id rci_timeout snapshot waited=0
 	case "${MORS_TEST_ACTIVE_KIND}" in
 		shadowsocks)
 			if [ -x /opt/etc/init.d/S22shadowsocks ] && \
@@ -33,15 +44,24 @@ test_tunnel__active_status() {
 			fi
 			;;
 		vless)
-			if [ -r "${VLESS_STATE_FILE}" ]; then
-				active_id=$(jq -r '.active_id // empty' "${VLESS_STATE_FILE}" 2>/dev/null)
-				state=$(jq -r --arg id "${active_id}" '.connections[$id].status // empty' \
-					"${VLESS_STATE_FILE}" 2>/dev/null)
-				if [ -n "${active_id}" ] && [ "${state}" = active ]; then
-					MORS_TEST_ACTIVE_ID=${active_id}; export MORS_TEST_ACTIVE_ID
-					test_probe__set working tunnel_active 'Активный VLESS runtime работает.'
-					return 0
-				fi
+			snapshot=$(test_tunnel__vless_active_snapshot 2>/dev/null || true)
+			active_id=${snapshot%%|*}
+			state=${snapshot#*|}
+			while [ -n "${snapshot}" ] && [ "${state}" != active ] && \
+				[ -d "${VLESS_DECISION_LOCK_DIR:-/nonexistent}" ] && \
+				[ "${waited}" -lt 30 ] && [ "$(test_probe__remaining)" -gt 0 ]; do
+				sleep 1
+				waited=$((waited + 1))
+				snapshot=$(test_tunnel__vless_active_snapshot 2>/dev/null || true)
+				active_id=${snapshot%%|*}
+				state=${snapshot#*|}
+			done
+			if [ -n "${active_id}" ]; then
+				MORS_TEST_ACTIVE_ID=${active_id}; export MORS_TEST_ACTIVE_ID
+			fi
+			if [ -n "${active_id}" ] && [ "${state}" = active ]; then
+				test_probe__set working tunnel_active 'Активный VLESS runtime работает.'
+				return 0
 			fi
 			;;
 		keenetic_vpn)
