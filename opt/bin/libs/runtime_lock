@@ -185,9 +185,11 @@ runtime_mutation_lock__acquire_wait() {
 		''|*[!0-9]*) return 1 ;;
 	esac
 	while :; do
-		runtime_mutation_lock__acquire "${command_name}"
-		result=$?
-		[ "${result}" -eq 0 ] && return 0
+		if runtime_mutation_lock__acquire "${command_name}"; then
+			return 0
+		else
+			result=$?
+		fi
 		# An unfinished cold transaction requires explicit recovery rather than
 		# waiting for a lock owner that cannot make this mutation safe.
 		[ "${result}" -eq 2 ] && return 2
