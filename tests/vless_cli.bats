@@ -21,6 +21,16 @@ setup() {
 	vless_store__ensure
 }
 
+@test "interactive prompt remains visible while only the entered value is captured" {
+	local prompt_output=${BATS_TEST_TMPDIR}/prompt-output
+	local value
+
+	value=$(printf '%s\n' 'vless://secret' | vless_cli__prompt 'Введите VLESS-ссылку' 2>"${prompt_output}")
+
+	[ "${value}" = 'vless://secret' ]
+	[ "$(cat "${prompt_output}")" = 'Введите VLESS-ссылку: ' ]
+}
+
 @test "status JSON exposes health metadata but no VLESS secrets" {
 	vless_store__add_metadata vless-a "Финляндия" true 11971
 	vless_runtime__ensure
