@@ -65,6 +65,30 @@ teardown() {
 	runtime_mutation_lock__release
 }
 
+@test "bounded runtime wait acquires after a live owner releases" {
+	local ready=${BATS_TEST_TMPDIR}/holder-ready holder
+	env MORS_LOCK_ROOT="${MORS_LOCK_ROOT}" \
+		MORS_RUNTIME_LOCK_DIR="${MORS_RUNTIME_LOCK_DIR}" \
+		MORS_COLD_JOURNAL_DIR="${MORS_COLD_JOURNAL_DIR}" \
+		READY_FILE="${ready}" sh -c '
+			. "$1"
+			runtime_mutation_lock__acquire holder || exit 1
+			: >"${READY_FILE}"
+			sleep 1
+			runtime_mutation_lock__release
+		' sh "${REPO_ROOT}/opt/bin/libs/runtime_lock" &
+	holder=$!
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		[ -e "${ready}" ] && break
+		sleep 0.1
+	done
+	[ -e "${ready}" ]
+
+	runtime_mutation_lock__acquire_wait waiter 5
+	wait "${holder}"
+	[ "${MORS_RUNTIME_LOCK_DEPTH}" -eq 1 ]
+}
+
 @test "mutating NDM hooks participate in runtime serialization" {
 	local hook
 	for hook in \
@@ -82,6 +106,7 @@ teardown() {
 @test "startup paths attempt cold recovery before normal initialization" {
 	grep -q 'test_cold__recover' "${REPO_ROOT}/opt/etc/ndm/fs.d/15-mors-start.sh"
 	grep -q 'test_cold__recover' "${REPO_ROOT}/opt/etc/init.d/S96mors"
+	grep -q 'runtime_mutation_lock__acquire_wait' "${REPO_ROOT}/opt/etc/init.d/S96mors"
 }
 
 @test "lifecycle and VLESS decision paths nest the runtime lock" {

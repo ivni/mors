@@ -56,7 +56,11 @@ case ${1} in
 		if [ -d "${MORS_COLD_JOURNAL_DIR}" ]; then
 			test_cold__recover || exit 1
 		fi
-		runtime_mutation_lock__acquire 'mors init service' || exit $?
+		# S25mors-vless is ordered before this service by Entware and may still
+		# own the runtime lock for its first health-cycle. Boot initialization
+		# must wait for that bounded operation instead of silently skipping the
+		# firewall and policy-route restore.
+		runtime_mutation_lock__acquire_wait 'mors init service' "${MORS_INIT_LOCK_WAIT:-60}" || exit $?
 		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
 		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
 		cmd_mors_init no

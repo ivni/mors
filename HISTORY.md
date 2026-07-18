@@ -13,6 +13,7 @@
 - Init stop повторно завершает только direct children подтверждённого supervisor с актуальным `PPid`, чтобы BusyBox `ash` мог обработать отложенный `TERM` даже во время активного health-probe.
 - VLESS JSON-команды больше не обрамляются CLI-разделителями, а dispatcher сохраняет документированные health exit codes, включая `1` для состояния `degraded`.
 - VLESS status больше не объявляет сохранённое recovery-соединение текущим active, когда data-plane переведён в прямой резерв или fail-closed.
+- Boot-init ограниченно ждёт первый health-cycle VLESS supervisor и больше не пропускает восстановление Mors firewall и policy routes из-за стартовой гонки lock.
 
 ## 1.3.0 beta 4 - 2026-07-12
 - Установка IPK стала пассивной: init/NDM hooks активируются только в commit-фазе подтверждённого `mors setup`; `mors`, `help` и `version` не запускают скрытую настройку.

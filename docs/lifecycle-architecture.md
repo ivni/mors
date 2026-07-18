@@ -124,6 +124,11 @@ Verify подтверждает выбранный интерфейс и DNS bac
 также опубликованные hooks. Одного наличия CLI или конфигурационного файла
 недостаточно для перехода в `ready`.
 
+При boot Entware может запустить первый health-cycle VLESS supervisor раньше
+основного init Mors. `S96mors` ограниченно ждёт общий runtime-mutation lock,
+после чего идемпотентно восстанавливает firewall и policy routes. Fail-fast
+контракт интерактивных runtime-команд при этом не меняется.
+
 ## 5. Uninstall
 
 Штатный порядок:

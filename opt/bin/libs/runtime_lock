@@ -178,6 +178,25 @@ runtime_mutation_lock__acquire() {
 	runtime_lock__acquire "${MORS_RUNTIME_LOCK_DIR}" runtime "${1:-mors mutation}"
 }
 
+runtime_mutation_lock__acquire_wait() {
+	local command_name="${1:-mors mutation}" timeout="${2:-60}"
+	local waited=0 result
+	case "${timeout}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	while :; do
+		runtime_mutation_lock__acquire "${command_name}"
+		result=$?
+		[ "${result}" -eq 0 ] && return 0
+		# An unfinished cold transaction requires explicit recovery rather than
+		# waiting for a lock owner that cannot make this mutation safe.
+		[ "${result}" -eq 2 ] && return 2
+		[ "${waited}" -ge "${timeout}" ] && return "${result}"
+		sleep 1
+		waited=$((waited + 1))
+	done
+}
+
 runtime_mutation_lock__release() {
 	runtime_lock__release "${MORS_RUNTIME_LOCK_DIR}" runtime
 }
