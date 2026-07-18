@@ -108,6 +108,17 @@ test_tunnel__ss_start() {
 	return 1
 }
 
+test_tunnel__shadowsocks_configured() {
+	[ -r "${SHADOWSOCKS_CONF}" ] || return 1
+	jq -e '
+		type == "object" and
+		(.server | type == "string" and length > 0 and . != "127.0.0.1" and . != "@SSR_SERVER_IP") and
+		(.server_port | type == "number" and . >= 1 and . <= 65535 and . == floor) and
+		(.password | type == "string" and length > 0 and . != "barfoo!" and . != "@SSR_SERVER_PASSWD") and
+		(.method | type == "string" and length > 0 and . != "@SSR_SERVER_CRYPT")
+	' "${SHADOWSOCKS_CONF}" >/dev/null 2>&1
+}
+
 test_tunnel__cleanup() {
 	if [ -n "${MORS_TEST_SS_PID:-}" ]; then
 		kill "${MORS_TEST_SS_PID}" 2>/dev/null || true
@@ -159,7 +170,7 @@ test_tunnel__wan_request() {
 }
 
 test_tunnel__inventory() {
-	local active_id=${MORS_TEST_ACTIVE_ID:-} rci_timeout rci_response
+	local active_id=${MORS_TEST_ACTIVE_ID:-} rci_timeout rci_response rci_interfaces
 	if [ -r "${VLESS_REGISTRY_FILE}" ]; then
 		jq -c --arg active "${active_id}" '
 			.connections[] | select(.enabled == true) |
@@ -167,7 +178,7 @@ test_tunnel__inventory() {
 			 desired:"enabled", probe_port}
 		' "${VLESS_REGISTRY_FILE}" 2>/dev/null
 	fi
-	if [ -r "${SHADOWSOCKS_CONF}" ] && jq -e . "${SHADOWSOCKS_CONF}" >/dev/null 2>&1; then
+	if test_tunnel__shadowsocks_configured; then
 		jq -nc --arg role "$([ "${MORS_TEST_ACTIVE_KIND}" = shadowsocks ] && printf active || printf other)" \
 			'{id:"shadowsocks",kind:"shadowsocks",role:$role,desired:"enabled"}'
 	fi
@@ -181,20 +192,26 @@ test_tunnel__inventory() {
 		printf '%s\n' '{"id":"keenetic_inventory","kind":"inventory_error","role":"meta","reason_code":"inventory_unavailable"}'
 		return 0
 	}
-	if ! printf '%s\n' "${rci_response}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+	rci_interfaces=$(printf '%s\n' "${rci_response}" | \
+		test_probe__normalize_rci_interfaces 2>/dev/null) || {
 		printf '%s\n' '{"id":"keenetic_inventory","kind":"inventory_error","role":"meta","reason_code":"inventory_invalid"}'
 		return 0
-	fi
-	printf '%s\n' "${rci_response}" | jq -c \
+	}
+	printf '%s\n' "${rci_interfaces}" | jq -c \
 		--arg active "${active_id}" '
 		.[] |
 		select((.id // "") != "") |
-		select((.vpn == true) or ((.type // "") | test("vpn|wireguard|openvpn|l2tp|pptp|sstp|ipsec"; "i"))) |
+		select(
+			(.vpn == true) or
+			.type == "OpenVPN" or .type == "Wireguard" or .type == "IKE" or
+			.type == "SSTP" or .type == "L2TP" or .type == "PPTP" or
+			.type == "OpenConnect" or .type == "IPsec"
+		) |
 		select((.role // "client") != "server") |
 		{id,kind:"keenetic_vpn",role:(if .id == $active then "active" else "other" end),
 		 desired:(if has("up") then .up elif has("enabled") then .enabled else "unknown" end),
 		 state:(.state // .link // "unknown"),
-		 device:(.interface // .ifname // .id)}
+		 device:(.interface // .ifname // .["interface-name"] // .id)}
 	' 2>/dev/null
 }
 

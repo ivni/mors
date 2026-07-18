@@ -24,6 +24,15 @@ setup() {
 	! test_probe__valid_ipv4 '203.0.113.7 text'
 }
 
+@test "RCI interface inventory normalizes Keenetic object and array responses" {
+	object='{"Bridge0":{"id":"Bridge0"},"Wireguard0":{"id":"Wireguard0"}}'
+	array='[{"id":"Bridge0"},{"id":"Wireguard0"}]'
+	[ "$(printf '%s\n' "${object}" | test_probe__normalize_rci_interfaces)" = "${array}" ]
+	[ "$(printf '%s\n' "${array}" | test_probe__normalize_rci_interfaces)" = "${array}" ]
+	run test_probe__normalize_rci_interfaces <<<'"invalid"'
+	[ "${status}" -ne 0 ]
+}
+
 @test "configuration reports unconfigured without mutation" {
 	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_CONF_FILE}"
 	printf '%s\n' ifconfig.me >"${MORS_LIST_FILE}"

@@ -18,6 +18,7 @@
 - Интервальное ожидание VLESS supervisor больше не использует подверженную race пару background `sleep`/`wait` в BusyBox `ash`; секундные foreground-срезы сохраняют быстрые `USR1`/`TERM` без вечного `sigsuspend`.
 - Повреждённый производный VLESS health-state теперь распознаётся по schema и атомарно пересоздаётся перед cycle из сохранённого реестра и active preference, не затрагивая credentials.
 - Повреждённые строки производного cache VLESS endpoint больше не передаются в `ipset`: при синхронизации принимаются только IPv4, а cache атомарно очищается от постороннего содержимого.
+- `mors test --all` больше не считает незаполненный Shadowsocks-шаблон включённым соединением и корректно нормализует object/array inventory Keenetic 5 без недоступных на роутере regex-функций `jq`.
 
 ## 1.3.0 beta 4 - 2026-07-12
 - Установка IPK стала пассивной: init/NDM hooks активируются только в commit-фазе подтверждённого `mors setup`; `mors`, `help` и `version` не запускают скрытую настройку.

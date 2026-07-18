@@ -44,6 +44,15 @@ test_probe__attempt_timeout() {
 	printf '%s\n' "${remaining}"
 }
 
+test_probe__normalize_rci_interfaces() {
+	jq -ce '
+		if type == "array" then .
+		elif type == "object" then [.[]]
+		else empty
+		end
+	'
+}
+
 test_probe__valid_ipv4() {
 	printf '%s\n' "${1}" | awk -F. '
 		BEGIN { valid = 1 }
@@ -399,7 +408,8 @@ test_probe__fingerprint() {
 		if [ -n "${rci_timeout}" ]; then
 			"${MORS_TEST_CURL}" -fsS --noproxy '*' --max-time "${rci_timeout}" \
 				"${MORS_TEST_RCI_URL}" 2>/dev/null | \
-				jq -c 'sort_by(.id) | map({id,state,link,defaultgw,global})' 2>/dev/null
+				test_probe__normalize_rci_interfaces 2>/dev/null | \
+				jq -c 'sort_by(.id // "") | map({id,state,link,defaultgw,global})' 2>/dev/null
 		fi
 	} | cksum | awk '{print $1 ":" $2}'
 }

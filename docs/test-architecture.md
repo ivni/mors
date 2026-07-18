@@ -103,9 +103,11 @@ cycle supervisor. Shadowsocks использует временный localhost-
 desired/link state и forced-interface request.
 
 Inventory `--all` строится из active Mors choice, enabled VLESS registry,
-валидного Shadowsocks config и client VPN interfaces live RCI. WAN/LAN/bridge,
-Wi-Fi, server VPN и disabled connections исключаются. Неизвестный desired state
-даёт `not_checked`.
+операционно заполненного Shadowsocks config и client VPN interfaces live RCI.
+Синтаксически корректный, но незаполненный шаблон Shadowsocks не является
+соединением. RCI inventory принимает обе формы Keenetic API — object и array —
+без зависимости от regex-функций `jq`. WAN/LAN/bridge, Wi-Fi, server VPN и
+disabled connections исключаются. Неизвестный desired state даёт `not_checked`.
 
 Порядок: active, reserves, остальные working connections. Исчерпание бюджета
 после успешного active path даёт общий `degraded`.

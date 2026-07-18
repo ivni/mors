@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mors
 PKG_VERSION:=1.3.0~beta5
-PKG_RELEASE:=15
+PKG_RELEASE:=16
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)-$(PKG_RELEASE)
 MOLOT_UNINSTALL:=mors uninstall full
 
