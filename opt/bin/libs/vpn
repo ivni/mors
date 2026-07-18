@@ -2301,13 +2301,17 @@ cmd_interface_change() {
 
 start_vless(){
 	local _inface_entware=${1}
+	local enabled_count empty_setup=false
 	xray_version_check || return 1
 	vless_store__ensure || return 1
-	if [ "$(vless_store__enabled_count)" -eq 0 ]; then
+	enabled_count=$(vless_store__enabled_count) || return 1
+	if [ "${enabled_count}" -eq 0 ] && [ "${is_install_stage:-no}" = install ]; then
+		empty_setup=true
+	elif [ "${enabled_count}" -eq 0 ]; then
 		error "Нет включённых VLESS-соединений. Выполните 'mors vless add'."
 		return 1
 	fi
-	if [ "$(vless_store__is_paused)" = true ]; then
+	if [ "${empty_setup}" = false ] && [ "$(vless_store__is_paused)" = true ]; then
 		error "VLESS приостановлен. Выполните 'mors vless resume'."
 		return 1
 	fi
@@ -2320,9 +2324,22 @@ start_vless(){
 
 		# Запуск xray в случае, если конфигурация xray не содержит ошибок
 		ready "Запускаем xray сервис..."
-		"${XRAY_INIT}" restart && when_ok "УСПЕШНО"
-		[ -f "${VLESS_SUPERVISOR_INIT}" ] && vless_runtime__supervisor_service restart &> /dev/null
-		vpn_on "${_inface_entware}" &> /dev/null
+		if "${XRAY_INIT}" restart; then
+			when_ok "УСПЕШНО"
+		else
+			when_bad "ОШИБКА"
+			return 1
+		fi
+		if [ "${empty_setup}" = false ]; then
+			[ -f "${VLESS_SUPERVISOR_INIT}" ] && vless_runtime__supervisor_service restart &> /dev/null
+		else
+			[ -f "${VLESS_SUPERVISOR_INIT}" ] && vless_runtime__supervisor_service stop &> /dev/null
+		fi
+		vpn_on "${_inface_entware}" &> /dev/null || return 1
+		if [ "${empty_setup}" = true ]; then
+			warning "VLESS ещё не настроен: трафик закрыт до выполнения 'mors vless add'."
+			return 0
+		fi
 		# Тестируем работу proxy vless
 		test_vless_proxy
 

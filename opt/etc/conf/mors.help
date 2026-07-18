@@ -9,6 +9,9 @@ setup plan [--interface ID --dns BACKEND] [--json]
                         - read-only inventory или полный план без изменения сети.
 setup apply --interface ID --dns dnscrypt|adguard --yes
                         - подтверждённая неинтерактивная настройка без вопросов.
+                          Для Proxy21 системные компоненты Keenetic Proxy/Netfilter
+                          должны быть установлены заранее; отсутствующий интерфейс
+                          будет создан транзакционно в fail-closed режиме.
 setup resume --yes      - продолжить транзакцию после требуемой перезагрузки.
 setup recover --yes     - восстановить точный snapshot незавершённой настройки.
 help                    - настоящая справка.

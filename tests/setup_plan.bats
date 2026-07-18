@@ -24,6 +24,33 @@ setup() {
 	! grep -q 'Proxy7\|ISP\|Bridge0' <<<"${output}"
 }
 
+@test "inventory offers deterministic managed VLESS when components exist but Proxy21 does not" {
+	MORS_SETUP_PROXY_AVAILABLE=true
+	MORS_SETUP_PLAN_INTERFACE_JSON='[
+		{"id":"ISP","interface-name":"eth2","description":"Провайдер","type":"PPPOE","defaultgw":true,"state":"up"}
+	]'
+	export MORS_SETUP_PROXY_AVAILABLE MORS_SETUP_PLAN_INTERFACE_JSON
+
+	run setup_plan__inventory_json
+
+	[ "${status}" -eq 0 ]
+	[ "$(jq -r 'length' <<<"${output}")" -eq 1 ]
+	[ "$(jq -r '.[0].cli' <<<"${output}")" = Proxy21 ]
+	[ "$(jq -r '.[0].entware' <<<"${output}")" = Proxy21 ]
+	[ "$(jq -r '.[0].provisioning' <<<"${output}")" = managed_vless ]
+}
+
+@test "inventory does not promise managed VLESS without required Keenetic components" {
+	MORS_SETUP_PROXY_AVAILABLE=false
+	MORS_SETUP_PLAN_INTERFACE_JSON='[]'
+	export MORS_SETUP_PROXY_AVAILABLE MORS_SETUP_PLAN_INTERFACE_JSON
+
+	run setup_plan__inventory_json
+
+	[ "${status}" -eq 0 ]
+	[ "$(jq -r 'length' <<<"${output}")" -eq 0 ]
+}
+
 @test "selection resolves an exact live interface without filesystem writes" {
 	local empty=${BATS_TEST_TMPDIR}/empty
 	mkdir "${empty}"
@@ -76,6 +103,31 @@ setup() {
 	[ "${MORS_SETUP_INTERFACE_ENTWARE}" = nwg0 ]
 	[ "${MORS_SETUP_DNS_BACKEND}" = dnscrypt ]
 	[ "$(jq -r '.plan.interface_cli' "$(lifecycle_transaction__journal_file)")" = Wireguard0 ]
+	[ "$(jq -r '.plan.provisioning' "$(lifecycle_transaction__journal_file)")" = existing ]
+}
+
+@test "managed VLESS provisioning intent is durable before router mutation" {
+	MORS_LIFECYCLE_ROOT=${BATS_TEST_TMPDIR}/lifecycle
+	MORS_LIFECYCLE_STATE_FILE=${MORS_LIFECYCLE_ROOT}/state.json
+	MORS_LIFECYCLE_TRANSACTION_ROOT=${MORS_LIFECYCLE_ROOT}/transactions
+	MORS_LIFECYCLE_ACTIVE_FILE=${MORS_LIFECYCLE_ROOT}/active
+	MORS_LIFECYCLE_CONF_FILE=${BATS_TEST_TMPDIR}/mors.conf
+	export MORS_LIFECYCLE_ROOT MORS_LIFECYCLE_STATE_FILE
+	export MORS_LIFECYCLE_TRANSACTION_ROOT MORS_LIFECYCLE_ACTIVE_FILE MORS_LIFECYCLE_CONF_FILE
+	. "${REPO_ROOT}/opt/bin/libs/lifecycle_state"
+	printf 'SETUP_FINISHED=\n' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	MORS_SETUP_PROXY_AVAILABLE=true
+	MORS_SETUP_PLAN_INTERFACE_JSON='[]'
+	export MORS_SETUP_PROXY_AVAILABLE MORS_SETUP_PLAN_INTERFACE_JSON
+	setup_plan__select Proxy21 dnscrypt
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	setup_plan__journal_store
+
+	setup_plan__journal_provision_state creating
+
+	[ "$(jq -r '.plan.provisioning' "$(lifecycle_transaction__journal_file)")" = managed_vless ]
+	[ "$(jq -r '.plan.provision_state' "$(lifecycle_transaction__journal_file)")" = creating ]
 }
 
 @test "setup apply has no legacy interface or AdGuard prompts" {
@@ -84,5 +136,6 @@ setup() {
 	install_body=$(sed -n '/^setup__cmd_install_unlocked()/,/^setup__activate_core_hooks()/p' "${setup_file}" | tr -d '\r')
 	! grep -q 'cmd_interface_change\|read_ynq\|read -r' <<<"${install_body}"
 	! grep -q 'cmd_install_proxy_package' <<<"${install_body}"
+	grep -q 'setup__prepare_selected_interface' <<<"${install_body}"
 	grep -q 'switch_vpn_on "${MORS_SETUP_INTERFACE_ENTWARE}"' <<<"${install_body}"
 }

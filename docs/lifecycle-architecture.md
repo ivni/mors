@@ -97,9 +97,22 @@ Setup разделён на read-only plan и apply:
 8. end-to-end verify;
 9. запись `ready` последним действием.
 
-Plan фиксирует точные `interface_cli`, `interface_entware` и `dns_backend` в
-journal до snapshot/apply. Apply повторно проверяет соответствие выбранного
-интерфейса live RCI и после начала транзакции не читает пользовательский ввод.
+Plan фиксирует точные `interface_cli`, `interface_entware`, `dns_backend` и
+режим provisioning в journal до snapshot/apply. Для уже существующего тоннеля
+apply повторно проверяет соответствие выбранного интерфейса live RCI. Для
+управляемого VLESS target `Proxy21 / Proxy21` допускается отсутствие интерфейса
+в read-only inventory, если системные компоненты Keenetic уже установлены:
+после snapshot setup записывает intent, создаёт интерфейс, проверяет его через
+RCI и только затем продолжает apply. Rollback удаляет интерфейс только при
+наличии соответствующего intent в journal. После начала транзакции setup не
+читает пользовательский ввод.
+
+Пустой реестр VLESS не блокирует lifecycle setup. Xray запускается с
+fail-closed конфигурацией без внешних outbound, lifecycle может перейти в
+`ready`, а VLESS сохраняет собственное состояние `unconfigured` до добавления
+первого соединения. Установка отсутствующих системных компонентов Keenetic не
+подменяется provisioning интерфейса и остаётся отдельной предварительной
+операцией.
 
 До commit hooks находятся только под `/opt/apps/mors`. Boot/init в
 `unconfigured` выполняют no-op. Все NDM/init/cron entrypoints дополнительно

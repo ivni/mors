@@ -2,14 +2,28 @@
 
 MORS_SETUP_PLAN_RCI_URL=${MORS_SETUP_PLAN_RCI_URL:-http://127.0.0.1:79/rci/show/interface}
 
+setup_plan__managed_vless_available() {
+	case "${MORS_SETUP_PROXY_AVAILABLE:-}" in
+		true) return 0 ;;
+		false) return 1 ;;
+	esac
+	[ -r /etc/components.xml ] || return 1
+	for component in proxy opkg-kmod-netfilter opkg-kmod-netfilter-addons; do
+		grep -q "<name>${component}</name>" /etc/components.xml || return 1
+	done
+}
+
 setup_plan__inventory_json() {
-	local raw
+	local raw managed_vless_available=false
 	if [ -n "${MORS_SETUP_PLAN_INTERFACE_JSON:-}" ]; then
 		raw=${MORS_SETUP_PLAN_INTERFACE_JSON}
 	else
 		raw=$(curl -fsS "${MORS_SETUP_PLAN_RCI_URL}") || return 1
 	fi
-	printf '%s\n' "${raw}" | jq -ce --arg managed_proxy "${PROXY_VLESS_NAME:-Proxy21}" '
+	setup_plan__managed_vless_available && managed_vless_available=true
+	printf '%s\n' "${raw}" | jq -ce \
+		--arg managed_proxy "${PROXY_VLESS_NAME:-Proxy21}" \
+		--argjson managed_vless_available "${managed_vless_available}" '
 		[.[]
 		| select(.defaultgw != true)
 		| select(
@@ -23,9 +37,20 @@ setup_plan__inventory_json() {
 			cli: .id,
 			entware: ."interface-name",
 			description: (.description // .id),
-			state: (.state // "unknown")
+			state: (.state // "unknown"),
+			provisioning: "existing"
 		}]
 		| unique_by(.cli)
+		| if $managed_vless_available and (any(.[]; .cli == $managed_proxy) | not) then
+			. + [{
+				cli: $managed_proxy,
+				entware: $managed_proxy,
+				description: "Mors VLESS",
+				state: "not_configured",
+				provisioning: "managed_vless"
+			}]
+		else . end
+		| sort_by(.cli)
 	'
 }
 
@@ -54,9 +79,11 @@ setup_plan__select() {
 	MORS_SETUP_INTERFACE_ENTWARE=$(printf '%s\n' "${selected}" | jq -r '.[0].entware')
 	MORS_SETUP_INTERFACE_DESCRIPTION=$(printf '%s\n' "${selected}" | jq -r '.[0].description')
 	MORS_SETUP_INTERFACE_STATE=$(printf '%s\n' "${selected}" | jq -r '.[0].state')
+	MORS_SETUP_INTERFACE_PROVISIONING=$(printf '%s\n' "${selected}" | jq -r '.[0].provisioning')
 	MORS_SETUP_DNS_BACKEND=${dns}
 	export MORS_SETUP_INTERFACE_CLI MORS_SETUP_INTERFACE_ENTWARE
-	export MORS_SETUP_INTERFACE_DESCRIPTION MORS_SETUP_INTERFACE_STATE MORS_SETUP_DNS_BACKEND
+	export MORS_SETUP_INTERFACE_DESCRIPTION MORS_SETUP_INTERFACE_STATE
+	export MORS_SETUP_INTERFACE_PROVISIONING MORS_SETUP_DNS_BACKEND
 }
 
 setup_plan__validate_selected() {
@@ -84,15 +111,17 @@ setup_plan__print() {
 			--arg entware "${MORS_SETUP_INTERFACE_ENTWARE}" \
 			--arg description "${MORS_SETUP_INTERFACE_DESCRIPTION}" \
 			--arg state "${MORS_SETUP_INTERFACE_STATE}" \
+			--arg provisioning "${MORS_SETUP_INTERFACE_PROVISIONING}" \
 			--arg dns "${MORS_SETUP_DNS_BACKEND}" '
 			{
 				schema_version: 1,
 				command: "setup plan",
 				selected: {
-					interface: {cli: $cli, entware: $entware, description: $description, state: $state},
+					interface: {cli: $cli, entware: $entware, description: $description, state: $state, provisioning: $provisioning},
 					dns_backend: $dns
 				},
-				changes: ["dns", "firewall", "routing", "services", "ndm_hooks"],
+				changes: (["dns", "firewall", "routing", "services", "ndm_hooks"] +
+					(if $provisioning == "managed_vless" then ["keenetic_proxy_interface"] else [] end)),
 				preserved: ["mors_config", "mors_list", "tunnel_credentials"],
 				may_require_reboot: false,
 				recovery_command: "mors setup recover --yes"
@@ -118,19 +147,23 @@ setup_plan__print_inventory() {
 	inventory=$(setup_plan__inventory_json) || return 2
 	setup_plan__adguard_available && adguard=true
 	if [ "${format}" = json ]; then
-		jq -n --argjson interfaces "${inventory}" --argjson adguard "${adguard}" '
+		jq -n --argjson interfaces "${inventory}" --argjson adguard "${adguard}" \
+			--argjson managed_vless "$(setup_plan__managed_vless_available && printf true || printf false)" '
 			{
 				schema_version: 1,
 				command: "setup plan",
 				selected: null,
 				interfaces: $interfaces,
 				dns_backends: (["dnscrypt"] + (if $adguard then ["adguard"] else [] end)),
+				managed_vless_available: $managed_vless,
 				next_command: "mors setup plan --interface ID --dns dnscrypt"
 			}'
 		return
 	fi
 	echo 'Mors: ДОСТУПНЫЕ ВАРИАНТЫ НАСТРОЙКИ'
 	printf '%s\n' "${inventory}" | jq -r '.[] | "- \(.description): \(.cli) / \(.entware), \(.state)"'
+	setup_plan__managed_vless_available || \
+		echo '- VLESS: сначала установите системные компоненты Keenetic Proxy client, Netfilter и Netfilter Add-ons'
 	echo '- DNS: dnscrypt'
 	[ "${adguard}" = true ] && echo '- DNS: существующий AdGuard Home'
 	echo
@@ -168,9 +201,26 @@ setup_plan__journal_store() {
 		--arg cli "${MORS_SETUP_INTERFACE_CLI}" \
 		--arg entware "${MORS_SETUP_INTERFACE_ENTWARE}" \
 		--arg dns "${MORS_SETUP_DNS_BACKEND}" \
+		--arg provisioning "${MORS_SETUP_INTERFACE_PROVISIONING}" \
 		--arg now "${now}" '
-		.plan = {interface_cli: $cli, interface_entware: $entware, dns_backend: $dns}
+		.plan = {
+			interface_cli: $cli,
+			interface_entware: $entware,
+			dns_backend: $dns,
+			provisioning: $provisioning,
+			provision_state: "none"
+		}
 		| .updated_at = $now
+	' "${journal}" | lifecycle_state__atomic_write "${journal}"
+}
+
+setup_plan__journal_provision_state() {
+	local state=${1:-} journal now
+	case "${state}" in creating|created) ;; *) return 64 ;; esac
+	journal=$(lifecycle_transaction__journal_file) || return 1
+	now=$(lifecycle_state__now) || return 1
+	jq --arg state "${state}" --arg now "${now}" '
+		.plan.provision_state = $state | .updated_at = $now
 	' "${journal}" | lifecycle_state__atomic_write "${journal}"
 }
 
@@ -180,9 +230,11 @@ setup_plan__journal_load() {
 	MORS_SETUP_INTERFACE_CLI=$(jq -er '.plan.interface_cli' "${journal}") || return 1
 	MORS_SETUP_INTERFACE_ENTWARE=$(jq -er '.plan.interface_entware' "${journal}") || return 1
 	MORS_SETUP_DNS_BACKEND=$(jq -er '.plan.dns_backend' "${journal}") || return 1
+	MORS_SETUP_INTERFACE_PROVISIONING=$(jq -er '.plan.provisioning // "existing"' "${journal}") || return 1
 	MORS_SETUP_INTERFACE_DESCRIPTION=${MORS_SETUP_INTERFACE_CLI}
 	MORS_SETUP_INTERFACE_STATE=unknown
 	export MORS_SETUP_INTERFACE_CLI MORS_SETUP_INTERFACE_ENTWARE
-	export MORS_SETUP_INTERFACE_DESCRIPTION MORS_SETUP_INTERFACE_STATE MORS_SETUP_DNS_BACKEND
+	export MORS_SETUP_INTERFACE_DESCRIPTION MORS_SETUP_INTERFACE_STATE
+	export MORS_SETUP_INTERFACE_PROVISIONING MORS_SETUP_DNS_BACKEND
 	setup_plan__validate_selected
 }

@@ -599,6 +599,11 @@ setup__cmd_install_unlocked(){
 		error 'Выбранный setup plan больше не соответствует состоянию роутера.'
 		return 1
 	}
+	setup__prepare_selected_interface || return $?
+	setup_plan__validate_selected || {
+		error 'Подготовленный VPN-интерфейс не соответствует setup plan.'
+		return 1
+	}
 
 	log_warning 'Установка пакета МОРС начата...'
 
@@ -1047,6 +1052,63 @@ setup__activate_core_hooks() {
 		/opt/etc/ndm/netfilter.d/100-dns-local || return 1
 }
 
+setup__managed_vless_live() {
+	curl -fsS "${INFACE_REQUEST}" | jq -ce --arg id "${PROXY_VLESS_NAME}" '
+		.[]
+		| select(.id == $id and .type == "Proxy" and ."interface-name" != null)
+		| {cli: .id, entware: ."interface-name"}
+	'
+}
+
+setup__prepare_selected_interface() {
+	local live attempt
+	[ "${MORS_SETUP_INTERFACE_CLI:-}" = "${PROXY_VLESS_NAME}" ] || return 0
+	if live=$(setup__managed_vless_live 2>/dev/null); then
+		[ "$(printf '%s\n' "${live}" | jq -r '.entware')" = "${MORS_SETUP_INTERFACE_ENTWARE}" ]
+		return $?
+	fi
+	[ "${MORS_SETUP_INTERFACE_PROVISIONING:-}" = managed_vless ] || {
+		error 'Выбранный Proxy21 исчез после построения setup plan.'
+		return 1
+	}
+	setup_plan__managed_vless_available || {
+		error 'Для VLESS установите системные компоненты Keenetic Proxy client, Netfilter и Netfilter Add-ons.'
+		return 1
+	}
+	setup_plan__journal_provision_state creating || return 1
+	create_proxy_interface || return 1
+	attempt=10
+	while [ "${attempt}" -gt 0 ]; do
+		if live=$(setup__managed_vless_live 2>/dev/null); then
+			[ "$(printf '%s\n' "${live}" | jq -r '.entware')" = "${MORS_SETUP_INTERFACE_ENTWARE}" ] || return 1
+			setup_plan__journal_provision_state created
+			return $?
+		fi
+		attempt=$((attempt - 1))
+		sleep 1
+	done
+	error 'Keenetic не опубликовал созданный интерфейс Proxy21.'
+	return 1
+}
+
+setup__rollback_provisioned_interface() {
+	local journal provisioning provision_state attempt
+	journal=$(lifecycle_transaction__journal_file) || return 1
+	provisioning=$(jq -r '.plan.provisioning // "existing"' "${journal}" 2>/dev/null) || return 1
+	provision_state=$(jq -r '.plan.provision_state // "none"' "${journal}" 2>/dev/null) || return 1
+	[ "${provisioning}" = managed_vless ] || return 0
+	case "${provision_state}" in creating|created) ;; *) return 0 ;; esac
+	setup__managed_vless_live >/dev/null 2>&1 || return 0
+	delete_proxy_interface || return 1
+	attempt=10
+	while [ "${attempt}" -gt 0 ]; do
+		setup__managed_vless_live >/dev/null 2>&1 || return 0
+		attempt=$((attempt - 1))
+		sleep 1
+	done
+	return 1
+}
+
 setup__service_running() {
 	local service output
 	service=${1}
@@ -1085,6 +1147,10 @@ setup__verify_committed() {
 			;;
 		*) return 1 ;;
 	esac
+	if [ "${expected_cli}" = "${PROXY_VLESS_NAME}" ]; then
+		setup__managed_vless_live >/dev/null 2>&1 || return 1
+		setup__service_running "${XRAY_INIT}" || return 1
+	fi
 	iptables_state=$(save_iptables 2>/dev/null) || return 1
 	printf '%s\n' "${iptables_state}" | grep -qE '(^|[[:space:]:])MORS(_|[[:space:]])' || return 1
 	if command -v ipset >/dev/null 2>&1; then
@@ -1127,6 +1193,7 @@ setup__rollback_transaction() {
 	export MORS_LIFECYCLE_APPLY
 	clear_previous_version_net_rules >/dev/null 2>&1 || true
 	setup__deactivate_core_hooks || result=1
+	[ "${result}" -ne 0 ] || setup__rollback_provisioned_interface || result=1
 	[ "${result}" -ne 0 ] || lifecycle_snapshot__restore || result=1
 	if [ "${result}" -eq 0 ] && [ "${previous_state}" = ready ]; then
 		(

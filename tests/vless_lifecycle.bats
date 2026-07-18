@@ -73,3 +73,10 @@ setup() {
 @test "legacy five minute VPN monitor exits for managed VLESS" {
 	grep -q '\[ "${CLI_INTERFACE}" = "${PROXY_VLESS_NAME}" \] && exit 0' "${REPO_ROOT}/opt/bin/main/check_vpn"
 }
+
+@test "initial VLESS setup permits an empty fail-closed registry" {
+	local vpn=${REPO_ROOT}/opt/bin/libs/vpn
+	grep -q 'empty_setup=true' "${vpn}"
+	grep -q "VLESS ещё не настроен: трафик закрыт" "${vpn}"
+	grep -q 'vless_domain__apply_generated.*false' "${vpn}"
+}

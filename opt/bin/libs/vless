@@ -48,7 +48,7 @@ vless_runtime__supervisor_service() (
 has_package_installed() {
 #-------------------------------------------------------------------------------
 #
-#	Функция проверяет установлен ли пакет Proxy
+#	Функция проверяет установлен ли компонент Keenetic по стабильному ID
 #
 #-------------------------------------------------------------------------------
     grep -q "<name>${1}</name>" /etc/components.xml
@@ -208,7 +208,7 @@ cmd_install_proxy_package() {
 #	Функция устанавливает пакет Proxy
 #
 #-------------------------------------------------------------------------------
-    if ! has_package_installed 'Proxy client' ; then
+    if ! has_package_installed proxy ; then
         #  Ставим пакет proxy в очередь на установку
         system_packages_action install proxy opkg-kmod-netfilter opkg-kmod-netfilter-addons
         package_status=$?
@@ -853,7 +853,7 @@ vless_domain__restore_declared_runtime() {
 vless_domain__ensure_platform() {
 	[ "${VLESS_SKIP_PLATFORM_CHECK:-false}" = true ] && return 0
 	xray_install_and_check || return 1
-	if has_package_installed 'Proxy client' && \
+	if has_package_installed proxy && \
 		curl -s "${INFACE_REQUEST}" | jq -e --arg id "${PROXY_VLESS_NAME}" '.[] | select(.id == $id)' >/dev/null 2>&1; then
 		return 0
 	fi

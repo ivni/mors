@@ -25,7 +25,7 @@ setup() {
 }
 
 @test "beta package declares E2E runtime dependencies" {
-	grep -q 'PKG_VERSION:=1.3.0~beta4' "${REPO_ROOT}/Makefile"
+	grep -q 'PKG_VERSION:=1.3.0~beta5' "${REPO_ROOT}/Makefile"
 	grep -q '+conntrack' "${REPO_ROOT}/Makefile"
 	grep -q '+coreutils-timeout' "${REPO_ROOT}/Makefile"
 	grep -q '+shadowsocks-libev-ss-local' "${REPO_ROOT}/Makefile"
