@@ -86,3 +86,12 @@ setup() {
 	grep -Fq 'candidate="${VLESS_CONFIG_FILE}.candidate.$$.json"' "${vless}"
 	grep -Fq 'rollback_config="${VLESS_CONFIG_FILE}.rollback.$$.json"' "${vless}"
 }
+
+@test "dnsmasq install stage returns success without starting runtime early" {
+	local vpn=${REPO_ROOT}/opt/bin/libs/vpn
+	local body
+	body=$(sed -n '/^dnsmasq_install(){/,/^}/p' "${vpn}" | tr -d '\r')
+	grep -q 'if \[ -z "${is_install_stage}" \]; then' <<<"${body}"
+	grep -q 'cmd_mors_init "no" || return 1' <<<"${body}"
+	grep -q '^[[:space:]]*return 0$' <<<"${body}"
+}

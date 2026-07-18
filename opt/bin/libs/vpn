@@ -1415,7 +1415,10 @@ dnsmasq_install(){
 	sed -i "s/@LOCAL_IP/${local_ip}/g; s/@INFACE/${inface}/g; s/@UPLEVEL_DNS/${uplevel_dns}/g;" /opt/etc/dnsmasq.conf 1> /dev/null 2> "${ERROR_LOG_FILE}"
 	ready_status "${?}" "Проблема при настройке файлов конфигурации dnsmasq"
 	# Если запуск функции был не при установке пакета Морс
-	[ -z "${is_install_stage}" ] && cmd_mors_init "no"
+	if [ -z "${is_install_stage}" ]; then
+		cmd_mors_init "no" || return 1
+	fi
+	return 0
 
 }
 
