@@ -1497,10 +1497,12 @@ cmd_dnsmasq_dns_change() {
 #
 # ------------------------------------------------------------------------------------------
 cmd_dnsmasq_listen_show() {
+	local ip port
 	exit_when_adguard_on status; [ "${status}" = 0 ] && {
 		ready "DNSMASQ слушает адрес:порт"
 		ip=$(get_config_value DNSMASQ_LISTEN_IP)
-		when_alert "${ip}:$(cmd_adguardhome_status)"
+		port=$(get_config_value DNSMASQ_PORT)
+		when_alert "${ip}:${port}"
 	}
 }
 
@@ -1597,11 +1599,15 @@ vpn_off() {
 #
 # ------------------------------------------------------------------------------------------
 cmd_vpn_status() {
-        vpn_cli_desc=$(get_current_vpn_interface "cli_desc")
-        vpn_cli=$(get_current_vpn_interface "cli")
-        [ "${vpn_cli}" = 'shadowsocks' ] && inface="SHADOWSOCKS" || inface="${vpn_cli_desc} (${vpn_cli})"
-        ready "Текущее VPN соединение: ${BLUE}${inface}${NOCL}"
-        [ "$(is_vpn_interface_connected "${vpn_cli}")" = 'on' ] && when_ok "ПОДКЛЮЧЕНО" || when_bad "ОТКЛЮЧЕНО"
+	if is_vless_over_proxy_enabled; then
+		cmd_vless_status
+		return $?
+	fi
+	vpn_cli_desc=$(get_current_vpn_interface "cli_desc")
+	vpn_cli=$(get_current_vpn_interface "cli")
+	[ "${vpn_cli}" = 'shadowsocks' ] && inface="SHADOWSOCKS" || inface="${vpn_cli_desc} (${vpn_cli})"
+	ready "Текущее VPN соединение: ${BLUE}${inface}${NOCL}"
+	[ "$(is_vpn_interface_connected "${vpn_cli}")" = 'on' ] && when_ok "ПОДКЛЮЧЕНО" || when_bad "ОТКЛЮЧЕНО"
 }
 # ------------------------------------------------------------------------------------------
 #

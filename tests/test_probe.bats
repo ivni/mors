@@ -50,6 +50,34 @@ setup() {
 	[ "${status}" -ne 0 ]
 }
 
+@test "DNS probe queries the active Mors backend port" {
+	local timeout_mock=${BATS_TEST_TMPDIR}/timeout
+	local calls=${BATS_TEST_TMPDIR}/calls
+	printf '%s\n' '#!/bin/sh' \
+		'printf "%s\n" "$@" >"${MORS_MOCK_CALLS}"' \
+		'printf "%s\n" 203.0.113.7' >"${timeout_mock}"
+	chmod +x "${timeout_mock}"
+	kdig() { :; }
+	get_config_value() { [ "${1}" = DNSMASQ_PORT ] && printf '%s\n' 9753; }
+	MORS_TEST_TIMEOUT_CMD=${timeout_mock}
+	MORS_MOCK_CALLS=${calls}; export MORS_MOCK_CALLS
+	MORS_TEST_DNS_BACKEND=dnsmasq
+	MORS_TEST_DEADLINE=$(( $(test_probe__now_seconds) + 10 ))
+
+	[ "$(test_probe__dns_command api.ipify.org)" = 203.0.113.7 ]
+	grep -Fxq '@127.0.0.1' "${calls}"
+	grep -Fxq -- '-p' "${calls}"
+	grep -Fxq 9753 "${calls}"
+	grep -Fxq api.ipify.org "${calls}"
+	grep -Fxq A "${calls}"
+}
+
+@test "AdGuard probe uses the managed main DNS port" {
+	MORS_TEST_DNS_BACKEND=adguard
+	MAIN_DNS_PORT=9753
+	[ "$(test_probe__dns_port)" = 9753 ]
+}
+
 @test "firewall probe requires the selected chain mark rule and active route" {
 	local iptables_save=${BATS_TEST_TMPDIR}/iptables-save
 	local ip=${BATS_TEST_TMPDIR}/ip

@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mors
 PKG_VERSION:=1.3.0~beta5
-PKG_RELEASE:=5
+PKG_RELEASE:=6
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)-$(PKG_RELEASE)
 MOLOT_UNINSTALL:=mors uninstall full
 
@@ -12,7 +12,7 @@ define Package/mors
 	SECTION:=utils
 	CATEGORY:=Keendev
 	# DEPENDS:=+jq +curl +knot-dig +libpcre +nano-full +cron +bind-dig +dnsmasq-full +ipset +dnscrypt-proxy2 +iptables +libopenssl +shadowsocks-rust +xray
-	DEPENDS:=+libpcre +jq +curl +knot-dig +nano-full +cron +bind-dig +dnsmasq-full +ipset +dnscrypt-proxy2 +iptables +conntrack +coreutils-timeout +shadowsocks-libev-ss-redir +shadowsocks-libev-ss-local +shadowsocks-libev-config +libmbedtls +xray
+	DEPENDS:=+libpcre +jq +curl +knot-dig +nano-full +cron +bind-dig +dnsmasq-full +ipset +dnscrypt-proxy2 +iptables +conntrack +coreutils-cksum +coreutils-timeout +shadowsocks-libev-ss-redir +shadowsocks-libev-ss-local +shadowsocks-libev-config +libmbedtls +xray
 	URL:=no
 	TITLE:=VPN клиент для обработки запросов по внесению хостов в белый список.
 	PKGARCH:=all
