@@ -117,13 +117,7 @@ if mors_cli__requires_runtime_lock "$@"; then
 fi
 
 if mors_cli__requires_runtime_lock "$@"; then
-	runtime_mutation_lock__acquire "mors ${1}" || {
-		lock_status=$?
-		[ "${lock_status}" -eq 2 ] && \
-			error 'Изменения заблокированы незавершённым cold test. Выполните mors test cold recover.' || \
-			error 'Другая операция изменения runtime Mors уже выполняется.'
-		exit 3
-	}
+	runtime_mutation_lock__acquire_or_explain "mors ${1}" || exit 3
 	MORS_CLI_RUNTIME_LOCKED=true
 	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
 	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM

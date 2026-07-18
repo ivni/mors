@@ -1419,7 +1419,7 @@ setup__recover_with_runtime() {
 		setup|uninstall) ;;
 		*) error "Для транзакции ${operation} требуется recovery обновления."; return 3 ;;
 	esac
-	runtime_mutation_lock__acquire 'mors setup recover' || return $?
+	runtime_mutation_lock__acquire_or_explain 'mors setup recover' || return $?
 	setup__rollback_transaction
 	result=$?
 	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
@@ -1491,7 +1491,7 @@ setup__cmd_install_with_runtime() {
 		setup_plan__validate_selected || return $?
 		new_transaction=true
 	fi
-	runtime_mutation_lock__acquire 'mors setup' || return $?
+	runtime_mutation_lock__acquire_or_explain 'mors setup' || return $?
 	if [ "${new_transaction}" = true ]; then
 		lifecycle_transaction__begin setup "${state}" ready >/dev/null || {
 			result=$?
@@ -1557,7 +1557,7 @@ setup__cmd_uninstall_with_runtime() {
 		error 'Другая lifecycle-транзакция не завершена.'
 		return 3
 	fi
-	runtime_mutation_lock__acquire 'mors uninstall' || return $?
+	runtime_mutation_lock__acquire_or_explain 'mors uninstall' || return $?
 	lifecycle_transaction__begin uninstall "${state}" unconfigured >/dev/null || {
 		result=$?
 		runtime_mutation_lock__release >/dev/null 2>&1 || true

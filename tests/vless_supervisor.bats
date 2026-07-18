@@ -25,6 +25,22 @@ setup() {
 	vless_runtime__override() { OVERRIDDEN_TAG="${1}"; return 0; }
 }
 
+@test "malformed derived state is rebuilt before a health cycle" {
+	printf '%s\n' '#!/bin/sh' 'damaged runtime state' >"${VLESS_STATE_FILE}"
+	vless_runtime__probe_connection() {
+		VLESS_PROBE_ERROR=''
+		VLESS_PROBE_LATENCY_MS=20
+		return 0
+	}
+
+	run vless_supervisor__once
+	[ "${status}" -eq 0 ]
+	[ "$(jq -r '.schema_version' "${VLESS_STATE_FILE}")" -eq 1 ]
+	[ "$(jq -r '.cycle' "${VLESS_STATE_FILE}")" -eq 1 ]
+	[ "$(jq -r '.overall_state' "${VLESS_STATE_FILE}")" = healthy ]
+	[ "$(jq -r '.active_id' "${VLESS_STATE_FILE}")" = vless-a ]
+}
+
 @test "confirmed active failure switches to a healthy standby" {
 	vless_runtime__probe_connection() {
 		if [ "${1}" -eq 11971 ]; then
@@ -200,10 +216,13 @@ setup() {
 	process_id=$!
 	for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(cycle_count)" -ge 1 ] && break; sleep 0.1; done
 	kill -USR1 "${process_id}"
-	for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(cycle_count)" -ge 2 ] && break; sleep 0.1; done
+	for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+		[ "$(cycle_count)" -ge 2 ] && break
+		sleep 0.1
+	done
 	[ "$(cycle_count)" -ge 2 ]
 	kill -TERM "${process_id}"
-	for _ in 1 2 3 4 5 6 7 8 9 10; do
+	for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
 		if ! kill -0 "${process_id}" 2>/dev/null; then stopped=true; break; fi
 		sleep 0.1
 	done
@@ -215,6 +234,11 @@ setup() {
 	wait "${process_id}"
 	[ ! -e "${VLESS_SUPERVISOR_PID_FILE}" ]
 	[ ! -d "${VLESS_SUPERVISOR_LOCK_DIR}" ]
+}
+
+@test "interval sleep avoids the BusyBox background wait race" {
+	! grep -q 'wait "${sleep_pid}"' "${REPO_ROOT}/opt/bin/main/vless-supervisor"
+	grep -q 'VLESS_SUPERVISOR_WAKE_REQUESTED' "${REPO_ROOT}/opt/bin/main/vless-supervisor"
 }
 
 @test "ownerless decision lock is not removed immediately" {

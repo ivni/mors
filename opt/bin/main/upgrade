@@ -207,7 +207,7 @@ upgrade__apply_locked() {
 	upgrade__verify_artifact "${MORS_UPDATE_ARTIFACT}" || return 64
 	upgrade__verify_artifact "${MORS_UPDATE_ROLLBACK}" || return 64
 
-	runtime_mutation_lock__acquire "mors ${operation}" || return $?
+	runtime_mutation_lock__acquire_or_explain "mors ${operation}" || return $?
 	lifecycle_transaction__begin "${operation}" "${state}" "${state}" >/dev/null || {
 		result=$?
 		runtime_mutation_lock__release >/dev/null 2>&1 || true
@@ -287,7 +287,7 @@ upgrade__recover_locked() {
 		*) return 3 ;;
 	esac
 	snapshot=$(lifecycle_transaction__snapshot_directory) || return 4
-	runtime_mutation_lock__acquire 'mors update recover' || return $?
+	runtime_mutation_lock__acquire_or_explain 'mors update recover' || return $?
 	case "${phase}" in
 		planning)
 			lifecycle_transaction__rollback_finish

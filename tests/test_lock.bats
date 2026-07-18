@@ -26,6 +26,34 @@ teardown() {
 	test_lock__acquire recovered
 }
 
+@test "metadata-free runtime lock is reclaimed only after its grace period" {
+	mkdir -p "${MORS_RUNTIME_LOCK_DIR}"
+	for file in pid owner_start token command started_at; do
+		: >"${MORS_RUNTIME_LOCK_DIR}/${file}"
+	done
+
+	MORS_LOCK_EMPTY_STALE_MINUTES=1
+	run runtime_mutation_lock__acquire fresh
+	[ "${status}" -ne 0 ]
+	[ -d "${MORS_RUNTIME_LOCK_DIR}" ]
+
+	touch -d '2 minutes ago' "${MORS_RUNTIME_LOCK_DIR}"
+	runtime_mutation_lock__acquire recovered
+	[ -s "${MORS_RUNTIME_LOCK_DIR}/pid" ]
+	[ "$(cat "${MORS_RUNTIME_LOCK_DIR}/command")" = recovered ]
+}
+
+@test "reported runtime lock acquisition explains a live owner" {
+	runtime_mutation_lock__acquire owner
+	run env -u MORS_RUNTIME_LOCK_TOKEN -u MORS_RUNTIME_LOCK_DEPTH \
+		MORS_LOCK_ROOT="${MORS_LOCK_ROOT}" MORS_RUNTIME_LOCK_DIR="${MORS_RUNTIME_LOCK_DIR}" \
+		MORS_COLD_JOURNAL_DIR="${MORS_COLD_JOURNAL_DIR}" \
+		sh -c '. "$1"; runtime_mutation_lock__acquire_or_explain contender' \
+		sh "${REPO_ROOT}/opt/bin/libs/runtime_lock"
+	[ "${status}" -eq 1 ]
+	[[ "${output}" == *'Другая операция изменения runtime Mors уже выполняется.'* ]]
+}
+
 @test "runtime lock is reentrant and recovery journal blocks mutations" {
 	runtime_mutation_lock__acquire outer
 	runtime_mutation_lock__acquire inner
@@ -111,6 +139,8 @@ teardown() {
 
 @test "lifecycle and VLESS decision paths nest the runtime lock" {
 	grep -q 'lifecycle__run_locked setup__cmd_install_with_runtime' \
+		"${REPO_ROOT}/opt/bin/main/setup"
+	grep -q "runtime_mutation_lock__acquire_or_explain 'mors setup'" \
 		"${REPO_ROOT}/opt/bin/main/setup"
 	grep -q "runtime_mutation_lock__acquire 'vless decision'" \
 		"${REPO_ROOT}/opt/bin/libs/vless_runtime"

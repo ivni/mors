@@ -7,22 +7,28 @@ MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
 VLESS_SUPERVISOR_INTERVAL=${VLESS_SUPERVISOR_INTERVAL:-30}
 VLESS_CONFIRM_DELAY=${VLESS_CONFIRM_DELAY:-5}
 VLESS_SUPERVISOR_STOP_REQUESTED=false
+VLESS_SUPERVISOR_WAKE_REQUESTED=false
 
 vless_supervisor__request_stop() {
 	VLESS_SUPERVISOR_STOP_REQUESTED=true
 }
 
+vless_supervisor__request_wake() {
+	VLESS_SUPERVISOR_WAKE_REQUESTED=true
+}
+
 vless_supervisor__interruptible_sleep() {
-	local sleep_pid result
-	sleep "${VLESS_SUPERVISOR_INTERVAL}" &
-	sleep_pid=$!
-	wait "${sleep_pid}" 2>/dev/null
-	result=$?
-	if kill -0 "${sleep_pid}" 2>/dev/null; then
-		kill "${sleep_pid}" 2>/dev/null || true
-		wait "${sleep_pid}" 2>/dev/null || true
-	fi
-	return "${result}"
+	local waited=0
+	# BusyBox ash may miss SIGCHLD between a background sleep and an explicit
+	# wait, leaving the shell in sigsuspend after the child has disappeared.
+	# Foreground one-second slices bound deferred traps without that race.
+	while [ "${waited}" -lt "${VLESS_SUPERVISOR_INTERVAL}" ] && \
+		[ "${VLESS_SUPERVISOR_STOP_REQUESTED}" != true ] && \
+		[ "${VLESS_SUPERVISOR_WAKE_REQUESTED}" != true ]; do
+		sleep 1
+		waited=$((waited + 1))
+	done
+	VLESS_SUPERVISOR_WAKE_REQUESTED=false
 }
 
 vless_supervisor__set_probe_result() {
@@ -312,7 +318,7 @@ vless_supervisor__run() {
 	[ "$(vless_store__is_paused)" = false ] || return 0
 	[ "$(vless_store__enabled_count)" -gt 0 ] || return 0
 	vless_supervisor__acquire_lock || return 1
-	trap ':' USR1
+	trap 'vless_supervisor__request_wake' USR1
 	while [ "${VLESS_SUPERVISOR_STOP_REQUESTED}" != true ]; do
 		vless_supervisor__once || true
 		[ "${VLESS_SUPERVISOR_STOP_REQUESTED}" != true ] || break

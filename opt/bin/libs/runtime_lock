@@ -8,6 +8,7 @@ MORS_TEST_LOCK_DIR=${MORS_TEST_LOCK_DIR:-${MORS_LOCK_ROOT}/mors-test.lock}
 MORS_RUNTIME_LOCK_DIR=${MORS_RUNTIME_LOCK_DIR:-${MORS_LOCK_ROOT}/mors-runtime.lock}
 MORS_RUNTIME_CANCEL_FILE=${MORS_RUNTIME_CANCEL_FILE:-/opt/var/run/mors/cancel-cold}
 MORS_COLD_JOURNAL_DIR=${MORS_COLD_JOURNAL_DIR:-/opt/etc/.mors/recovery/test-cold}
+MORS_LOCK_EMPTY_STALE_MINUTES=${MORS_LOCK_EMPTY_STALE_MINUTES:-1}
 
 runtime_lock__read() {
 	[ -f "${1}" ] && tr -d '\r\n' <"${1}"
@@ -33,6 +34,18 @@ runtime_lock__owner_alive() {
 	[ "${current_start}" = "${2}" ]
 }
 
+runtime_lock__metadata_free_stale() {
+	local directory="${1}" grace recent
+	grace=${MORS_LOCK_EMPTY_STALE_MINUTES:-1}
+	case "${grace}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "${grace}" -eq 0 ] && return 0
+	recent=$(find "${directory}" -maxdepth 0 -mmin "-${grace}" \
+		-print -quit 2>/dev/null) || return 1
+	[ -z "${recent}" ]
+}
+
 runtime_lock__remove_stale() {
 	local directory="${1}" owner owner_start
 	owner=$(runtime_lock__read "${directory}/pid")
@@ -41,8 +54,10 @@ runtime_lock__remove_stale() {
 		sleep 1
 		owner=$(runtime_lock__read "${directory}/pid")
 		# Do not remove a metadata-free directory immediately: the owner may have
-		# been descheduled between atomic mkdir and publishing its PID.
-		[ -n "${owner}" ] || return 1
+		# been descheduled between atomic mkdir and publishing its PID. A directory
+		# that stays metadata-free past the grace period belongs to an interrupted
+		# acquisition and must not block every future mutation permanently.
+		[ -n "${owner}" ] || runtime_lock__metadata_free_stale "${directory}" || return 1
 	fi
 	owner_start=$(runtime_lock__read "${directory}/owner_start")
 	if runtime_lock__owner_alive "${owner}" "${owner_start}"; then
@@ -176,6 +191,22 @@ runtime_mutation_lock__acquire() {
 		return 2
 	fi
 	runtime_lock__acquire "${MORS_RUNTIME_LOCK_DIR}" runtime "${1:-mors mutation}"
+}
+
+runtime_mutation_lock__acquire_or_explain() {
+	local result
+	if runtime_mutation_lock__acquire "${1:-mors mutation}"; then
+		return 0
+	else
+		result=$?
+	fi
+	if [ "${result}" -eq 2 ]; then
+		printf '%s\n' \
+			'Изменения заблокированы незавершённым cold test. Выполните mors test cold recover.' >&2
+	else
+		printf '%s\n' 'Другая операция изменения runtime Mors уже выполняется.' >&2
+	fi
+	return "${result}"
 }
 
 runtime_mutation_lock__acquire_wait() {

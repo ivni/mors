@@ -64,7 +64,11 @@ Supervisor является отдельным Entware-сервисом. Он н
 - записывать структурированные события;
 - восстанавливать выбор после перезагрузки.
 
-Только один экземпляр supervisor может принимать решения. Process lock защищает от двух supervisor, а общий decision lock сериализует полный health-cycle со всеми изменяющими CLI-операциями. Entware init управляет shell-процессом по защищённому PID-файлу supervisor и перед отправкой сигнала сверяет точный argv через `/proc`, поскольку стандартный `pidof` видит такой процесс только как `sh`. Интервальное ожидание supervisor прерывается сигналами: `USR1` немедленно начинает новый health-cycle, а `TERM` освобождает process lock и завершает сервис без ожидания полного интервала. Если BusyBox `ash` ждёт foreground probe и откладывает trap, init в пределах stop timeout повторно завершает только direct children с заново подтверждённым `PPid` этого supervisor. `status`, `list` и `events` не изменяют runtime state. Отдельный редкий watchdog проверяет наличие процесса и перезапускает сервис, но никогда не выбирает outbound.
+Перед каждым health-cycle supervisor проверяет schema производного
+`state.json`. Отсутствующий или повреждённый файл атомарно пересоздаётся из
+реестра и сохранённого active preference без изменения credentials.
+
+Только один экземпляр supervisor может принимать решения. Process lock защищает от двух supervisor, а общий decision lock сериализует полный health-cycle со всеми изменяющими CLI-операциями. Entware init управляет shell-процессом по защищённому PID-файлу supervisor и перед отправкой сигнала сверяет точный argv через `/proc`, поскольку стандартный `pidof` видит такой процесс только как `sh`. Интервальное ожидание supervisor использует секундные foreground-срезы: это исключает race BusyBox `ash` между background `sleep` и `wait`, `USR1` начинает новый health-cycle не позднее следующего среза, а `TERM` освобождает process lock и завершает сервис без ожидания полного интервала. Если BusyBox `ash` ждёт foreground probe и откладывает trap, init в пределах stop timeout повторно завершает только direct children с заново подтверждённым `PPid` этого supervisor. `status`, `list` и `events` не изменяют runtime state. Отдельный редкий watchdog проверяет наличие процесса и перезапускает сервис, но никогда не выбирает outbound.
 
 ## 4. Машина состояний
 

@@ -14,6 +14,9 @@
 - VLESS JSON-команды больше не обрамляются CLI-разделителями, а dispatcher сохраняет документированные health exit codes, включая `1` для состояния `degraded`.
 - VLESS status больше не объявляет сохранённое recovery-соединение текущим active, когда data-plane переведён в прямой резерв или fail-closed.
 - Boot-init ограниченно ждёт первый health-cycle VLESS supervisor и больше не пропускает восстановление Mors firewall и policy routes из-за стартовой гонки lock.
+- Metadata-free runtime lock после прерванной записи больше не блокирует Mors навсегда: после защитного интервала он восстанавливается как stale, а lifecycle-команды явно сообщают о занятом runtime или незавершённом cold test.
+- Интервальное ожидание VLESS supervisor больше не использует подверженную race пару background `sleep`/`wait` в BusyBox `ash`; секундные foreground-срезы сохраняют быстрые `USR1`/`TERM` без вечного `sigsuspend`.
+- Повреждённый производный VLESS health-state теперь распознаётся по schema и атомарно пересоздаётся перед cycle из сохранённого реестра и active preference, не затрагивая credentials.
 
 ## 1.3.0 beta 4 - 2026-07-12
 - Установка IPK стала пассивной: init/NDM hooks активируются только в commit-фазе подтверждённого `mors setup`; `mors`, `help` и `version` не запускают скрытую настройку.
