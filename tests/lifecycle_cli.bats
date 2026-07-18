@@ -16,6 +16,16 @@ setup() {
 	grep -A4 '^[[:space:]]*setup)' "${REPO_ROOT}/opt/bin/mors" | grep -q 'cmd_setup_cli'
 }
 
+@test "VLESS dispatcher preserves health exit codes and keeps JSON undecorated" {
+	local cli=${REPO_ROOT}/opt/bin/mors body
+	body=$(sed -n '/^[[:space:]]*vless)/,/^[[:space:]]*;;/p' "${cli}" | tr -d '\r')
+	grep -q 'vless_status=\$?' <<<"${body}"
+	grep -q 'exit "\${vless_status}"' <<<"${body}"
+	grep -q '\[ "\${MORS_CLI_JSON_OUTPUT}" = true \] || print_line' <<<"${body}"
+	grep -q '^mors_cli__has_json_flag()' "${cli}"
+	grep -q '\[ "\${1}" = test \] || \[ "\${MORS_CLI_JSON_OUTPUT}" = true \] || print_line' "${cli}"
+}
+
 @test "IPK install payload contains no active system hooks" {
 	local install_body
 	install_body=$(sed -n '/^define Package\/mors\/install/,/^endef/p' "${REPO_ROOT}/Makefile" | tr -d '\r')

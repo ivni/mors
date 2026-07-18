@@ -68,7 +68,17 @@ mors_cli__requires_runtime_lock() {
 	esac
 }
 
+mors_cli__has_json_flag() {
+	local argument
+	for argument in "$@"; do
+		[ "${argument}" = --json ] && return 0
+	done
+	return 1
+}
+
 MORS_CLI_RUNTIME_LOCKED=false
+MORS_CLI_JSON_OUTPUT=false
+mors_cli__has_json_flag "$@" && MORS_CLI_JSON_OUTPUT=true
 MORS_CLI_LIFECYCLE_STATE=$(lifecycle_state__read) || {
 	error 'Не удалось прочитать lifecycle state Mors.'
 	echo 'Действие: проверьте /opt/etc/.mors/lifecycle/state.json или восстановите пакет.'
@@ -121,7 +131,7 @@ fi
 
 #clear_file_content "${MORS_LIST_FILE}"
 
-[ "${1}" = test ] || print_line
+[ "${1}" = test ] || [ "${MORS_CLI_JSON_OUTPUT}" = true ] || print_line
 case "${1}" in
 	setup)
 							shift
@@ -164,6 +174,9 @@ case "${1}" in
 	vless)
 		shift
 		cmd_vless_cli "$@"
+		vless_status=$?
+		[ "${MORS_CLI_JSON_OUTPUT}" = true ] || print_line
+		exit "${vless_status}"
 			;;
 
 	ssr)
