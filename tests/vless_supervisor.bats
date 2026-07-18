@@ -86,7 +86,8 @@ setup() {
 
 	run vless_supervisor__once
 	[ "${status}" -ne 0 ]
-	[ "${OVERRIDDEN_TAG}" = mors-direct ]
+	[ "$(tail -n 1 "${VLESS_EVENTS_FILE}" | jq -r '.to_id')" = mors-direct ]
+	[ "$(tail -n 1 "${VLESS_EVENTS_FILE}" | jq -r '.reason')" = direct_fallback ]
 	[ "$(jq -r '.overall_state' "${VLESS_STATE_FILE}")" = direct_fallback ]
 	[ "$(jq -r '.active_id' "${VLESS_STATE_FILE}")" = null ]
 	[ "$(vless_runtime__active_id)" = vless-a ]
