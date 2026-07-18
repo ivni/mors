@@ -46,7 +46,7 @@ Mors управляет одним глобальным списком из од
 - отдельный localhost-only диагностический SOCKS inbound для каждого включённого outbound;
 - `direct` и `blackhole` outbound, между которыми supervisor выбирает по глобальной политике.
 
-Любое изменение проходит стадии `parse -> validate -> generate candidate -> xray run -test -> atomic replace -> runtime apply`. Ошибка на любой стадии сохраняет предыдущую рабочую ревизию.
+Любое изменение проходит стадии `parse -> validate -> generate candidate -> xray run -test -> atomic replace -> runtime apply`. Candidate и rollback-файлы сохраняют расширение `.json`, по которому Xray определяет формат. Ошибка на любой стадии сохраняет предыдущую рабочую ревизию.
 
 ### 3.3 Supervisor
 

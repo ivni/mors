@@ -758,7 +758,7 @@ EOF
 vless_domain__apply_generated() {
 	local active_id="${1:-}"
 	local restart_runtime="${2:-true}"
-	local candidate="${VLESS_CONFIG_FILE}.candidate.$$"
+	local candidate="${VLESS_CONFIG_FILE}.candidate.$$.json"
 	local backup="${VLESS_CONFIG_FILE}.backup.$$"
 
 	vless_config__generate "${candidate}" "${active_id}" || return 1
@@ -820,7 +820,7 @@ vless_domain__apply_generated() {
 
 vless_domain__restore_declared_runtime() {
 	local active_id="${1:-}" restart_runtime="${2:-true}" rollback_config
-	rollback_config="${VLESS_CONFIG_FILE}.rollback.$$"
+	rollback_config="${VLESS_CONFIG_FILE}.rollback.$$.json"
 	if ! vless_config__generate "${rollback_config}" "${active_id}" || \
 		! "${XRAY}" run -test -c "${rollback_config}" >/dev/null 2>&1; then
 		rm -f "${rollback_config}"

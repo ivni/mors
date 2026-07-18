@@ -80,3 +80,9 @@ setup() {
 	grep -q "VLESS ещё не настроен: трафик закрыт" "${vpn}"
 	grep -q 'vless_domain__apply_generated.*false' "${vpn}"
 }
+
+@test "Xray candidate and rollback configs retain a JSON extension" {
+	local vless=${REPO_ROOT}/opt/bin/libs/vless
+	grep -Fq 'candidate="${VLESS_CONFIG_FILE}.candidate.$$.json"' "${vless}"
+	grep -Fq 'rollback_config="${VLESS_CONFIG_FILE}.rollback.$$.json"' "${vless}"
+}
