@@ -19,7 +19,7 @@ cleanup() {
 }
 trap 'cleanup; exit 0' INT TERM
 trap cleanup EXIT
-while :; do sleep 1; done
+while :; do sleep "${FAKE_SLEEP_INTERVAL:-1}"; done
 EOF
 	chmod +x "${PROGRAM}"
 }
@@ -39,6 +39,7 @@ run_init() {
 		VLESS_SUPERVISOR_PROGRAM="${PROGRAM}" \
 		VLESS_SUPERVISOR_PID_FILE="${PID_FILE}" \
 		VLESS_SUPERVISOR_LOCK_DIR="${LOCK_DIR}" \
+		FAKE_SLEEP_INTERVAL=30 \
 		VLESS_SUPERVISOR_WAIT_STEPS=30 \
 		VLESS_SUPERVISOR_WAIT_DELAY=0.1 \
 		sh "${INIT_SCRIPT}" "$@"
@@ -90,6 +91,7 @@ run_init() {
 	env \
 		VLESS_SUPERVISOR_PID_FILE="${PID_FILE}" \
 		VLESS_SUPERVISOR_LOCK_DIR="${LOCK_DIR}" \
+		FAKE_SLEEP_INTERVAL=1 \
 		"${PROGRAM}" once &
 	ONCE_PID=$!
 	for _ in 1 2 3 4 5 6 7 8 9 10; do

@@ -66,6 +66,20 @@ vless_init__cleanup_stale() {
 	rmdir "${VLESS_SUPERVISOR_LOCK_DIR}" 2>/dev/null || true
 }
 
+vless_init__terminate_children() {
+	local parent=${1} status child ppid current_ppid
+	for status in "${VLESS_SUPERVISOR_PROC_ROOT}"/[0-9]*/status; do
+		[ -r "${status}" ] || continue
+		child=${status%/status}
+		child=${child##*/}
+		ppid=$(sed -n 's/^PPid:[[:space:]]*//p' "${status}" 2>/dev/null | head -n 1)
+		[ "${ppid}" = "${parent}" ] || continue
+		current_ppid=$(sed -n 's/^PPid:[[:space:]]*//p' "${VLESS_SUPERVISOR_PROC_ROOT}/${child}/status" 2>/dev/null | head -n 1)
+		[ "${current_ppid}" = "${parent}" ] || continue
+		kill -TERM "${child}" 2>/dev/null || true
+	done
+}
+
 vless_init__start() {
 	local pid counter=0
 	printf '\033[1;37m Starting %s... \033[m' "${DESC}"
@@ -110,6 +124,10 @@ vless_init__stop() {
 	fi
 	kill "${pid}" 2>/dev/null || true
 	while vless_process__pid_is_service "${pid}" && [ "${counter}" -lt "${VLESS_SUPERVISOR_WAIT_STEPS}" ]; do
+		# BusyBox ash can defer the parent's TERM trap while it waits for a
+		# foreground probe. Revalidate PPid on every pass and terminate only
+		# direct children of this exact supervisor so the trap can run.
+		vless_init__terminate_children "${pid}"
 		sleep "${VLESS_SUPERVISOR_WAIT_DELAY}"
 		counter=$((counter + 1))
 	done
