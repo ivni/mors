@@ -63,7 +63,16 @@ data_members="$(tar -tzf "${tmp_dir}/data.tar.gz")"
 for required_member in \
 	./opt/apps/mors/bin/mors \
 	./opt/apps/mors/bin/libs/main \
-	./opt/apps/mors/bin/libs/test; do
+	./opt/apps/mors/bin/libs/test \
+	./opt/apps/mors/bin/libs/telemetry \
+	./opt/apps/mors/bin/libs/telemetry_runtime \
+	./opt/apps/mors/bin/libs/telemetry_store \
+	./opt/apps/mors/bin/libs/telemetry_otlp \
+	./opt/apps/mors/bin/libs/telemetry_process \
+	./opt/apps/mors/bin/libs/telemetry_upgrade \
+	./opt/apps/mors/bin/libs/upgrade_artifact \
+	./opt/apps/mors/bin/main/telemetry-sender \
+	./opt/apps/mors/etc/init.d/S98mors-telemetry; do
 	if ! printf '%s\n' "${data_members}" | grep -Fxq "${required_member}"; then
 		echo "Release package is missing ${required_member}." >&2
 		exit 1

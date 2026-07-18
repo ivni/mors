@@ -1,0 +1,53 @@
+#!/bin/sh
+
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+. "${MORS_LIB_DIR}/telemetry"
+. "${MORS_LIB_DIR}/lifecycle_snapshot"
+
+telemetry_upgrade__artifact_capability() {
+	local artifact=${1} work_directory=${2} data_archive listing required capability=supported
+	[ -f "${artifact}" ] && [ ! -L "${artifact}" ] || return 1
+	[ -d "${work_directory}" ] && [ ! -L "${work_directory}" ] || return 1
+	data_archive="${work_directory}/target-data.$$.tar.gz"
+	listing="${work_directory}/target-data.$$.list"
+	[ ! -e "${data_archive}" ] && [ ! -L "${data_archive}" ] || return 1
+	[ ! -e "${listing}" ] && [ ! -L "${listing}" ] || return 1
+	umask 077
+	tar -xOzf "${artifact}" ./data.tar.gz >"${data_archive}" 2>/dev/null || {
+		rm -f "${data_archive}" "${listing}"
+		return 1
+	}
+	tar -tzf "${data_archive}" >"${listing}" 2>/dev/null || {
+		rm -f "${data_archive}" "${listing}"
+		return 1
+	}
+	for required in \
+		./opt/apps/mors/bin/libs/telemetry \
+		./opt/apps/mors/bin/libs/telemetry_runtime \
+		./opt/apps/mors/bin/libs/telemetry_store \
+		./opt/apps/mors/bin/libs/telemetry_otlp \
+		./opt/apps/mors/bin/libs/telemetry_process \
+		./opt/apps/mors/bin/libs/telemetry_upgrade \
+		./opt/apps/mors/bin/main/telemetry-sender \
+		./opt/apps/mors/etc/init.d/S98mors-telemetry; do
+		grep -Fxq "${required}" "${listing}" || capability=unsupported
+	done
+	rm -f "${data_archive}" "${listing}"
+	printf '%s\n' "${capability}"
+}
+
+telemetry_upgrade__prepare_target() {
+	case "${1}" in
+		supported) telemetry_lifecycle__quiesce_for_upgrade ;;
+		unsupported) telemetry_lifecycle__deactivate_for_unsupported_target ;;
+		*) return 64 ;;
+	esac
+}
+
+telemetry_upgrade__restore_target() {
+	case "${1}" in
+		supported) lifecycle_snapshot__restore_telemetry_service ;;
+		unsupported) return 0 ;;
+		*) return 64 ;;
+	esac
+}

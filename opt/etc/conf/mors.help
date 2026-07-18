@@ -96,6 +96,19 @@ vless policy direct-fallback on --yes|off
 vless version|ver       - показывает версию Xray и проверяет совместимость с Mors.
 vless new               - удаленная команда; используйте vless add или vless update.
 
+Телеметрия Monium:
+---------------------------------------------------------------------------------
+
+telemetry enable monium - включает обезличенную эксплуатационную телеметрию.
+telemetry enable monium --project PROJECT --key-file PATH --yes
+                        - неинтерактивное включение без ключа в shell history.
+telemetry status [--json]
+                        - показывает sender, очередь и последнюю доставку.
+telemetry test [--json] - отправляет одну безопасную тестовую запись.
+telemetry disable --yes - останавливает доставку, сохраняя конфигурацию.
+telemetry disable --purge --yes
+                        - удаляет ключ, конфигурацию, cursor и очередь.
+
 vpn                     - отображаем текущий тип VPN соединения и его состояние.
 vpn set                 - меняем текущий VPN интерфейс, путем выбора из списка доступных.
 vpn reset               - обновляем таблицу правил iptables для vpn подключения:

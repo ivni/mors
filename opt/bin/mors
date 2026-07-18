@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. /opt/apps/mors/bin/libs/telemetry_runtime
+telemetry_runtime__pin_production
 . /opt/apps/mors/bin/libs/check
 . /opt/apps/mors/bin/libs/hosts
 . /opt/apps/mors/bin/libs/route
@@ -8,6 +10,7 @@
 . /opt/apps/mors/bin/libs/vless
 . /opt/apps/mors/bin/libs/vpn
 . /opt/apps/mors/bin/libs/lifecycle_state
+. /opt/apps/mors/bin/libs/telemetry
 . /opt/apps/mors/bin/libs/test
 . /opt/apps/mors/bin/main/setup
 
@@ -172,6 +175,14 @@ case "${1}" in
 		[ "${MORS_CLI_JSON_OUTPUT}" = true ] || print_line
 		exit "${vless_status}"
 			;;
+
+	telemetry)
+		shift
+		cmd_telemetry_cli "$@"
+		telemetry_status=$?
+		[ "${MORS_CLI_JSON_OUTPUT}" = true ] || print_line
+		exit "${telemetry_status}"
+		;;
 
 	ssr)
 		case "${2}" in

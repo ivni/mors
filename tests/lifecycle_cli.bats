@@ -98,6 +98,7 @@ setup() {
 	grep -q 'upgrade__verify_unconfigured' "${upgrade}"
 	grep -q 'upgrade__verify_passive_runtime' "${upgrade}"
 	grep -q 'setup__verify_runtime_removed' "${upgrade}"
+	grep -q 'telemetry_lifecycle__passive_runtime_removed' "${REPO_ROOT}/opt/bin/main/setup"
 }
 
 @test "passive recovery verifies runtime before restoring the stable state" {

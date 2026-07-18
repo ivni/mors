@@ -30,6 +30,7 @@
 6. **Морс** позволяет подключить **AdGuardHome** в качестве **DNS** сервера, вместо связки **dnsmasq + dnscrypt-proxy2 + adblock**.
 7. **Морс** позволяет оперировать со списком исключений при блокировке рекламы, добавляет и удаляет домены в этом списке.
 8. **Морс** поддерживает маршрутизацию через **VLESS Reality** с помощью **Xray** и системного Proxy-интерфейса Keenetic.
+9. **Морс** умеет по явному согласию отправлять обезличенную эксплуатационную телеметрию в **Monium**.
 
 ### Совместимость с Xray
 
@@ -92,6 +93,46 @@ mors vless policy direct-fallback on --yes
 
 `mors vless status` отвечает за отображение данных. `mors vless check` предназначен для внешнего мониторинга: `0` означает исправное состояние, `1` - работа без готового резерва или запуск, `2` - недоступность либо прямой резерв, `3` - VLESS не настроен или приостановлен, `4` - неизвестное состояние.
 
+### Наблюдение через Monium (beta)
+
+Mors может отправлять в Monium периодические OTLP/HTTP JSON-события о lifecycle,
+состоянии VLESS/Xray, задержках, переключениях и агрегированных счётчиках.
+Функция выключена после установки и включается только отдельной командой после
+успешной тестовой доставки:
+
+```sh
+mors telemetry enable monium --project PROJECT
+mors telemetry status
+mors telemetry test
+```
+
+API-ключ вводится без эха терминала. Для автоматизации используйте защищённый
+файл, чтобы ключ не попал в shell history:
+
+```sh
+mors telemetry enable monium --project PROJECT --key-file /secure/monium.key --yes
+```
+
+Сервисному аккаунту нужна роль `monium.logs.writer` или общая
+`monium.telemetry.writer`; API-ключу — область действия
+`yc.monium.logs.write` или `yc.monium.telemetry.write`.
+
+В облако не отправляются VLESS credentials, адреса серверов и клиентов, домены,
+syslog или полный debug. Ошибка Monium не меняет маршруты и не блокирует VLESS
+supervisor; недоставленные записи попадают в ограниченную локальную очередь.
+Endpoint, transport и TLS trust store закреплены внутри telemetry sender и не
+переопределяются environment variables или пользовательским `.curlrc`; другие
+команды Mors сохраняют пользовательское proxy/custom-CA окружение.
+Остановить передачу можно командой `mors telemetry disable --yes`, а удалить
+ключ, конфигурацию и очередь — `mors telemetry disable --purge --yes`.
+
+Формат и авторизация реализованы по официальной документации
+[OTLP в Monium](https://yandex.cloud/ru/docs/monium/collector/otlp-protocol),
+[быстрому старту логов](https://yandex.cloud/ru/docs/monium/logs/quickstart) и
+[ограничениям логирования](https://yandex.cloud/ru/docs/monium/logs/limits).
+Полный privacy и lifecycle-контракт описан в
+[архитектуре телеметрии](docs/telemetry-architecture.md).
+
 ### Диагностика Mors (beta)
 
 Команды диагностики имеют разные задачи:
@@ -137,6 +178,7 @@ mors test cold recover
 - [Дизайн-система CLI](docs/cli-design-system.md).
 - [Архитектура end-to-end проверки](docs/test-architecture.md).
 - [Архитектура управляемых VLESS-соединений](docs/vless-architecture.md).
+- [Архитектура телеметрии Monium](docs/telemetry-architecture.md).
 
 ## Релизы проекта
 - [GitHub Releases](https://github.com/ivni/mors/releases)

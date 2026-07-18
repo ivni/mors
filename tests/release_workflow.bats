@@ -29,7 +29,9 @@ setup() {
 	local version='9.9.9~beta1-4'
 
 	mkdir -p "${artifact_dir}" "${control_dir}" \
-		"${data_dir}/opt/apps/mors/bin/libs" "${outer_dir}"
+		"${data_dir}/opt/apps/mors/bin/libs" \
+		"${data_dir}/opt/apps/mors/bin/main" \
+		"${data_dir}/opt/apps/mors/etc/init.d" "${outer_dir}"
 	printf '%s\n' \
 		'Package: mors' \
 		"Version: ${version}" \
@@ -37,6 +39,15 @@ setup() {
 	: >"${data_dir}/opt/apps/mors/bin/mors"
 	: >"${data_dir}/opt/apps/mors/bin/libs/main"
 	: >"${data_dir}/opt/apps/mors/bin/libs/test"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_runtime"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_store"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_otlp"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_process"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_upgrade"
+	: >"${data_dir}/opt/apps/mors/bin/libs/upgrade_artifact"
+	: >"${data_dir}/opt/apps/mors/bin/main/telemetry-sender"
+	: >"${data_dir}/opt/apps/mors/etc/init.d/S98mors-telemetry"
 	printf '2.0\n' >"${outer_dir}/debian-binary"
 	tar -czf "${outer_dir}/control.tar.gz" -C "${control_dir}" ./control
 	tar -czf "${outer_dir}/data.tar.gz" -C "${data_dir}" ./opt

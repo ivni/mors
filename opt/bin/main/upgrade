@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. /opt/apps/mors/bin/libs/telemetry_runtime
+telemetry_runtime__pin_production
 . /opt/apps/mors/bin/libs/main
 . /opt/apps/mors/bin/libs/vpn
 . /opt/apps/mors/bin/libs/vless
@@ -7,6 +9,8 @@
 . /opt/apps/mors/bin/libs/lifecycle_state
 . /opt/apps/mors/bin/libs/lifecycle_snapshot
 . /opt/apps/mors/bin/libs/runtime_lock
+. /opt/apps/mors/bin/libs/telemetry_upgrade
+. /opt/apps/mors/bin/libs/upgrade_artifact
 
 MORS_RELEASE_API=${MORS_RELEASE_API:-https://api.github.com/repos/ivni/mors/releases/latest}
 MORS_UPDATE_CACHE=${MORS_UPDATE_CACHE:-/opt/packages/mors-lifecycle}
@@ -40,21 +44,16 @@ upgrade__check() {
 }
 
 upgrade__verify_artifact() {
-	local artifact digest_file expected actual
-	artifact=${1}
-	digest_file=${artifact}.sha256
+	local artifact=${1}
 	[ -r "${artifact}" ] || {
 		error "IPK не найден: ${artifact}."
 		return 1
 	}
-	[ -r "${digest_file}" ] || {
-		error "Отсутствует digest: ${digest_file}."
+	[ -r "${artifact}.sha256" ] || {
+		error "Отсутствует digest: ${artifact}.sha256."
 		return 1
 	}
-	expected=$(awk 'NR == 1 {print $1}' "${digest_file}")
-	printf '%s\n' "${expected}" | grep -Eq '^[0-9a-fA-F]{64}$' || return 1
-	actual=$(sha256sum "${artifact}" | awk '{print $1}') || return 1
-	[ "${actual}" = "${expected}" ] || {
+	upgrade_artifact__verified_digest "${artifact}" >/dev/null || {
 		error "SHA-256 не совпадает для ${artifact}."
 		return 1
 	}
@@ -63,10 +62,20 @@ upgrade__verify_artifact() {
 upgrade__reload_installed_runtime() {
 	# opkg has replaced /opt/apps/mors. Reload functions before migrations,
 	# verification or rollback so the installed package validates itself.
+	if [ -r /opt/apps/mors/bin/libs/telemetry_runtime ]; then
+		. /opt/apps/mors/bin/libs/telemetry_runtime || return 1
+		telemetry_runtime__pin_production || return 1
+	fi
 	. /opt/apps/mors/bin/libs/main || return 1
 	. /opt/apps/mors/bin/libs/vpn || return 1
 	. /opt/apps/mors/bin/libs/vless || return 1
 	. /opt/apps/mors/bin/main/setup || return 1
+	if [ -r /opt/apps/mors/bin/libs/telemetry_upgrade ]; then
+		. /opt/apps/mors/bin/libs/telemetry_upgrade || return 1
+	fi
+	if [ -r /opt/apps/mors/bin/libs/upgrade_artifact ]; then
+		. /opt/apps/mors/bin/libs/upgrade_artifact || return 1
+	fi
 }
 
 upgrade__load_committed_plan() {
@@ -115,6 +124,7 @@ upgrade__restart_and_verify() {
 		export MORS_LIFECYCLE_APPLY
 		cmd_mors_init no
 	) >/dev/null 2>&1 || return 1
+	telemetry_upgrade__restore_target "${MORS_UPDATE_TARGET_TELEMETRY}" || return 1
 	lifecycle_transaction__phase verifying || return 1
 	/opt/bin/mors version >/dev/null 2>&1 || return 1
 	setup__verify_committed
@@ -199,13 +209,14 @@ upgrade__restore_pre_apply() {
 }
 
 upgrade__apply_locked() {
-	local operation state result
+	local operation state result rollback_result target_capability install_attempted=false snapshot
+	local candidate_fingerprint rollback_fingerprint staged_candidate staged_rollback
 	operation=${1}
 	state=$(lifecycle_state__read) || return 4
 	case "${state}" in ready|unconfigured) ;; *) return 3 ;; esac
 	! lifecycle_state__has_active_marker || return 3
-	upgrade__verify_artifact "${MORS_UPDATE_ARTIFACT}" || return 64
-	upgrade__verify_artifact "${MORS_UPDATE_ROLLBACK}" || return 64
+	candidate_fingerprint=$(upgrade_artifact__verified_digest "${MORS_UPDATE_ARTIFACT}") || return 64
+	rollback_fingerprint=$(upgrade_artifact__verified_digest "${MORS_UPDATE_ROLLBACK}") || return 64
 
 	runtime_mutation_lock__acquire_or_explain "mors ${operation}" || return $?
 	lifecycle_transaction__begin "${operation}" "${state}" "${state}" >/dev/null || {
@@ -219,19 +230,45 @@ upgrade__apply_locked() {
 		runtime_mutation_lock__release >/dev/null 2>&1 || true
 		return "${result}"
 	}
+	snapshot=$(lifecycle_transaction__snapshot_directory) || {
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	}
+	staged_candidate=${snapshot}/candidate.ipk
+	staged_rollback=${snapshot}/rollback.ipk
 	if ! mkdir -p "${MORS_UPDATE_CACHE}" || \
-		! cp -p "${MORS_UPDATE_ARTIFACT}" "$(lifecycle_transaction__snapshot_directory)/candidate.ipk" || \
-		! cp -p "${MORS_UPDATE_ROLLBACK}" "$(lifecycle_transaction__snapshot_directory)/rollback.ipk" || \
-		! cp -p "${MORS_UPDATE_ROLLBACK}.sha256" "$(lifecycle_transaction__snapshot_directory)/rollback.ipk.sha256" || \
-		! lifecycle_transaction__phase prepared || \
-		! lifecycle_transaction__phase applying; then
+		! upgrade_artifact__stage_pair "${MORS_UPDATE_ARTIFACT}" "${MORS_UPDATE_ROLLBACK}" \
+			"${snapshot}" "${candidate_fingerprint}" "${rollback_fingerprint}"; then
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || \
+			lifecycle_transaction__mark_recovery_required update_prepare_failed 2>/dev/null || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	fi
+	target_capability=$(telemetry_upgrade__artifact_capability "${staged_candidate}" "${snapshot}") || {
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	}
+	MORS_UPDATE_ARTIFACT=${staged_candidate}
+	MORS_UPDATE_ROLLBACK=${staged_rollback}
+	MORS_UPDATE_TARGET_TELEMETRY=${target_capability}
+	export MORS_UPDATE_ARTIFACT MORS_UPDATE_ROLLBACK MORS_UPDATE_TARGET_TELEMETRY
+	if ! lifecycle_transaction__phase prepared; then
 		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || \
 			lifecycle_transaction__mark_recovery_required update_prepare_failed 2>/dev/null || true
 		runtime_mutation_lock__release >/dev/null 2>&1 || true
 		return 1
 	fi
 
-	if upgrade__install_artifact "${operation}" "${MORS_UPDATE_ARTIFACT}"; then
+	if telemetry_upgrade__prepare_target "${MORS_UPDATE_TARGET_TELEMETRY}" && \
+		lifecycle_transaction__phase applying; then
+		install_attempted=true
+	else
+		result=1
+	fi
+
+	if [ "${result:-0}" -eq 0 ] && upgrade__install_artifact "${operation}" "${MORS_UPDATE_ARTIFACT}"; then
 		upgrade__reload_installed_runtime || result=1
 		if [ "${result:-0}" -eq 0 ] && [ "${state}" = ready ]; then
 			upgrade__run_migrations || result=1
@@ -241,18 +278,24 @@ upgrade__apply_locked() {
 				upgrade__restart_and_verify || result=1
 			else
 				lifecycle_transaction__phase verifying || result=1
+				[ "${result:-0}" -ne 0 ] || telemetry_upgrade__restore_target "${MORS_UPDATE_TARGET_TELEMETRY}" || result=1
 				[ "${result:-0}" -ne 0 ] || upgrade__verify_unconfigured || result=1
 			fi
 		fi
 		if [ "${result:-0}" -eq 0 ]; then
 			lifecycle_transaction__finish || result=1
 		fi
-	else
+	elif [ "${result:-0}" -eq 0 ]; then
 		result=1
 	fi
 
 	if [ "${result:-0}" -ne 0 ]; then
-		if upgrade__rollback_failed_apply; then
+		if [ "${install_attempted}" = true ]; then
+			upgrade__rollback_failed_apply || rollback_result=$?
+		else
+			upgrade__restore_pre_apply || rollback_result=$?
+		fi
+		if [ "${rollback_result:-0}" -eq 0 ]; then
 			error 'Обновление не завершено. Предыдущая версия восстановлена.'
 			result=2
 		else

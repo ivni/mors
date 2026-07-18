@@ -1,0 +1,693 @@
+#!/bin/sh
+
+TELEMETRY_CONFIG_ROOT=${TELEMETRY_CONFIG_ROOT:-/opt/etc/mors/telemetry}
+TELEMETRY_CONFIG_FILE=${TELEMETRY_CONFIG_FILE:-${TELEMETRY_CONFIG_ROOT}/config.json}
+TELEMETRY_KEY_FILE=${TELEMETRY_KEY_FILE:-${TELEMETRY_CONFIG_ROOT}/monium.key}
+TELEMETRY_CURL_CONFIG=${TELEMETRY_CURL_CONFIG:-${TELEMETRY_CONFIG_ROOT}/curl.conf}
+TELEMETRY_CURSOR_FILE=${TELEMETRY_CURSOR_FILE:-${TELEMETRY_CONFIG_ROOT}/cursor}
+TELEMETRY_STATE_ROOT=${TELEMETRY_STATE_ROOT:-/tmp/mors/telemetry}
+TELEMETRY_STATE_FILE=${TELEMETRY_STATE_FILE:-${TELEMETRY_STATE_ROOT}/state.json}
+TELEMETRY_DATA_ROOT=${TELEMETRY_DATA_ROOT:-/opt/var/lib/mors/telemetry}
+TELEMETRY_QUEUE_FILE=${TELEMETRY_QUEUE_FILE:-${TELEMETRY_DATA_ROOT}/outbox.jsonl}
+TELEMETRY_ENDPOINT=${TELEMETRY_ENDPOINT:-https://ingest.monium.yandex.cloud/otlp/v1/logs}
+TELEMETRY_QUEUE_LIMIT=${TELEMETRY_QUEUE_LIMIT:-1000}
+TELEMETRY_QUEUE_BATCH_LIMIT=${TELEMETRY_QUEUE_BATCH_LIMIT:-50}
+TELEMETRY_PAYLOAD_BYTE_LIMIT=${TELEMETRY_PAYLOAD_BYTE_LIMIT:-524288}
+TELEMETRY_QUEUE_BYTE_LIMIT=${TELEMETRY_QUEUE_BYTE_LIMIT:-16777216}
+TELEMETRY_BATCH_BYTE_LIMIT=${TELEMETRY_BATCH_BYTE_LIMIT:-4194304}
+TELEMETRY_MAX_AGE_SECONDS=${TELEMETRY_MAX_AGE_SECONDS:-72000}
+TELEMETRY_FUTURE_GRACE_SECONDS=${TELEMETRY_FUTURE_GRACE_SECONDS:-300}
+TELEMETRY_INTERVAL_SECONDS=${TELEMETRY_INTERVAL_SECONDS:-60}
+TELEMETRY_JQ=${TELEMETRY_JQ:-jq}
+
+telemetry_store__now() {
+	date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+telemetry_store__now_seconds() {
+	date -u '+%s'
+}
+
+telemetry_store__atomic_from_stdin() {
+	local destination=${1} mode=${2:-600} temporary
+	temporary="${destination}.tmp.$$"
+	umask 077
+	cat >"${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	chmod "${mode}" "${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	mv -f "${temporary}" "${destination}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+}
+
+telemetry_store__safe_value() {
+	local value=${1:-} maximum=${2:-256}
+	[ -n "${value}" ] || return 1
+	[ "${#value}" -le "${maximum}" ] || return 1
+	case "${value}" in
+		*[!A-Za-z0-9._:-]*) return 1 ;;
+	esac
+}
+
+telemetry_store__safe_connection_id() {
+	local value=${1:-} suffix
+	[ -z "${value}" ] && return 0
+	case "${value}" in
+		mors-block|mors-direct) return 0 ;;
+		vless-*)
+			suffix=${value#vless-}
+			[ -n "${suffix}" ] && [ "${#suffix}" -le 48 ] || return 1
+			case "${suffix}" in *[!A-Za-z0-9]*) return 1 ;; esac
+			return 0
+			;;
+	esac
+	return 1
+}
+
+telemetry_store__instance_id_valid() {
+	local value=${1:-} suffix
+	case "${value}" in
+		mors-*)
+			suffix=${value#mors-}
+			case "${suffix}" in ''|*[!0-9]*) return 1 ;; esac
+			return 0
+			;;
+	esac
+	[ "${#value}" -eq 32 ] || return 1
+	case "${value}" in *[!a-f0-9]*) return 1 ;; esac
+}
+
+telemetry_store__ensure_directories() {
+	umask 077
+	for path in "${TELEMETRY_CONFIG_ROOT}" "${TELEMETRY_STATE_ROOT}" "${TELEMETRY_DATA_ROOT}"; do
+		[ ! -L "${path}" ] || return 1
+		if [ -d "${path}" ]; then
+			telemetry_store__mode_is "${path}" 700 || chmod 700 "${path}" || return 1
+		else
+			mkdir -p "${path}" || return 1
+			chmod 700 "${path}" || return 1
+		fi
+	done
+}
+
+telemetry_store__mode_is() {
+	local path=${1} expected=${2} actual
+	[ ! -L "${path}" ] || return 1
+	actual=$(stat -c '%a' "${path}" 2>/dev/null) || return 1
+	[ "${actual}" = "${expected}" ]
+}
+
+telemetry_store__key_valid() {
+	local key_file=${1:-${TELEMETRY_KEY_FILE}} size key lines
+	[ -f "${key_file}" ] && [ ! -L "${key_file}" ] || return 1
+	size=$(wc -c <"${key_file}" 2>/dev/null | tr -d ' ') || return 1
+	case "${size}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "${size}" -ge 16 ] && [ "${size}" -le 4097 ] || return 1
+	lines=$(awk 'END { print NR }' "${key_file}" 2>/dev/null) || return 1
+	[ "${lines}" -eq 1 ] || return 1
+	key=$(tr -d '\n' <"${key_file}") || return 1
+	case "${key}" in
+		''|*[!A-Za-z0-9._~-]*) return 1 ;;
+	esac
+	[ "$(printf '%s' "${key}" | wc -c | tr -d ' ')" -le 4096 ]
+}
+
+telemetry_store__config_valid() {
+	local project cluster service instance interval endpoint enabled
+	[ -f "${TELEMETRY_CONFIG_FILE}" ] && [ ! -L "${TELEMETRY_CONFIG_FILE}" ] || return 1
+	"${TELEMETRY_JQ}" -e '
+		type == "object" and
+		.schema_version == 1 and
+		.provider == "monium" and
+		(.enabled | type == "boolean") and
+		(.endpoint | type == "string") and
+		(.project | type == "string") and
+		(.cluster | type == "string") and
+		(.service | type == "string") and
+		(.instance_id | type == "string") and
+		(.interval_seconds | type == "number")
+	' "${TELEMETRY_CONFIG_FILE}" >/dev/null 2>&1 || return 1
+	project=$("${TELEMETRY_JQ}" -r '.project' "${TELEMETRY_CONFIG_FILE}") || return 1
+	cluster=$("${TELEMETRY_JQ}" -r '.cluster' "${TELEMETRY_CONFIG_FILE}") || return 1
+	service=$("${TELEMETRY_JQ}" -r '.service' "${TELEMETRY_CONFIG_FILE}") || return 1
+	instance=$("${TELEMETRY_JQ}" -r '.instance_id' "${TELEMETRY_CONFIG_FILE}") || return 1
+	interval=$("${TELEMETRY_JQ}" -r '.interval_seconds' "${TELEMETRY_CONFIG_FILE}") || return 1
+	endpoint=$("${TELEMETRY_JQ}" -r '.endpoint' "${TELEMETRY_CONFIG_FILE}") || return 1
+	enabled=$("${TELEMETRY_JQ}" -r '.enabled' "${TELEMETRY_CONFIG_FILE}") || return 1
+	telemetry_store__safe_value "${project}" 256 || return 1
+	telemetry_store__safe_value "${cluster}" 64 || return 1
+	telemetry_store__safe_value "${service}" 64 || return 1
+	telemetry_store__instance_id_valid "${instance}" || return 1
+	case "${interval}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "${interval}" -ge 30 ] && [ "${interval}" -le 3600 ] || return 1
+	[ "${endpoint}" = "${TELEMETRY_ENDPOINT}" ] || return 1
+	[ "${enabled}" = true ] || [ "${enabled}" = false ]
+}
+
+telemetry_store__credentials_valid() {
+	local expected actual
+	telemetry_store__config_valid || return 1
+	telemetry_store__key_valid || return 1
+	telemetry_store__mode_is "${TELEMETRY_CONFIG_ROOT}" 700 || return 1
+	telemetry_store__mode_is "${TELEMETRY_CONFIG_FILE}" 600 || return 1
+	telemetry_store__mode_is "${TELEMETRY_KEY_FILE}" 600 || return 1
+	[ -f "${TELEMETRY_CURL_CONFIG}" ] && [ ! -L "${TELEMETRY_CURL_CONFIG}" ] || return 1
+	telemetry_store__mode_is "${TELEMETRY_CURL_CONFIG}" 600 || return 1
+	expected=$(telemetry_store__render_curl_config) || return 1
+	actual=$(cat "${TELEMETRY_CURL_CONFIG}") || return 1
+	[ "${actual}" = "${expected}" ]
+}
+
+telemetry_store__generate_instance_id() {
+	local value
+	value=$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \r\n')
+	if [ "${#value}" -ne 32 ]; then
+		value=$(printf '%s:%s:%s\n' "$(telemetry_store__now_seconds)" "$$" "${PPID:-0}" | cksum | awk '{print $1}')
+		value="mors-${value}"
+	fi
+	printf '%s\n' "${value}"
+}
+
+telemetry_store__write_key() {
+	local source=${1} key temporary
+	telemetry_store__ensure_directories || return 1
+	telemetry_store__key_valid "${source}" || return 1
+	key=$(tr -d '\n' <"${source}") || return 1
+	temporary="${TELEMETRY_KEY_FILE}.tmp.$$"
+	umask 077
+	printf '%s\n' "${key}" >"${temporary}" || {
+		rm -f "${temporary}"
+		key=''
+		return 1
+	}
+	chmod 600 "${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	mv -f "${temporary}" "${TELEMETRY_KEY_FILE}" || {
+		rm -f "${temporary}"
+		key=''
+		return 1
+	}
+	key=''
+}
+
+telemetry_store__write_config() {
+	local project=${1} cluster=${2} service=${3} enabled=${4:-false} instance=${5:-} now
+	telemetry_store__safe_value "${project}" 256 || return 1
+	telemetry_store__safe_value "${cluster}" 64 || return 1
+	telemetry_store__safe_value "${service}" 64 || return 1
+	[ "${enabled}" = true ] || [ "${enabled}" = false ] || return 1
+	[ -n "${instance}" ] || instance=$(telemetry_store__generate_instance_id)
+	telemetry_store__instance_id_valid "${instance}" || return 1
+	case "${TELEMETRY_INTERVAL_SECONDS}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "${TELEMETRY_INTERVAL_SECONDS}" -ge 30 ] && [ "${TELEMETRY_INTERVAL_SECONDS}" -le 3600 ] || return 1
+	telemetry_store__ensure_directories || return 1
+	now=$(telemetry_store__now) || return 1
+	"${TELEMETRY_JQ}" -n \
+		--arg endpoint "${TELEMETRY_ENDPOINT}" \
+		--arg project "${project}" \
+		--arg cluster "${cluster}" \
+		--arg service "${service}" \
+		--arg instance "${instance}" \
+		--arg now "${now}" \
+		--argjson enabled "${enabled}" \
+		--argjson interval "${TELEMETRY_INTERVAL_SECONDS}" '{
+			schema_version: 1,
+			provider: "monium",
+			enabled: $enabled,
+			endpoint: $endpoint,
+			project: $project,
+			cluster: $cluster,
+			service: $service,
+			instance_id: $instance,
+			interval_seconds: $interval,
+			updated_at: $now
+		}' | telemetry_store__atomic_from_stdin "${TELEMETRY_CONFIG_FILE}" 600
+}
+
+telemetry_store__set_enabled() {
+	local enabled=${1} now
+	[ "${enabled}" = true ] || [ "${enabled}" = false ] || return 1
+	telemetry_store__config_valid || return 1
+	now=$(telemetry_store__now) || return 1
+	"${TELEMETRY_JQ}" --argjson enabled "${enabled}" --arg now "${now}" \
+		'.enabled = $enabled | .updated_at = $now' "${TELEMETRY_CONFIG_FILE}" |
+		telemetry_store__atomic_from_stdin "${TELEMETRY_CONFIG_FILE}" 600
+}
+
+telemetry_store__render_curl_config() {
+	local project cluster service key
+	telemetry_store__config_valid || return 1
+	telemetry_store__key_valid || return 1
+	project=$("${TELEMETRY_JQ}" -r '.project' "${TELEMETRY_CONFIG_FILE}") || return 1
+	cluster=$("${TELEMETRY_JQ}" -r '.cluster' "${TELEMETRY_CONFIG_FILE}") || return 1
+	service=$("${TELEMETRY_JQ}" -r '.service' "${TELEMETRY_CONFIG_FILE}") || return 1
+	key=$(tr -d '\n' <"${TELEMETRY_KEY_FILE}") || return 1
+	printf 'url = "%s"\n' "${TELEMETRY_ENDPOINT}"
+	printf '%s\n' 'request = "POST"'
+	printf 'header = "Authorization: Api-Key %s"\n' "${key}"
+	printf 'header = "x-monium-project: %s"\n' "${project}"
+	printf 'header = "x-monium-cluster: %s"\n' "${cluster}"
+	printf 'header = "x-monium-service: %s"\n' "${service}"
+	printf '%s\n' 'header = "Content-Type: application/json"'
+	printf '%s\n' 'connect-timeout = 10'
+	printf '%s\n' 'max-time = 20'
+	printf '%s\n' 'silent'
+	printf '%s\n' 'show-error'
+	key=''
+}
+
+telemetry_store__write_curl_config() {
+	local content status
+	content=$(telemetry_store__render_curl_config) || return 1
+	printf '%s\n' "${content}" | telemetry_store__atomic_from_stdin "${TELEMETRY_CURL_CONFIG}" 600
+	status=$?
+	content=''
+	return "${status}"
+}
+
+telemetry_store__payload_schema() {
+	cat <<'JQ'
+def exact_keys($expected): (keys | sort) == ($expected | sort);
+def member($allowed): . as $value | ($allowed | index($value)) != null;
+def safe_ascii($maximum):
+  type == "string" and length > 0 and length <= $maximum and
+  test("^[A-Za-z0-9._:~+-]+$");
+def safe_id:
+  type == "string" and
+  (test("^vless-[A-Za-z0-9]{1,48}$") or . == "mors-block" or . == "mors-direct");
+def safe_instance: type == "string" and (test("^[a-f0-9]{32}$") or test("^mors-[0-9]+$"));
+def decimal_int: type == "string" and test("^(0|[1-9][0-9]{0,19})$");
+def string_value: (.value | type == "object" and exact_keys(["stringValue"]) and (.stringValue | type == "string"));
+def int_value: (.value | type == "object" and exact_keys(["intValue"]) and (.intValue | decimal_int));
+def bool_value: (.value | type == "object" and exact_keys(["boolValue"]) and (.boolValue | type == "boolean"));
+def valid_attribute:
+  type == "object" and exact_keys(["key", "value"]) and
+  (.key | type == "string" and length <= 64) and
+  . as $attribute |
+  if $attribute.key == "mors.event.id" then
+    ($attribute | string_value) and ($attribute.value.stringValue | safe_ascii(256))
+  elif $attribute.key == "mors.event" then
+    ($attribute | string_value) and
+    ($attribute.value.stringValue | member(["telemetry_test", "health_snapshot", "connection_health", "vless_event"]))
+  elif $attribute.key == "mors.lifecycle.state" then
+    ($attribute | string_value) and
+    ($attribute.value.stringValue | member(["unconfigured", "ready", "recovery_required", "unknown"]))
+  elif $attribute.key == "mors.vless.state" then
+    ($attribute | string_value) and
+    ($attribute.value.stringValue | member(["unconfigured", "starting", "healthy", "degraded", "unavailable", "direct_fallback", "paused", "unknown"]))
+  elif $attribute.key == "mors.vless.upstream_state" then
+    ($attribute | string_value) and ($attribute.value.stringValue | member(["up", "down", "unknown"]))
+  elif ($attribute.key | member(["mors.vless.active_id", "mors.connection.id", "mors.vless.from_id", "mors.vless.to_id"])) then
+    ($attribute | string_value) and ($attribute.value.stringValue | safe_id)
+  elif $attribute.key == "mors.connection.status" then
+    ($attribute | string_value) and
+    ($attribute.value.stringValue | member(["checking", "active", "standby", "unstable", "unavailable", "disabled", "draining", "unknown"]))
+  elif $attribute.key == "mors.vless.event_type" then
+    ($attribute | string_value) and
+    ($attribute.value.stringValue | member(["switch", "cycle", "all_unavailable", "pause", "resume"]))
+  elif $attribute.key == "mors.vless.reason" then
+    ($attribute | string_value) and
+    ($attribute.value.stringValue | member(["sticky_restore_failed", "concurrent_change", "health_failure", "api_override_failed", "direct_fallback", "fail_closed", "manual_disable", "manual", "manual_remove"]))
+  elif $attribute.key == "mors.vless.result" then
+    ($attribute | string_value) and ($attribute.value.stringValue | member(["ok", "error", "aborted"]))
+  elif $attribute.key == "mors.vless.event_at" then
+    ($attribute | string_value) and
+    ($attribute.value.stringValue | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+  elif ($attribute.key | member([
+      "mors.vless.cycle", "mors.vless.enabled_count", "mors.vless.standby_count",
+      "mors.vless.unavailable_count", "mors.tunnel.rx_bytes", "mors.tunnel.tx_bytes",
+      "mors.firewall.rule_match_packets", "mors.firewall.rule_match_bytes",
+      "mors.connection.consecutive_failures", "mors.connection.recent_failures",
+      "mors.connection.latency_ms"
+    ])) then
+    ($attribute | int_value)
+  elif ($attribute.key | member([
+      "mors.vless.supervisor_alive", "mors.xray.alive",
+      "mors.tunnel.interface_counters_available", "mors.firewall.counters_available",
+      "mors.connection.enabled"
+    ])) then
+    ($attribute | bool_value)
+  else false end;
+def valid_resource_attribute($service; $instance):
+  type == "object" and exact_keys(["key", "value"]) and . as $attribute |
+  if $attribute.key == "service.name" then
+    ($attribute | string_value) and $attribute.value.stringValue == $service
+  elif $attribute.key == "service.version" then
+    ($attribute | string_value) and
+    ($attribute.value.stringValue |
+      test("^(unknown|[0-9]+[.][0-9]+[.][0-9]+(~(alpha|beta|rc)[0-9]+)?)-(unknown|[0-9]+)$"))
+  elif $attribute.key == "service.instance.id" then
+    ($attribute | string_value) and ($attribute.value.stringValue | safe_instance) and
+    $attribute.value.stringValue == $instance
+  elif $attribute.key == "telemetry.sdk.name" then
+    ($attribute | string_value) and $attribute.value.stringValue == "mors"
+  else false end;
+def valid_record($instance):
+  type == "object" and
+  exact_keys(["timeUnixNano", "observedTimeUnixNano", "severityNumber", "severityText", "body", "attributes"]) and
+  (.timeUnixNano | type == "string" and test("^[0-9]{19}$")) and
+  .observedTimeUnixNano == .timeUnixNano and
+  ((.severityNumber == 9 and .severityText == "INFO") or (.severityNumber == 17 and .severityText == "ERROR")) and
+  (.body | type == "object" and exact_keys(["stringValue"])) and
+  (.attributes | type == "array" and length > 0 and all(.[]; valid_attribute) and
+    ([.[].key] | length == (unique | length))) and
+  ([.attributes[] | select(.key == "mors.event.id")] | length == 1) and
+  ([.attributes[] | select(.key == "mors.event")] | length == 1) and
+  (.body.stringValue as $body |
+    ([.attributes[] | select(.key == "mors.event")][0].value.stringValue) as $event |
+    ([.attributes[] | select(.key == "mors.event.id")][0].value.stringValue) as $event_id |
+    (($body == "Проверка доставки телеметрии Mors" and $event == "telemetry_test" and
+      ($event_id | test("^" + $instance + ":[0-9]{19}:test:summary$"))) or
+     ($body == "Состояние Mors" and $event == "health_snapshot" and
+      ($event_id | test("^" + $instance + ":[0-9]{19}:snapshot:summary$"))) or
+     ($body == "Состояние соединения Mors" and $event == "connection_health" and
+      ($event_id | test("^" + $instance + ":[0-9]{19}:connection:[0-9]+-[0-9]+$"))) or
+     ($body == "Событие VLESS" and $event == "vless_event" and
+      ($event_id | test("^" + $instance + ":[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z:(switch|cycle|all_unavailable|pause|resume):[0-9]+-[0-9]+$")))));
+def valid_resource_log($service; $instance):
+  type == "object" and exact_keys(["resource", "scopeLogs"]) and
+  (.resource | type == "object" and exact_keys(["attributes"]) and
+    (.attributes | type == "array" and length == 4 and all(.[]; valid_resource_attribute($service; $instance)) and
+      ([.[].key] | sort == ["service.instance.id", "service.name", "service.version", "telemetry.sdk.name"]))) and
+  (.scopeLogs | type == "array" and length == 1 and all(.[];
+    type == "object" and exact_keys(["scope", "logRecords"]) and
+    (.scope | type == "object" and exact_keys(["name", "version"]) and
+      .name == "mors.telemetry" and .version == "1") and
+    (.logRecords | type == "array" and length > 0 and all(.[]; valid_record($instance)))));
+def payload_valid($service; $instance):
+  type == "object" and exact_keys(["resourceLogs"]) and
+  ($service | safe_ascii(64)) and ($instance | safe_instance) and
+  (.resourceLogs | type == "array" and length > 0 and all(.[]; valid_resource_log($service; $instance)));
+JQ
+}
+
+telemetry_store__payload_valid() {
+	local payload=${1} maximum=${2:-${TELEMETRY_PAYLOAD_BYTE_LIMIT}} size schema service instance
+	[ -s "${payload}" ] || return 1
+	size=$(wc -c <"${payload}" 2>/dev/null | tr -d ' ') || return 1
+	case "${size}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "${size}" -le "${maximum}" ] || return 1
+	telemetry_store__config_valid || return 1
+	service=$("${TELEMETRY_JQ}" -r '.service' "${TELEMETRY_CONFIG_FILE}") || return 1
+	instance=$("${TELEMETRY_JQ}" -r '.instance_id' "${TELEMETRY_CONFIG_FILE}") || return 1
+	schema=$(telemetry_store__payload_schema) || return 1
+	"${TELEMETRY_JQ}" -e --arg expected_service "${service}" --arg expected_instance "${instance}" \
+		"${schema} payload_valid(\$expected_service; \$expected_instance)" \
+		"${payload}" >/dev/null 2>&1
+}
+
+telemetry_store__queue_bound() {
+	local source=${1} destination=${2} line_count byte_count skip
+	line_count=$(wc -l <"${source}" 2>/dev/null | tr -d ' ') || return 1
+	byte_count=$(wc -c <"${source}" 2>/dev/null | tr -d ' ') || return 1
+	case "${line_count}:${byte_count}" in
+		*[!0-9:]*) return 1 ;;
+	esac
+	skip=$((line_count - TELEMETRY_QUEUE_LIMIT))
+	[ "${skip}" -ge 0 ] || skip=0
+	LC_ALL=C awk -v skip="${skip}" -v total="${byte_count}" \
+		-v max_bytes="${TELEMETRY_QUEUE_BYTE_LIMIT}" '
+		{
+			size = length($0) + 1
+			if (NR <= skip || total > max_bytes) {
+				total -= size
+				next
+			}
+			print
+		}
+	' "${source}" >"${destination}"
+}
+
+telemetry_store__payload_recent() {
+	local payload=${1} now=${2:-} timestamp seconds minimum maximum
+	[ -n "${now}" ] || now=$(telemetry_store__now_seconds)
+	timestamp=$("${TELEMETRY_JQ}" -r '.resourceLogs[0].scopeLogs[0].logRecords[0].timeUnixNano // empty' "${payload}" 2>/dev/null) || return 1
+	case "${timestamp}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "${#timestamp}" -eq 19 ] || return 1
+	seconds=$(printf '%.10s' "${timestamp}")
+	minimum=$((now - TELEMETRY_MAX_AGE_SECONDS))
+	maximum=$((now + TELEMETRY_FUTURE_GRACE_SECONDS))
+	[ "${seconds}" -ge "${minimum}" ] && [ "${seconds}" -le "${maximum}" ]
+}
+
+telemetry_store__queue_sanitize() {
+	local now minimum maximum schema staged limited persistent_temporary service instance
+	telemetry_store__ensure_directories || return 1
+	telemetry_store__config_valid || return 1
+	[ -e "${TELEMETRY_QUEUE_FILE}" ] || return 0
+	[ -f "${TELEMETRY_QUEUE_FILE}" ] && [ ! -L "${TELEMETRY_QUEUE_FILE}" ] || return 1
+	if [ ! -s "${TELEMETRY_QUEUE_FILE}" ]; then
+		rm -f "${TELEMETRY_QUEUE_FILE}"
+		return $?
+	fi
+	now=$(telemetry_store__now_seconds) || return 1
+	minimum=$((now - TELEMETRY_MAX_AGE_SECONDS))
+	maximum=$((now + TELEMETRY_FUTURE_GRACE_SECONDS))
+	staged="${TELEMETRY_STATE_ROOT}/queue-clean.$$"
+	limited="${TELEMETRY_STATE_ROOT}/queue-limited.$$"
+	persistent_temporary="${TELEMETRY_QUEUE_FILE}.tmp.$$"
+	schema=$(telemetry_store__payload_schema) || return 1
+	service=$("${TELEMETRY_JQ}" -r '.service' "${TELEMETRY_CONFIG_FILE}") || return 1
+	instance=$("${TELEMETRY_JQ}" -r '.instance_id' "${TELEMETRY_CONFIG_FILE}") || return 1
+	umask 077
+	"${TELEMETRY_JQ}" -Rrc \
+		--arg expected_service "${service}" --arg expected_instance "${instance}" \
+		--argjson minimum "${minimum}" --argjson maximum "${maximum}" \
+		"${schema}
+		fromjson? | select(payload_valid(\$expected_service; \$expected_instance)) |
+		.resourceLogs[0].scopeLogs[0].logRecords[0].timeUnixNano as \$timestamp |
+		(\$timestamp[0:10] | tonumber) as \$seconds |
+		select(\$seconds >= \$minimum and \$seconds <= \$maximum)" \
+		"${TELEMETRY_QUEUE_FILE}" >"${staged}" || {
+		rm -f "${staged}" "${limited}"
+		return 1
+	}
+	telemetry_store__queue_bound "${staged}" "${limited}" || {
+		rm -f "${staged}" "${limited}"
+		return 1
+	}
+	if cmp -s "${limited}" "${TELEMETRY_QUEUE_FILE}"; then
+		rm -f "${staged}" "${limited}"
+		return 0
+	fi
+	if [ ! -s "${limited}" ]; then
+		rm -f "${TELEMETRY_QUEUE_FILE}" "${staged}" "${limited}"
+		return $?
+	fi
+	cat "${limited}" >"${persistent_temporary}" || {
+		rm -f "${persistent_temporary}" "${staged}" "${limited}"
+		return 1
+	}
+	chmod 600 "${persistent_temporary}" || {
+		rm -f "${persistent_temporary}" "${staged}" "${limited}"
+		return 1
+	}
+	mv -f "${persistent_temporary}" "${TELEMETRY_QUEUE_FILE}" || {
+		rm -f "${persistent_temporary}" "${staged}" "${limited}"
+		return 1
+	}
+	rm -f "${staged}" "${limited}"
+}
+
+telemetry_store__queue_depth() {
+	if [ ! -s "${TELEMETRY_QUEUE_FILE}" ]; then
+		printf '%s\n' 0
+		return 0
+	fi
+	wc -l <"${TELEMETRY_QUEUE_FILE}" | tr -d ' '
+}
+
+telemetry_store__queue_enqueue() {
+	local payload=${1} compact current_lines=0 current_bytes=0 payload_bytes created=false
+	TELEMETRY_QUEUE_DROPPED=false
+	export TELEMETRY_QUEUE_DROPPED
+	telemetry_store__payload_valid "${payload}" || return 1
+	telemetry_store__payload_recent "${payload}" || return 1
+	telemetry_store__ensure_directories || return 1
+	[ ! -L "${TELEMETRY_QUEUE_FILE}" ] || return 1
+	[ ! -e "${TELEMETRY_QUEUE_FILE}" ] || [ -f "${TELEMETRY_QUEUE_FILE}" ] || return 1
+	compact="${TELEMETRY_STATE_ROOT}/queue-enqueue.$$"
+	umask 077
+	"${TELEMETRY_JQ}" -c . "${payload}" >"${compact}" || return 1
+	payload_bytes=$(wc -c <"${compact}" 2>/dev/null | tr -d ' ') || {
+		rm -f "${compact}"
+		return 1
+	}
+	if [ -s "${TELEMETRY_QUEUE_FILE}" ]; then
+		current_lines=$(wc -l <"${TELEMETRY_QUEUE_FILE}" 2>/dev/null | tr -d ' ') || return 1
+		current_bytes=$(wc -c <"${TELEMETRY_QUEUE_FILE}" 2>/dev/null | tr -d ' ') || return 1
+	else
+		created=true
+	fi
+	case "${current_lines}:${current_bytes}:${payload_bytes}" in *[!0-9:]*) rm -f "${compact}"; return 1 ;; esac
+	if [ $((current_lines + 1)) -gt "${TELEMETRY_QUEUE_LIMIT}" ] || \
+		[ $((current_bytes + payload_bytes)) -gt "${TELEMETRY_QUEUE_BYTE_LIMIT}" ]; then
+		TELEMETRY_QUEUE_DROPPED=true
+		export TELEMETRY_QUEUE_DROPPED
+		rm -f "${compact}"
+		return 0
+	fi
+	cat "${compact}" >>"${TELEMETRY_QUEUE_FILE}" || {
+		rm -f "${compact}"
+		return 1
+	}
+	rm -f "${compact}"
+	if [ "${created}" = true ] || ! telemetry_store__mode_is "${TELEMETRY_QUEUE_FILE}" 600; then
+		chmod 600 "${TELEMETRY_QUEUE_FILE}" || return 1
+	fi
+}
+
+telemetry_store__queue_batch() {
+	local destination=${1} lines selected
+	lines=$(telemetry_store__queue_depth) || return 1
+	[ "${lines}" -gt 0 ] || return 1
+	selected="${TELEMETRY_STATE_ROOT}/queue-batch-lines.$$"
+	LC_ALL=C awk -v max_lines="${TELEMETRY_QUEUE_BATCH_LIMIT}" \
+		-v max_bytes="${TELEMETRY_BATCH_BYTE_LIMIT}" '
+		{
+			size = length($0) + 1
+			if (count >= max_lines || total + size > max_bytes) exit
+			print
+			total += size
+			count++
+		}
+	' "${TELEMETRY_QUEUE_FILE}" >"${selected}" || return 1
+	lines=$(wc -l <"${selected}" | tr -d ' ') || {
+		rm -f "${selected}"
+		return 1
+	}
+	[ "${lines}" -gt 0 ] || {
+		rm -f "${selected}"
+		return 1
+	}
+	"${TELEMETRY_JQ}" -cs '{resourceLogs: [.[].resourceLogs[]]}' "${selected}" >"${destination}" || {
+		rm -f "${selected}"
+		return 1
+	}
+	rm -f "${selected}"
+	chmod 600 "${destination}" || return 1
+	telemetry_store__payload_valid "${destination}" "${TELEMETRY_BATCH_BYTE_LIMIT}" || return 1
+	TELEMETRY_QUEUE_BATCH_COUNT=${lines}
+	export TELEMETRY_QUEUE_BATCH_COUNT
+}
+
+telemetry_store__queue_ack() {
+	local count=${1} temporary
+	case "${count}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "${count}" -gt 0 ] || return 1
+	[ -f "${TELEMETRY_QUEUE_FILE}" ] && [ ! -L "${TELEMETRY_QUEUE_FILE}" ] || return 1
+	temporary="${TELEMETRY_QUEUE_FILE}.ack.$$"
+	sed "1,${count}d" "${TELEMETRY_QUEUE_FILE}" >"${temporary}" || return 1
+	chmod 600 "${temporary}" || return 1
+	mv -f "${temporary}" "${TELEMETRY_QUEUE_FILE}" || return 1
+	[ -s "${TELEMETRY_QUEUE_FILE}" ] || rm -f "${TELEMETRY_QUEUE_FILE}"
+}
+
+telemetry_store__state_valid() {
+	[ -f "${TELEMETRY_STATE_FILE}" ] && [ ! -L "${TELEMETRY_STATE_FILE}" ] || return 1
+	"${TELEMETRY_JQ}" -e --argjson queue_limit "${TELEMETRY_QUEUE_LIMIT}" '
+		def exact_keys($expected): (keys | sort) == ($expected | sort);
+		def timestamp: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
+		def allowed_error:
+			. == null or . == "dns" or . == "timeout" or . == "tls" or . == "transport" or
+			. == "http_4xx" or . == "http_5xx" or . == "partial_reject" or
+			. == "invalid_response" or . == "invalid_payload" or . == "invalid_config" or
+			. == "queue_invalid" or . == "queue_write_failed" or . == "queue_ack_failed";
+		type == "object" and
+		exact_keys(["schema_version", "last_attempt_at", "last_success_at", "last_error", "last_http_code", "queue_depth", "queue_overflow", "dropped_samples"]) and
+		.schema_version == 1 and
+		(.last_attempt_at | timestamp) and
+		(.last_success_at == null or (.last_success_at | timestamp)) and
+		(.last_error | allowed_error) and
+		(.last_http_code == null or
+			(.last_http_code | type == "number" and floor == . and . >= 100 and . <= 599)) and
+		(.queue_depth | type == "number" and floor == . and . >= 0 and . <= $queue_limit) and
+		(.queue_overflow | type == "boolean") and
+		(.dropped_samples | type == "number" and floor == . and . >= 0 and . <= 9007199254740991)
+	' "${TELEMETRY_STATE_FILE}" >/dev/null 2>&1
+}
+
+telemetry_store__state_write() {
+	local success=${1} error=${2:-} http_code=${3:-null} overflow=${4:-false}
+	local queue_depth now previous_success previous_overflow=false previous_dropped=0
+	[ "${success}" = true ] || [ "${success}" = false ] || return 1
+	[ "${overflow}" = true ] || [ "${overflow}" = false ] || return 1
+	case "${error}" in
+		''|dns|timeout|tls|transport|http_4xx|http_5xx|partial_reject|invalid_response|invalid_payload|invalid_config|queue_invalid|queue_write_failed|queue_ack_failed) ;;
+		*) return 1 ;;
+	esac
+	case "${http_code}" in null) ;; ''|*[!0-9]*) return 1 ;; *) [ "${http_code}" -ge 100 ] && [ "${http_code}" -le 599 ] || return 1 ;; esac
+	queue_depth=$(telemetry_store__queue_depth 2>/dev/null || printf 0)
+	case "${queue_depth}" in ''|*[!0-9]*) return 1 ;; esac
+	[ "${queue_depth}" -le "${TELEMETRY_QUEUE_LIMIT}" ] || return 1
+	now=$(telemetry_store__now) || return 1
+	previous_success=null
+	if telemetry_store__state_valid; then
+		previous_success=$("${TELEMETRY_JQ}" -c '.last_success_at' "${TELEMETRY_STATE_FILE}") || previous_success=null
+		previous_overflow=$("${TELEMETRY_JQ}" -r '.queue_overflow' "${TELEMETRY_STATE_FILE}") || previous_overflow=false
+		previous_dropped=$("${TELEMETRY_JQ}" -r '.dropped_samples' "${TELEMETRY_STATE_FILE}") || previous_dropped=0
+	fi
+	telemetry_store__ensure_directories || return 1
+	"${TELEMETRY_JQ}" -n \
+		--arg now "${now}" \
+		--arg error "${error}" \
+		--argjson success "${success}" \
+		--argjson previous_success "${previous_success}" \
+		--argjson previous_overflow "${previous_overflow}" \
+		--argjson previous_dropped "${previous_dropped}" \
+		--argjson http_code "${http_code:-null}" \
+		--argjson queue_depth "${queue_depth}" \
+		--argjson overflow "${overflow}" '{
+			schema_version: 1,
+			last_attempt_at: $now,
+			last_success_at: (if $success then $now else $previous_success end),
+			last_error: (if $error == "" then null else $error end),
+			last_http_code: $http_code,
+			queue_depth: $queue_depth,
+			queue_overflow: ($previous_overflow or $overflow),
+			dropped_samples: (
+				if $overflow and $previous_dropped < 9007199254740991
+				then $previous_dropped + 1
+				else $previous_dropped
+				end
+			)
+		}' | telemetry_store__atomic_from_stdin "${TELEMETRY_STATE_FILE}" 600
+}
+
+telemetry_store__purge() {
+	local status=0 path
+	for path in "${TELEMETRY_CONFIG_ROOT}" "${TELEMETRY_STATE_ROOT}" "${TELEMETRY_DATA_ROOT}"; do
+		[ ! -L "${path}" ] || return 1
+	done
+	rm -f "${TELEMETRY_CONFIG_FILE}" "${TELEMETRY_KEY_FILE}" \
+		"${TELEMETRY_CURL_CONFIG}" "${TELEMETRY_CURSOR_FILE}" \
+		"${TELEMETRY_QUEUE_FILE}" "${TELEMETRY_STATE_FILE}" || status=1
+	for path in "${TELEMETRY_CONFIG_FILE}" "${TELEMETRY_KEY_FILE}" \
+		"${TELEMETRY_CURL_CONFIG}" "${TELEMETRY_CURSOR_FILE}" \
+		"${TELEMETRY_QUEUE_FILE}" "${TELEMETRY_STATE_FILE}"; do
+		[ ! -e "${path}" ] && [ ! -L "${path}" ] || status=1
+	done
+	rmdir "${TELEMETRY_STATE_ROOT}" "${TELEMETRY_DATA_ROOT}" \
+		"${TELEMETRY_CONFIG_ROOT}" 2>/dev/null || true
+	return "${status}"
+}

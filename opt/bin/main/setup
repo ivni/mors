@@ -1,4 +1,6 @@
 #!/bin/sh
+. /opt/apps/mors/bin/libs/telemetry_runtime
+telemetry_runtime__pin_production
 . /opt/apps/mors/bin/libs/main
 . /opt/apps/mors/bin/libs/vpn
 . /opt/apps/mors/bin/libs/vless
@@ -7,6 +9,7 @@
 . /opt/apps/mors/bin/libs/lifecycle_snapshot
 . /opt/apps/mors/bin/libs/setup_plan
 . /opt/apps/mors/bin/libs/runtime_lock
+. /opt/apps/mors/bin/libs/telemetry
 
 # В случае проблем с инсталляцией пакета ставим в значение true
 ANSWER_AGH=n
@@ -854,6 +857,15 @@ setup__cmd_uninstall_unlocked() {
 		echo "${mess}"
 
 		list__backup
+		telemetry_lifecycle__deactivate "$([ "${rm_type}" = full ] && printf true || printf false)"
+		telemetry_status=$?
+		if [ "${telemetry_status}" -ne 0 ]; then
+			case "${telemetry_status}" in
+				4) error 'Удаление остановлено: путь S98mors-telemetry не принадлежит Mors. Переместите его вручную и повторите удаление.' ;;
+				*) error 'Удаление остановлено: telemetry sender не завершился или его состояние повреждено.' ;;
+			esac
+			return 1
+		fi
 
 		if has_ssr_enable ; then
 			ready 'Останавливаем службу Shadowsocks '
@@ -996,6 +1008,7 @@ setup__verify_runtime_removed() {
 		/opt/etc/cron.5mins/check_vpn; do
 		[ ! -e "${path}" ] && [ ! -L "${path}" ] || return 1
 	done
+	telemetry_lifecycle__passive_runtime_removed
 }
 
 setup__activate_core_hooks() {

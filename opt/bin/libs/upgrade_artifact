@@ -1,0 +1,55 @@
+#!/bin/sh
+
+# Return the digest of exactly the bytes that were verified against the
+# adjacent sidecar. Callers retain it as the immutable prepared-plan
+# fingerprint before copying an artifact into the protected transaction tree.
+upgrade_artifact__verified_digest() {
+	local artifact=${1} digest_file expected actual
+	digest_file=${artifact}.sha256
+	[ -f "${artifact}" ] && [ ! -L "${artifact}" ] || return 1
+	[ -f "${digest_file}" ] && [ ! -L "${digest_file}" ] || return 1
+	expected=$(awk 'NR == 1 {print $1}' "${digest_file}") || return 1
+	printf '%s\n' "${expected}" | grep -Eq '^[0-9a-fA-F]{64}$' || return 1
+	actual=$(sha256sum "${artifact}" | awk '{print $1}') || return 1
+	[ "${actual}" = "${expected}" ] || return 1
+	printf '%s\n' "${actual}"
+}
+
+# Copy both installation directions and their sidecars into the protected
+# snapshot, then bind the copies to fingerprints captured before the lifecycle
+# transaction. Only these staged paths may be passed to opkg.
+upgrade_artifact__stage_pair() {
+	local candidate=${1} rollback=${2} snapshot=${3}
+	local candidate_fingerprint=${4} rollback_fingerprint=${5}
+	local staged_candidate staged_rollback actual path fingerprint
+	for fingerprint in "${candidate_fingerprint}" "${rollback_fingerprint}"; do
+		printf '%s\n' "${fingerprint}" | grep -Eq '^[0-9a-f]{64}$' || return 1
+	done
+	[ -d "${snapshot}" ] && [ ! -L "${snapshot}" ] || return 1
+	staged_candidate=${snapshot}/candidate.ipk
+	staged_rollback=${snapshot}/rollback.ipk
+	for path in "${staged_candidate}" "${staged_candidate}.sha256" \
+		"${staged_rollback}" "${staged_rollback}.sha256"; do
+		[ ! -e "${path}" ] && [ ! -L "${path}" ] || return 1
+	done
+	if ! cp -p "${candidate}" "${staged_candidate}" || \
+		! cp -p "${candidate}.sha256" "${staged_candidate}.sha256" || \
+		! cp -p "${rollback}" "${staged_rollback}" || \
+		! cp -p "${rollback}.sha256" "${staged_rollback}.sha256"; then
+		rm -f "${staged_candidate}" "${staged_candidate}.sha256" \
+			"${staged_rollback}" "${staged_rollback}.sha256"
+		return 1
+	fi
+	actual=$(upgrade_artifact__verified_digest "${staged_candidate}") || actual=''
+	if [ "${actual}" != "${candidate_fingerprint}" ]; then
+		rm -f "${staged_candidate}" "${staged_candidate}.sha256" \
+			"${staged_rollback}" "${staged_rollback}.sha256"
+		return 1
+	fi
+	actual=$(upgrade_artifact__verified_digest "${staged_rollback}") || actual=''
+	if [ "${actual}" != "${rollback_fingerprint}" ]; then
+		rm -f "${staged_candidate}" "${staged_candidate}.sha256" \
+			"${staged_rollback}" "${staged_rollback}.sha256"
+		return 1
+	fi
+}

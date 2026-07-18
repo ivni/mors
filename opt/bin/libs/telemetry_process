@@ -1,0 +1,138 @@
+#!/bin/sh
+
+TELEMETRY_SENDER_PROGRAM=${TELEMETRY_SENDER_PROGRAM:-/opt/apps/mors/bin/main/telemetry-sender}
+TELEMETRY_SENDER_ARGUMENT=${TELEMETRY_SENDER_ARGUMENT:-run}
+TELEMETRY_PROCESS_ROOT=${TELEMETRY_PROCESS_ROOT:-/proc}
+TELEMETRY_PID_FILE=${TELEMETRY_PID_FILE:-/opt/var/run/mors/telemetry/sender.pid}
+TELEMETRY_PROCESS_LOCK_DIR=${TELEMETRY_PROCESS_LOCK_DIR:-/opt/var/run/mors/telemetry/sender.lock}
+TELEMETRY_PROCESS_LOCK_GRACE=${TELEMETRY_PROCESS_LOCK_GRACE:-5}
+
+telemetry_process__read_pid() {
+	local file=${TELEMETRY_PID_FILE} pid
+	[ -f "${file}" ] && [ ! -L "${file}" ] || return 1
+	pid=$(tr -d '\r\n' <"${file}") || return 1
+	case "${pid}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "${pid}" -gt 1 ] || return 1
+	printf '%s\n' "${pid}"
+}
+
+telemetry_process__process_start() {
+	[ -r "${TELEMETRY_PROCESS_ROOT}/${1}/stat" ] || return 1
+	awk '{ print $22 }' "${TELEMETRY_PROCESS_ROOT}/${1}/stat" 2>/dev/null
+}
+
+telemetry_process__pid_is_sender() {
+	local pid=${1} cmdline first second third fourth
+	case "${pid}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	cmdline="${TELEMETRY_PROCESS_ROOT}/${pid}/cmdline"
+	[ -r "${cmdline}" ] || return 1
+	first=$(tr '\000' '\n' <"${cmdline}" | sed -n '1p')
+	second=$(tr '\000' '\n' <"${cmdline}" | sed -n '2p')
+	third=$(tr '\000' '\n' <"${cmdline}" | sed -n '3p')
+	fourth=$(tr '\000' '\n' <"${cmdline}" | sed -n '4p')
+	if [ "${first}" = "${TELEMETRY_SENDER_PROGRAM}" ]; then
+		[ "${second}" = "${TELEMETRY_SENDER_ARGUMENT}" ] && [ -z "${third}" ]
+		return $?
+	fi
+	case "${first}" in
+		*/sh|*/ash|*/dash|*/bash) ;;
+		*) return 1 ;;
+	esac
+	[ "${second}" = "${TELEMETRY_SENDER_PROGRAM}" ] && \
+		[ "${third}" = "${TELEMETRY_SENDER_ARGUMENT}" ] && [ -z "${fourth}" ]
+}
+
+telemetry_process__running_pid() {
+	local pid lock_pid stored_start current_start
+	pid=$(telemetry_process__read_pid) || return 1
+	lock_pid=$(tr -d '\r\n' <"${TELEMETRY_PROCESS_LOCK_DIR}/pid" 2>/dev/null) || return 1
+	[ "${lock_pid}" = "${pid}" ] || return 1
+	stored_start=$(tr -d '\r\n' <"${TELEMETRY_PROCESS_LOCK_DIR}/owner_start" 2>/dev/null) || return 1
+	[ -n "${stored_start}" ] || return 1
+	current_start=$(telemetry_process__process_start "${pid}") || return 1
+	[ "${current_start}" = "${stored_start}" ] || return 1
+	telemetry_process__pid_is_sender "${pid}" || return 1
+	printf '%s\n' "${pid}"
+}
+
+telemetry_process__lock_is_fresh() {
+	local modified now age
+	[ -d "${TELEMETRY_PROCESS_LOCK_DIR}" ] || return 1
+	modified=$(stat -c '%Y' "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null) || return 0
+	now=$(date -u '+%s') || return 0
+	age=$((now - modified))
+	[ "${age}" -lt "${TELEMETRY_PROCESS_LOCK_GRACE}" ]
+}
+
+telemetry_process__cleanup_stale() {
+	local pid=''
+	[ ! -L "${TELEMETRY_PROCESS_LOCK_DIR}" ] || return 1
+	pid=$(telemetry_process__read_pid 2>/dev/null || true)
+	if [ -n "${pid}" ] && telemetry_process__pid_is_sender "${pid}"; then
+		return 1
+	fi
+	if [ -z "${pid}" ] && telemetry_process__lock_is_fresh; then
+		return 1
+	fi
+	rm -f "${TELEMETRY_PID_FILE}" "${TELEMETRY_PROCESS_LOCK_DIR}/pid" \
+		"${TELEMETRY_PROCESS_LOCK_DIR}/owner_start"
+	if [ -d "${TELEMETRY_PROCESS_LOCK_DIR}" ]; then
+		rmdir "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null || return 1
+	elif [ -e "${TELEMETRY_PROCESS_LOCK_DIR}" ] || [ -L "${TELEMETRY_PROCESS_LOCK_DIR}" ]; then
+		return 1
+	fi
+}
+
+telemetry_process__acquire() {
+	local parent acquired=false owner_start pid_temporary
+	parent=$(dirname "${TELEMETRY_PID_FILE}") || return 1
+	[ ! -L "${parent}" ] && [ ! -L "${TELEMETRY_PROCESS_LOCK_DIR}" ] || return 1
+	mkdir -p "${parent}" || return 1
+	chmod 700 "${parent}" || return 1
+	if ! mkdir "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null; then
+		telemetry_process__cleanup_stale || return 1
+		mkdir "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null || return 1
+	fi
+	acquired=true
+	if [ -e "${TELEMETRY_PID_FILE}" ] || [ -L "${TELEMETRY_PID_FILE}" ]; then
+		rmdir "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null || true
+		return 1
+	fi
+	owner_start=$(telemetry_process__process_start "$$") || owner_start=''
+	[ -n "${owner_start}" ] || {
+		rmdir "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null || true
+		return 1
+	}
+	umask 077
+	pid_temporary="${TELEMETRY_PID_FILE}.tmp.$$"
+	[ ! -e "${pid_temporary}" ] && [ ! -L "${pid_temporary}" ] || {
+		rmdir "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null || true
+		return 1
+	}
+	printf '%s\n' "${owner_start}" >"${TELEMETRY_PROCESS_LOCK_DIR}/owner_start" &&
+		chmod 600 "${TELEMETRY_PROCESS_LOCK_DIR}/owner_start" &&
+		printf '%s\n' "$$" >"${TELEMETRY_PROCESS_LOCK_DIR}/pid" &&
+		chmod 600 "${TELEMETRY_PROCESS_LOCK_DIR}/pid" &&
+		printf '%s\n' "$$" >"${pid_temporary}" &&
+		chmod 600 "${pid_temporary}" &&
+		mv -f "${pid_temporary}" "${TELEMETRY_PID_FILE}" && return 0
+	[ "${acquired}" = false ] || {
+		rm -f "${pid_temporary}" "${TELEMETRY_PID_FILE}" "${TELEMETRY_PROCESS_LOCK_DIR}/pid" \
+			"${TELEMETRY_PROCESS_LOCK_DIR}/owner_start"
+		rmdir "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null || true
+	}
+	return 1
+}
+
+telemetry_process__release() {
+	local owner=''
+	[ -r "${TELEMETRY_PROCESS_LOCK_DIR}/pid" ] && owner=$(tr -d '\r\n' <"${TELEMETRY_PROCESS_LOCK_DIR}/pid")
+	[ "${owner}" = "$$" ] || return 1
+	rm -f "${TELEMETRY_PID_FILE}" "${TELEMETRY_PROCESS_LOCK_DIR}/pid" \
+		"${TELEMETRY_PROCESS_LOCK_DIR}/owner_start"
+	rmdir "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null || true
+}

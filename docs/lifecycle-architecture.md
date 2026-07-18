@@ -168,9 +168,13 @@ Upgrade использует in-place установку IPK. До вызова 
 - список активированных hooks;
 - затрагиваемое runtime-состояние.
 
-Artifact проверяется по опубликованному digest до lifecycle mutation. После
+Candidate и rollback проверяются по опубликованным digest до lifecycle mutation.
+Затем оба IPK вместе с sidecar копируются в защищённый transaction snapshot,
+повторно проверяются против первоначальных fingerprint и классифицируются уже
+из snapshot. `opkg` получает только эти immutable staged paths, поэтому подмена
+исходного файла после prepare не меняет фактически установленный пакет. После
 upgrade выполняются migration и health verification. Ошибка запускает rollback
-на подготовленный artifact и snapshot.
+только на staged artifact и snapshot.
 
 После `opkg install` updater повторно загружает библиотеки установленного IPK,
 выполняет migrations, обновляет активные копии hooks, перезапускает runtime и
@@ -182,6 +186,9 @@ artifact и rollback, но сохраняет target `unconfigured`: hooks и с
 Rollback также ветвится по `previous_state` и не пытается запускать runtime,
 которого до операции не было. Runtime-миграции VLESS откладываются до
 подтверждённого `setup`: пассивное обновление не создаёт Xray-конфигурацию.
+Passive verifier запрещает managed telemetry hook и живой валидный sender, но
+разрешает внешний operator-owned `S98mors-telemetry`, не исполняя и не изменяя
+его.
 Явный rollback и аварийное восстановление используют проверенный rollback IPK с
 `opkg --force-downgrade`, поскольку SemVer-цель штатно может быть старше
 установленного пакета. При повторном recovery пассивный runtime проверяется до

@@ -85,7 +85,7 @@ Smoke job собирает пакет, загружает его в `/opt/tmp/mo
 состоянием непосредственно после установки. Используйте его только на
 disposable или специально подготовленном тестовом Keenetic.
 
-Для `1.3.0~beta5` отсутствие такого стенда не блокирует beta, но должно быть явно указано при публикации. До стабильного релиза на авторизованном роутере необходимо проверить:
+Для `1.3.0~beta6` отсутствие такого стенда не блокирует beta, но должно быть явно указано при публикации. До стабильного релиза на авторизованном роутере необходимо проверить:
 
 - cold restart/restore для dnsmasq и Entware-managed AdGuard Home;
 - реальные `iptables` counters и conntrack correlation;
@@ -96,3 +96,7 @@ disposable или специально подготовленном тестов
 - recovery после SIGKILL и reboot;
 - client mode с DNS cache и private/external DNS;
 - install, upgrade и rollback IPK с prerelease-версией.
+- opt-in telemetry: успешную тестовую запись Monium, offline queue/recovery,
+  отсутствие full-file rewrite при длительной ошибке, stop/restart/reboot,
+  lifecycle snapshot/rollback, bounded CPU/RAM и неизменность routing/firewall
+  при ошибке облачного приёмника.
