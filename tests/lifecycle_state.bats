@@ -179,6 +179,29 @@ setup() {
 	[ "$(cat "${service_state}")" = running ]
 }
 
+@test "snapshot restore treats an already stopped service as restored" {
+	local service=${BATS_TEST_TMPDIR}/service
+	local stop_called=${BATS_TEST_TMPDIR}/stop.called
+	printf '%s\n' '#!/bin/sh' \
+		'case "$1" in' \
+		'status) echo dead; exit 1 ;;' \
+		'stop) : >"${STOP_CALLED}"; exit 1 ;;' \
+		'esac' >"${service}"
+	chmod +x "${service}"
+	export STOP_CALLED=${stop_called}
+	lifecycle_snapshot__files() { :; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { printf '%s\n' "${service}"; }
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	lifecycle_snapshot__capture
+
+	lifecycle_snapshot__restore
+
+	[ ! -e "${stop_called}" ]
+}
+
 @test "snapshot preserves symlinks and managed directories" {
 	local target=${BATS_TEST_TMPDIR}/target
 	local link=${BATS_TEST_TMPDIR}/link

@@ -96,6 +96,17 @@ upgrade__run_migrations() {
 	fi
 }
 
+upgrade__install_artifact() {
+	local operation artifact
+	operation=${1}
+	artifact=${2}
+	case "${operation}" in
+		upgrade) opkg install "${artifact}" ;;
+		rollback) opkg install --force-downgrade "${artifact}" ;;
+		*) return 64 ;;
+	esac
+}
+
 upgrade__restart_and_verify() {
 	upgrade__load_committed_plan || return 1
 	setup__activate_core_hooks || return 1
@@ -109,11 +120,15 @@ upgrade__restart_and_verify() {
 	setup__verify_committed
 }
 
-upgrade__verify_unconfigured() {
-	[ "$(lifecycle_state__read)" = unconfigured ] || return 1
+upgrade__verify_passive_runtime() {
 	/opt/bin/mors version >/dev/null 2>&1 || return 1
 	opkg status mors 2>/dev/null | grep -q '^Status: install .* installed$' || return 1
 	setup__verify_runtime_removed
+}
+
+upgrade__verify_unconfigured() {
+	[ "$(lifecycle_state__read)" = unconfigured ] || return 1
+	upgrade__verify_passive_runtime
 }
 
 upgrade__parse_apply() {
@@ -144,7 +159,7 @@ upgrade__rollback_failed_apply() {
 	local result previous_state
 	previous_state=$(jq -er '.previous_state' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
 	lifecycle_transaction__phase rolling_back || return 1
-	opkg install "${MORS_UPDATE_ROLLBACK}" >/dev/null 2>&1 || return 1
+	opkg install --force-downgrade "${MORS_UPDATE_ROLLBACK}" >/dev/null 2>&1 || return 1
 	upgrade__reload_installed_runtime || return 1
 	(
 		MORS_LIFECYCLE_APPLY=true
@@ -155,7 +170,7 @@ upgrade__rollback_failed_apply() {
 			cmd_mors_init no || exit 1
 			setup__verify_committed
 		else
-			upgrade__verify_unconfigured
+			upgrade__verify_passive_runtime
 		fi
 	) >/dev/null 2>&1 || return 1
 	lifecycle_transaction__rollback_finish
@@ -177,7 +192,7 @@ upgrade__restore_pre_apply() {
 			cmd_mors_init no || exit 1
 			setup__verify_committed
 		else
-			upgrade__verify_unconfigured
+			upgrade__verify_passive_runtime
 		fi
 	) >/dev/null 2>&1 || return 1
 	lifecycle_transaction__rollback_finish
@@ -216,9 +231,9 @@ upgrade__apply_locked() {
 		return 1
 	fi
 
-	if opkg install "${MORS_UPDATE_ARTIFACT}"; then
+	if upgrade__install_artifact "${operation}" "${MORS_UPDATE_ARTIFACT}"; then
 		upgrade__reload_installed_runtime || result=1
-		if [ "${result:-0}" -eq 0 ]; then
+		if [ "${result:-0}" -eq 0 ] && [ "${state}" = ready ]; then
 			upgrade__run_migrations || result=1
 		fi
 		if [ "${result:-0}" -eq 0 ]; then

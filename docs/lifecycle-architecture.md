@@ -170,7 +170,15 @@ upgrade выполняются migration и health verification. Ошибка з
 artifact и rollback, но сохраняет target `unconfigured`: hooks и сервисы не
 активируются, а commit требует подтверждённого отсутствия Mors dataplane.
 Rollback также ветвится по `previous_state` и не пытается запускать runtime,
-которого до операции не было.
+которого до операции не было. Runtime-миграции VLESS откладываются до
+подтверждённого `setup`: пассивное обновление не создаёт Xray-конфигурацию.
+Явный rollback и аварийное восстановление используют проверенный rollback IPK с
+`opkg --force-downgrade`, поскольку SemVer-цель штатно может быть старше
+установленного пакета. При повторном recovery пассивный runtime проверяется до
+commit journal без преждевременной смены `recovery_required`; stable-state
+возвращается в `unconfigured` только через `rollback_finish`. Восстановление
+service-state идемпотентно: уже остановленный Entware-сервис не получает
+повторный `stop`, чей ненулевой код не означает ошибку snapshot.
 
 Первое обновление с legacy-версии не имеет старого journal. Новый `preinst`
 создаёт bootstrap snapshot до замены файлов. Если старый IPK недоступен,

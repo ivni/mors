@@ -165,6 +165,12 @@ lifecycle_snapshot__restore_files() {
 	done <"${manifest}"
 }
 
+lifecycle_snapshot__service_is_stopped() {
+	local status_output
+	status_output=$("${1}" status 2>/dev/null || true)
+	printf '%s\n' "${status_output}" | grep -qiE 'dead|not[[:space:]]+running|stopped'
+}
+
 lifecycle_snapshot__restore_services() {
 	local snapshot services state path
 	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
@@ -177,7 +183,9 @@ lifecycle_snapshot__restore_services() {
 				"${path}" restart >/dev/null 2>&1 || return 1
 				;;
 			stopped)
-				[ ! -x "${path}" ] || "${path}" stop >/dev/null 2>&1 || return 1
+				if [ -x "${path}" ] && ! lifecycle_snapshot__service_is_stopped "${path}"; then
+					"${path}" stop >/dev/null 2>&1 || return 1
+				fi
 				;;
 			missing) ;;
 			*) return 1 ;;

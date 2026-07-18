@@ -71,7 +71,7 @@ setup() {
 	! grep -q 'mors uninstall' "${updater}"
 	grep -q 'upgrade__verify_artifact' "${updater}"
 	grep -q -- '--rollback-ipk' "${updater}"
-	grep -q 'opkg install "${MORS_UPDATE_ARTIFACT}"' "${updater}"
+	grep -q 'upgrade__install_artifact "${operation}" "${MORS_UPDATE_ARTIFACT}"' "${updater}"
 	grep -q 'upgrade__rollback_failed_apply' "${updater}"
 	grep -q 'upgrade__recover_locked' "${updater}"
 	grep -q 'upgrade__run_migrations' "${updater}"
@@ -84,8 +84,22 @@ setup() {
 	local upgrade=${REPO_ROOT}/opt/bin/main/upgrade
 	grep -q 'case "${state}" in ready|unconfigured)' "${upgrade}"
 	grep -q 'lifecycle_transaction__begin "${operation}" "${state}" "${state}"' "${upgrade}"
+	grep -q '\[ "${result:-0}" -eq 0 \] && \[ "${state}" = ready \]' "${upgrade}"
 	grep -q 'upgrade__verify_unconfigured' "${upgrade}"
+	grep -q 'upgrade__verify_passive_runtime' "${upgrade}"
 	grep -q 'setup__verify_runtime_removed' "${upgrade}"
+}
+
+@test "passive recovery verifies runtime before restoring the stable state" {
+	local upgrade=${REPO_ROOT}/opt/bin/main/upgrade
+	[ "$(grep -c 'upgrade__verify_passive_runtime' "${upgrade}")" -ge 4 ]
+	grep -q 'lifecycle_transaction__rollback_finish' "${upgrade}"
+}
+
+@test "rollback explicitly allows opkg to install an older package" {
+	local upgrade=${REPO_ROOT}/opt/bin/main/upgrade
+	grep -q 'rollback) opkg install --force-downgrade "${artifact}"' "${upgrade}"
+	grep -q 'opkg install --force-downgrade "${MORS_UPDATE_ROLLBACK}"' "${upgrade}"
 }
 
 @test "maintainer scripts read a missing active marker without shell redirection errors" {
