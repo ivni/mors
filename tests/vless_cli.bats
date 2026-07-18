@@ -285,12 +285,13 @@ setup() {
 	export VLESS_ENDPOINT_LOG="${BATS_TEST_TMPDIR}/ipset.log"
 	printf '%s\n' '#!/bin/sh' 'printf "%s\\n" "$*" >>"${VLESS_ENDPOINT_LOG}"' 'exit 0' >"${VLESS_IPSET_COMMAND}"
 	chmod +x "${VLESS_IPSET_COMMAND}"
-	printf '%s\n' '192.0.2.1' >"${VLESS_ENDPOINTS_FILE}"
+	printf '%s\n' '192.0.2.1' '#!/bin/sh' 'damaged derived cache' >"${VLESS_ENDPOINTS_FILE}"
 	jq -n '{outbounds:[{protocol:"vless",settings:{vnext:[{address:"192.0.2.2"}]}}]}' >"${BATS_TEST_TMPDIR}/config.json"
 
 	vless_domain__sync_endpoint_exclusions "${BATS_TEST_TMPDIR}/config.json"
 	grep -q 'add MORS_DESTINATION_EXCLUDED 192.0.2.2' "${VLESS_ENDPOINT_LOG}"
 	grep -q 'del MORS_DESTINATION_EXCLUDED 192.0.2.1' "${VLESS_ENDPOINT_LOG}"
+	! grep -q 'bin/sh\|damaged' "${VLESS_ENDPOINT_LOG}"
 	[ "$(cat "${VLESS_ENDPOINTS_FILE}")" = 192.0.2.2 ]
 }
 
@@ -300,12 +301,13 @@ setup() {
 	export VLESS_ENDPOINT_LOG="${BATS_TEST_TMPDIR}/ipset.log"
 	printf '%s\n' '#!/bin/sh' 'printf "%s\\n" "$*" >>"${VLESS_ENDPOINT_LOG}"' 'exit 0' >"${VLESS_IPSET_COMMAND}"
 	chmod +x "${VLESS_IPSET_COMMAND}"
-	printf '%s\n' '192.0.2.1' >"${VLESS_ENDPOINTS_FILE}"
+	printf '%s\n' '192.0.2.1' '#!/bin/sh' 'damaged derived cache' >"${VLESS_ENDPOINTS_FILE}"
 	jq -n '{outbounds:[{protocol:"blackhole"}]}' >"${BATS_TEST_TMPDIR}/config.json"
 
 	vless_domain__sync_endpoint_exclusions "${BATS_TEST_TMPDIR}/config.json" false
 	[ "$(cat "${VLESS_ENDPOINTS_FILE}")" = 192.0.2.1 ]
 	! grep -q 'del MORS_DESTINATION_EXCLUDED 192.0.2.1' "${VLESS_ENDPOINT_LOG}"
+	! grep -q 'bin/sh\|damaged' "${VLESS_ENDPOINT_LOG}"
 }
 
 @test "failed final override rolls first enable fully back" {

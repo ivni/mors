@@ -735,7 +735,11 @@ $(jq -r '.outbounds[]? | select(.protocol == "vless") | .settings.vnext[]?.addre
 EOF
 	sort -u "${temporary}" -o "${temporary}"
 	if [ "${remove_stale}" = false ] && [ -f "${VLESS_ENDPOINTS_FILE}" ]; then
-		cat "${VLESS_ENDPOINTS_FILE}" >>"${temporary}"
+		while IFS= read -r old_ip; do
+			[ -n "${old_ip}" ] || continue
+			printf '%s\n' "${old_ip}" | grep -qE "^${ip_filter}$" || continue
+			printf '%s\n' "${old_ip}" >>"${temporary}"
+		done <"${VLESS_ENDPOINTS_FILE}"
 		sort -u "${temporary}" -o "${temporary}"
 	fi
 	if [ -x "${VLESS_IPSET_COMMAND}" ] && "${VLESS_IPSET_COMMAND}" list "${VLESS_DESTINATION_IPSET}" >/dev/null 2>&1; then
@@ -746,6 +750,7 @@ EOF
 		if [ "${remove_stale}" = true ] && [ -f "${VLESS_ENDPOINTS_FILE}" ]; then
 			while IFS= read -r old_ip; do
 				[ -n "${old_ip}" ] || continue
+				printf '%s\n' "${old_ip}" | grep -qE "^${ip_filter}$" || continue
 				grep -Fxq "${old_ip}" "${temporary}" || "${VLESS_IPSET_COMMAND}" -exist del "${VLESS_DESTINATION_IPSET}" "${old_ip}" || return 1
 			done <"${VLESS_ENDPOINTS_FILE}"
 		fi
