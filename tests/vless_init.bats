@@ -41,7 +41,7 @@ run_init() {
 		VLESS_SUPERVISOR_LOCK_DIR="${LOCK_DIR}" \
 		VLESS_SUPERVISOR_WAIT_STEPS=30 \
 		VLESS_SUPERVISOR_WAIT_DELAY=0.1 \
-		"${INIT_SCRIPT}" "$@"
+		sh "${INIT_SCRIPT}" "$@"
 }
 
 @test "init status, restart and stop manage the shell supervisor by its PID file" {
@@ -87,7 +87,10 @@ run_init() {
 }
 
 @test "stop does not signal or unlock a concurrent one-off supervisor" {
-	"${PROGRAM}" once &
+	env \
+		VLESS_SUPERVISOR_PID_FILE="${PID_FILE}" \
+		VLESS_SUPERVISOR_LOCK_DIR="${LOCK_DIR}" \
+		"${PROGRAM}" once &
 	ONCE_PID=$!
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
 		tr '\000' '\n' <"/proc/${ONCE_PID}/cmdline" | grep -F -x "${PROGRAM}" >/dev/null && break
