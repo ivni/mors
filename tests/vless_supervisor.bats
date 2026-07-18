@@ -74,6 +74,24 @@ setup() {
 	[ "$(jq -r '.last_switch' "${VLESS_STATE_FILE}")" = null ]
 }
 
+@test "direct fallback keeps the recovery choice but clears the current VLESS selection" {
+	vless_store__set_direct_fallback true
+	vless_runtime__probe_connection() {
+		VLESS_PROBE_ERROR=timeout
+		VLESS_PROBE_LATENCY_MS=null
+		return 1
+	}
+	vless_supervisor__confirm_active_failure() { return 1; }
+	vless_runtime__probe() { VLESS_PROBE_LATENCY_MS=10; VLESS_PROBE_ERROR=''; return 0; }
+
+	run vless_supervisor__once
+	[ "${status}" -ne 0 ]
+	[ "${OVERRIDDEN_TAG}" = mors-direct ]
+	[ "$(jq -r '.overall_state' "${VLESS_STATE_FILE}")" = direct_fallback ]
+	[ "$(jq -r '.active_id' "${VLESS_STATE_FILE}")" = null ]
+	[ "$(vless_runtime__active_id)" = vless-a ]
+}
+
 @test "global pause skips probes and preserves last active connection" {
 	vless_store__set_paused true
 	vless_runtime__probe_connection() { return 99; }

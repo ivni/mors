@@ -548,12 +548,11 @@ vless_cli__name_by_id() {
 
 vless_cli__status_json() {
 	local state_json active_id now
-	active_id=$(vless_runtime__active_id)
 	now=$(vless_store__now)
 	if [ -f "${VLESS_STATE_FILE}" ] && state_json=$(jq -c . "${VLESS_STATE_FILE}" 2>/dev/null); then
-		state_json=$(printf '%s\n' "${state_json}" | jq -c --arg active_id "${active_id}" '
-			.active_id = (if $active_id == "" then null else $active_id end)')
+		:
 	else
+		active_id=$(vless_runtime__active_id)
 		state_json=$(jq -nc --arg now "${now}" --arg active_id "${active_id}" '{
 			schema_version: 1, cycle: 0, last_cycle_at: null,
 			overall_state: "unconfigured", upstream_state: "unknown",

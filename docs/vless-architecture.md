@@ -123,7 +123,7 @@ disabled -> checking -> standby -> unstable -> unavailable
 Конфигурация и оперативное состояние разделены:
 
 - `/opt/etc/mors/vless` содержит пользовательскую конфигурацию;
-- `/opt/var/lib/mors/vless` содержит последнее активное соединение и ограниченную историю событий;
+- `/opt/var/lib/mors/vless` содержит последнее выбранное VLESS-соединение для восстановления и ограниченную историю событий; это сохранённое предпочтение не считается текущим `active_id`, пока data-plane переведён в `direct_fallback` или fail-closed;
 - `/opt/var/run/mors/vless` содержит только runtime-файлы.
 
 После успешного add/update/enable Mors до запуска Xray синхронизирует IP всех включённых endpoint в `MORS_DESTINATION_EXCLUDED`: сначала добавляет новые, затем удаляет только ранее управляемые VLESS-адреса.

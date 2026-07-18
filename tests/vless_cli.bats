@@ -47,6 +47,20 @@ setup() {
 	[[ "${output}" != *"public_key"* ]]
 }
 
+@test "status distinguishes current direct fallback from the saved VLESS recovery choice" {
+	vless_store__add_metadata vless-a Finland true 11971
+	vless_runtime__ensure
+	vless_runtime__set_active_id vless-a
+	vless_runtime__set_connection vless-a unavailable null 3 3 vless_unavailable false
+	vless_runtime__set_overall direct_fallback up ''
+
+	run cmd_vless_status --json
+	[ "${status}" -eq 0 ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.status')" = direct_fallback ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.active_id')" = null ]
+	[ "$(vless_runtime__active_id)" = vless-a ]
+}
+
 @test "removed vless new command does not mutate storage" {
 	rm -rf "${VLESS_STORE_ROOT}"
 
