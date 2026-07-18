@@ -111,6 +111,9 @@ disabled connections исключаются. Неизвестный desired stat
 
 Порядок: active, reserves, остальные working connections. Исчерпание бюджета
 после успешного active path даёт общий `degraded`.
+Каждый дополнительный tunnel probe применяет тот же настроенный fallback
+контрольной HTTPS-цели, что и active path: ответ IPv6 не принимается как
+доказательство IPv4-тракта, но после него проверяется резервная IPv4-цель.
 
 ## 7. Deadline и конкурентное состояние
 
