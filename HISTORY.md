@@ -1,4 +1,5 @@
 ## 1.3.0 beta 7 - 2026-07-19
+- Пакетный выпуск 3: `mors update apply`, `mors rollback` и recovery ограниченно ожидают кратковременный runtime-lock VLESS supervisor, сохраняя немедленный отказ при незавершённом cold test и понятную диагностику после исчерпания бюджета.
 - Пакетный выпуск 2: исправлены обнаруженные router-smoke дефекты uninstall, recovery, setup dataplane, lifecycle-статусов VLESS и диагностики IPv6.
 - Uninstall теперь отличает отсутствие необязательных файлов от реальной ошибки резервного копирования и останавливается при любой ошибке копирования существующей конфигурации.
 - Все lifecycle status/stop/restart проходят через единый wall-clock hard timeout с TERM→KILL границей и transaction-local журналом; ненулевой результат действия и неопознанный status больше не маскируются совпавшим poststate, а cold activation, snapshot/rollback и recovery не могут бессрочно удерживать lifecycle lock.

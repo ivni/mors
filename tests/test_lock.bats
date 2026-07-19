@@ -112,9 +112,31 @@ teardown() {
 	done
 	[ -e "${ready}" ]
 
-	runtime_mutation_lock__acquire_wait waiter 5
+	runtime_mutation_lock__acquire_wait_or_explain waiter 5
 	wait "${holder}"
 	[ "${MORS_RUNTIME_LOCK_DEPTH}" -eq 1 ]
+}
+
+@test "bounded runtime wait reports an unfinished cold transaction immediately" {
+	mkdir -p "${MORS_COLD_JOURNAL_DIR}"
+
+	run runtime_mutation_lock__acquire_wait_or_explain waiter 5
+
+	[ "${status}" -eq 2 ]
+	[[ "${output}" == *'Изменения заблокированы незавершённым cold test.'* ]]
+}
+
+@test "bounded runtime wait reports an owner after its budget is exhausted" {
+	runtime_mutation_lock__acquire owner
+
+	run env -u MORS_RUNTIME_LOCK_TOKEN -u MORS_RUNTIME_LOCK_DEPTH \
+		MORS_LOCK_ROOT="${MORS_LOCK_ROOT}" MORS_RUNTIME_LOCK_DIR="${MORS_RUNTIME_LOCK_DIR}" \
+		MORS_COLD_JOURNAL_DIR="${MORS_COLD_JOURNAL_DIR}" \
+		sh -c '. "$1"; runtime_mutation_lock__acquire_wait_or_explain contender 0' \
+		sh "${REPO_ROOT}/opt/bin/libs/runtime_lock"
+
+	[ "${status}" -eq 1 ]
+	[[ "${output}" == *'Другая операция изменения runtime Mors уже выполняется.'* ]]
 }
 
 @test "mutating NDM hooks participate in runtime serialization" {

@@ -14,6 +14,7 @@ telemetry_runtime__pin_production
 
 MORS_RELEASE_API=${MORS_RELEASE_API:-https://api.github.com/repos/ivni/mors/releases/latest}
 MORS_UPDATE_CACHE=${MORS_UPDATE_CACHE:-/opt/packages/mors-lifecycle}
+MORS_UPDATE_RUNTIME_LOCK_WAIT=${MORS_UPDATE_RUNTIME_LOCK_WAIT:-60}
 
 upgrade__usage() {
 	cat <<'EOF'
@@ -218,7 +219,8 @@ upgrade__apply_locked() {
 	candidate_fingerprint=$(upgrade_artifact__verified_digest "${MORS_UPDATE_ARTIFACT}") || return 64
 	rollback_fingerprint=$(upgrade_artifact__verified_digest "${MORS_UPDATE_ROLLBACK}") || return 64
 
-	runtime_mutation_lock__acquire_or_explain "mors ${operation}" || return $?
+	runtime_mutation_lock__acquire_wait_or_explain "mors ${operation}" \
+		"${MORS_UPDATE_RUNTIME_LOCK_WAIT}" || return $?
 	lifecycle_transaction__begin "${operation}" "${state}" "${state}" >/dev/null || {
 		result=$?
 		runtime_mutation_lock__release >/dev/null 2>&1 || true
@@ -330,7 +332,8 @@ upgrade__recover_locked() {
 		*) return 3 ;;
 	esac
 	snapshot=$(lifecycle_transaction__snapshot_directory) || return 4
-	runtime_mutation_lock__acquire_or_explain 'mors update recover' || return $?
+	runtime_mutation_lock__acquire_wait_or_explain 'mors update recover' \
+		"${MORS_UPDATE_RUNTIME_LOCK_WAIT}" || return $?
 	case "${phase}" in
 		planning)
 			lifecycle_transaction__rollback_finish

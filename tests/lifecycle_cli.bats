@@ -88,6 +88,8 @@ setup() {
 	grep -q 'upgrade__reload_installed_runtime' "${updater}"
 	grep -q 'upgrade__restart_and_verify' "${updater}"
 	grep -q 'setup__verify_committed' "${updater}"
+	[ "$(grep -c 'runtime_mutation_lock__acquire_wait_or_explain' "${updater}")" -eq 2 ]
+	grep -q 'MORS_UPDATE_RUNTIME_LOCK_WAIT=.*60' "${updater}"
 }
 
 @test "update preserves an unconfigured installation without starting runtime" {

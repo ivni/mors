@@ -200,6 +200,11 @@ runtime_mutation_lock__acquire_or_explain() {
 	else
 		result=$?
 	fi
+	runtime_mutation_lock__explain_failure "${result}"
+}
+
+runtime_mutation_lock__explain_failure() {
+	local result=${1}
 	if [ "${result}" -eq 2 ]; then
 		printf '%s\n' \
 			'Изменения заблокированы незавершённым cold test. Выполните mors test cold recover.' >&2
@@ -228,6 +233,16 @@ runtime_mutation_lock__acquire_wait() {
 		sleep 1
 		waited=$((waited + 1))
 	done
+}
+
+runtime_mutation_lock__acquire_wait_or_explain() {
+	local result
+	if runtime_mutation_lock__acquire_wait "${1:-mors mutation}" "${2:-60}"; then
+		return 0
+	else
+		result=$?
+	fi
+	runtime_mutation_lock__explain_failure "${result}"
 }
 
 runtime_mutation_lock__release() {
