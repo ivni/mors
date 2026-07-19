@@ -355,6 +355,8 @@ esac
 EOF
 	chmod +x "${service}"
 	export STATUS_CALLS=${calls}
+	MORS_SETUP_DNS_LOG=${BATS_TEST_TMPDIR}/lifecycle-services.log
+	export MORS_SETUP_DNS_LOG
 	lifecycle_snapshot__prepare_service_log
 	MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT=0
 
@@ -362,6 +364,15 @@ EOF
 
 	[ "${status}" -ne 0 ]
 	[ ! -e "${calls}" ]
+}
+
+@test "service log path rejects a missing transaction instead of using filesystem root" {
+	unset MORS_SETUP_DNS_LOG
+
+	run lifecycle_snapshot__service_log_path
+
+	[ "${status}" -ne 0 ]
+	[ -z "${output}" ]
 }
 
 @test "snapshot quiesces a newly created service before removing its hook" {

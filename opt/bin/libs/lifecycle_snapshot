@@ -17,10 +17,12 @@ MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT=${MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT:-15}
 MORS_LIFECYCLE_SERVICE_RETRY_INTERVAL=${MORS_LIFECYCLE_SERVICE_RETRY_INTERVAL:-1}
 
 lifecycle_snapshot__service_log_path() {
+	local transaction_directory
 	if [ -n "${MORS_SETUP_DNS_LOG:-}" ]; then
 		printf '%s\n' "${MORS_SETUP_DNS_LOG}"
 	else
-		printf '%s/lifecycle-services.log\n' "$(lifecycle_transaction__directory)"
+		transaction_directory=$(lifecycle_transaction__directory) || return 1
+		printf '%s/lifecycle-services.log\n' "${transaction_directory}"
 	fi
 }
 
