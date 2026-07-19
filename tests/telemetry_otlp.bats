@@ -27,7 +27,7 @@ setup() {
 	telemetry_store__write_key "${BATS_TEST_TMPDIR}/key"
 	telemetry_store__write_curl_config
 	printf '%s\n' '{"schema_version":1,"state":"ready"}' >"${MORS_LIFECYCLE_STATE_FILE}"
-	printf '%s\n' 'APP_VERSION=1.3.0~beta6' 'APP_RELEASE=1' 'INFACE_ENT=t2s21' >"${MORS_CONF_FILE}"
+	printf '%s\n' 'APP_VERSION=1.3.0~beta7' 'APP_RELEASE=1' 'INFACE_ENT=t2s21' >"${MORS_CONF_FILE}"
 	cat >"${VLESS_STATE_FILE}" <<'JSON'
 {"schema_version":1,"cycle":42,"overall_state":"healthy","upstream_state":"up","active_id":"vless-a","last_cycle_at":"2026-07-18T18:00:00Z","connections":{"vless-a":{"name":"SECRET Germany","server":"198.51.100.9","enabled":true,"status":"active","latency_ms":73,"consecutive_failures":0,"recent_failures":1},"vless-b":{"name":"SECRET Reserve","enabled":true,"status":"standby","latency_ms":91,"consecutive_failures":0,"recent_failures":0}}}
 JSON

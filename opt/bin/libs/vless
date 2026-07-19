@@ -31,6 +31,7 @@ VLESS_CONFIG_ORIGINAL_FILE=/opt/apps/mors/etc/conf/mors.vless
 VLESS_CONFIG_FILE_BACKUP=${MORS_BACKUP_PATH}/mors.json
 
 PROXY_VLESS_DESC="Mors-proxy-vless"
+LEGACY_PROXY_VLESS_DESC="Kvas-proxy-vless"
 PROXY_LOCAL_IP="127.0.0.1"
 PROXY_VLESS_PORT=1097
 PROXY_VLESS_PROTO=socks5
@@ -229,19 +230,19 @@ set +xeu
 }
 
 
-create_proxy_interface(){
+configure_proxy_interface(){
 #-------------------------------------------------------------------------------
 #
-#   Функция для создания интерфейса для Proxy клиента и задает ему его свойства по умолчанию
+#   Функция создаёт отсутствующий управляемый Proxy-интерфейс.
 #
 #-------------------------------------------------------------------------------
 
-    delete_proxy_interface
+    local description=${1:-${PROXY_VLESS_DESC}}
 
     data='[{
         "interface": {
             "name": "'${PROXY_VLESS_NAME}'",
-            "description": "'${PROXY_VLESS_DESC}'",
+            "description": "'${description}'",
             "proxy": {
                 "protocol": {
                     "proto": "'${PROXY_VLESS_PROTO}'"
@@ -263,6 +264,42 @@ create_proxy_interface(){
     # создаем интерфейс для Proxy клиента и задает ему его свойства по умолчанию
     api_post_query "${data}" "" &> /dev/null
 
+}
+
+rename_proxy_interface(){
+#-------------------------------------------------------------------------------
+#
+#   Функция меняет только описание уже существующего Proxy-интерфейса.
+#   Proxy protocol/upstream и системная идентичность остаются неизменными.
+#
+#-------------------------------------------------------------------------------
+
+    local description=${1:-}
+    case "${description}" in
+        "${PROXY_VLESS_DESC}"|"${LEGACY_PROXY_VLESS_DESC}") ;;
+        *) return 64 ;;
+    esac
+    data='[{
+        "interface": {
+            "name": "'${PROXY_VLESS_NAME}'",
+            "description": "'${description}'"
+        },
+        "system": {
+            "configuration": {
+                "save": true
+            }
+        }
+    }]'
+    api_post_query "${data}" "" &> /dev/null
+}
+
+create_proxy_interface(){
+#-------------------------------------------------------------------------------
+#
+#   Функция создаёт отсутствующий управляемый Proxy-интерфейс с нуля.
+#
+#-------------------------------------------------------------------------------
+    configure_proxy_interface "${PROXY_VLESS_DESC}"
 }
 
 proxy_package_progress(){

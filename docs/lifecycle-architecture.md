@@ -100,11 +100,22 @@ Setup разделён на read-only plan и apply:
 Plan фиксирует точные `interface_cli`, `interface_entware`, `dns_backend` и
 режим provisioning в journal до snapshot/apply. Для уже существующего тоннеля
 apply повторно проверяет соответствие выбранного интерфейса live RCI. Для
-управляемого VLESS target `Proxy21 / Proxy21` допускается отсутствие интерфейса
+управляемого VLESS target `Proxy21 / t2s21` допускается отсутствие интерфейса
 в read-only inventory, если системные компоненты Keenetic уже установлены:
 после snapshot setup записывает intent, создаёт интерфейс, проверяет его через
 RCI и только затем продолжает apply. Rollback удаляет интерфейс только при
-наличии соответствующего intent в journal. После начала транзакции setup не
+наличии соответствующего intent в journal. Для intent `creating` отсутствие
+`Proxy21` подтверждается несколькими ограниченными по времени чтениями RCI;
+pending, foreign и изменившееся состояние остаются fail-closed в
+`recovery_required` без автоматической мутации.
+
+Точный legacy target `Kvas-proxy-vless` на `Proxy21` имеет отдельный intent
+`legacy_vless`: setup меняет только его описание на `Mors-proxy-vless`, не
+перезаписывая proxy protocol/upstream, системный ID и связанные политики, и
+подтверждает новое описание через RCI. Rollback по intent также меняет только
+описание обратно на `Kvas-proxy-vless`. Любой иной
+`Proxy21` считается внешним конфликтом, не попадает в inventory и не может быть
+автоматически заменён синтетическим target. После начала транзакции setup не
 читает пользовательский ввод.
 
 Пустой реестр VLESS не блокирует lifecycle setup. Xray запускается с
@@ -123,6 +134,14 @@ Verify подтверждает выбранный интерфейс и DNS bac
 активные Mors firewall/ipset-объекты, policy rule и таблицу маршрутизации, а
 также опубликованные hooks. Одного наличия CLI или конфигурационного файла
 недостаточно для перехода в `ready`.
+
+Для DNSCrypt prepare меняет только файлы и выполняет bounded
+`dnscrypt-proxy -check`. Commit сначала строит dataplane без рестарта DNS, затем один раз
+запускает DNSCrypt и ждёт A-ответ на его локальном порту, после чего один раз
+запускает dnsmasq и ждёт A-ответ через него. Повторная lifecycle verification
+проверяет оба сервиса и оба DNS-пути. `/opt/etc/hosts` принадлежит snapshot,
+должен быть обычным читаемым файлом `0644`; приватный журнал DNS cold-start
+остаётся внутри каталога транзакции.
 
 При boot Entware может запустить первый health-cycle VLESS supervisor раньше
 основного init Mors. `S96mors` ограниченно ждёт общий runtime-mutation lock,

@@ -1,0 +1,132 @@
+#!/bin/sh
+
+# Cold-start DNS orchestration used only by the transactional setup path.
+# Configuration is validated before commit; DNSCrypt and dnsmasq are then
+# started once, in dependency order, with bounded end-to-end readiness probes.
+
+MORS_SETUP_DNSCRYPT_BIN=${MORS_SETUP_DNSCRYPT_BIN:-dnscrypt-proxy}
+MORS_SETUP_DNSCRYPT_CONFIG=${MORS_SETUP_DNSCRYPT_CONFIG:-${DNSCRYPT_CONFIG:-/opt/etc/dnscrypt-proxy.toml}}
+MORS_SETUP_DNSCRYPT_INIT=${MORS_SETUP_DNSCRYPT_INIT:-${DNSCRYPT_DEMON:-/opt/etc/init.d/S09dnscrypt-proxy2}}
+MORS_SETUP_DNSMASQ_INIT=${MORS_SETUP_DNSMASQ_INIT:-${DNSMASQ_DEMON:-/opt/etc/init.d/S56dnsmasq}}
+MORS_SETUP_DNS_TIMEOUT_CMD=${MORS_SETUP_DNS_TIMEOUT_CMD:-/opt/bin/timeout}
+MORS_SETUP_DNS_CHECK_TIMEOUT=${MORS_SETUP_DNS_CHECK_TIMEOUT:-90}
+MORS_SETUP_DNS_READY_TIMEOUT=${MORS_SETUP_DNS_READY_TIMEOUT:-60}
+MORS_SETUP_DNS_PROBE_TIMEOUT=${MORS_SETUP_DNS_PROBE_TIMEOUT:-5}
+MORS_SETUP_DNS_RETRY_INTERVAL=${MORS_SETUP_DNS_RETRY_INTERVAL:-2}
+MORS_SETUP_DNS_PROBE_NAME=${MORS_SETUP_DNS_PROBE_NAME:-example.com}
+
+setup_dns__log_path() {
+	if [ -n "${MORS_SETUP_DNS_LOG:-}" ]; then
+		printf '%s\n' "${MORS_SETUP_DNS_LOG}"
+	else
+		printf '%s\n' /opt/tmp/mors.setup-dns.log
+	fi
+}
+
+setup_dns__prepare_log() {
+	local log parent
+	log=$(setup_dns__log_path) || return 1
+	parent=$(dirname "${log}") || return 1
+	mkdir -p "${parent}" || return 1
+	[ ! -L "${log}" ] || return 1
+	if [ -e "${log}" ] && [ ! -f "${log}" ]; then
+		return 1
+	fi
+	(umask 077; : >>"${log}") || return 1
+	chmod 600 "${log}"
+}
+
+setup_dns__reset_log() {
+	local log
+	setup_dns__prepare_log || return 1
+	log=$(setup_dns__log_path) || return 1
+	: >"${log}" || return 1
+	chmod 600 "${log}"
+}
+
+setup_dns__service_running() {
+	local service output
+	service=${1}
+	[ -x "${service}" ] || return 1
+	output=$("${service}" status 2>/dev/null || true)
+	printf '%s\n' "${output}" | grep -qiE 'dead|not[[:space:]]+running|stopped' && return 1
+	printf '%s\n' "${output}" | grep -qiE '(^|[[:space:]])(alive|running)([[:space:].]|$)'
+}
+
+setup_dns__query() {
+	local host port output log
+	host=${1}
+	port=${2}
+	log=$(setup_dns__log_path) || return 1
+	if command -v kdig >/dev/null 2>&1; then
+		output=$("${MORS_SETUP_DNS_TIMEOUT_CMD}" "${MORS_SETUP_DNS_PROBE_TIMEOUT}" \
+			kdig "@${host}" -p "${port}" "${MORS_SETUP_DNS_PROBE_NAME}" A +short 2>>"${log}") || return 1
+	elif command -v dig >/dev/null 2>&1; then
+		output=$("${MORS_SETUP_DNS_TIMEOUT_CMD}" "${MORS_SETUP_DNS_PROBE_TIMEOUT}" \
+			dig "@${host}" -p "${port}" "${MORS_SETUP_DNS_PROBE_NAME}" A +short 2>>"${log}") || return 1
+	else
+		printf '%s\n' 'DNS probe tool is unavailable' >>"${log}"
+		return 1
+	fi
+	printf '%s\n' "${output}" | awk -F. '
+		NF == 4 {
+			valid = 1
+			for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) valid = 0
+			if (valid) found = 1
+		}
+		END { exit(found ? 0 : 1) }
+	'
+}
+
+setup_dns__wait_ready() {
+	local service host port elapsed=0 log
+	service=${1}
+	host=${2}
+	port=${3}
+	log=$(setup_dns__log_path) || return 1
+	while [ "${elapsed}" -le "${MORS_SETUP_DNS_READY_TIMEOUT}" ]; do
+		if setup_dns__service_running "${service}" && setup_dns__query "${host}" "${port}"; then
+			printf 'ready service=%s address=%s:%s elapsed=%s\n' "${service}" "${host}" "${port}" "${elapsed}" >>"${log}"
+			return 0
+		fi
+		[ "${elapsed}" -ge "${MORS_SETUP_DNS_READY_TIMEOUT}" ] && break
+		sleep "${MORS_SETUP_DNS_RETRY_INTERVAL}"
+		elapsed=$((elapsed + MORS_SETUP_DNS_RETRY_INTERVAL))
+	done
+	printf 'timeout service=%s address=%s:%s elapsed=%s\n' "${service}" "${host}" "${port}" "${elapsed}" >>"${log}"
+	return 1
+}
+
+setup_dns__validate_dnscrypt() {
+	local log
+	setup_dns__reset_log || return 1
+	log=$(setup_dns__log_path) || return 1
+	printf '%s\n' 'validate dnscrypt configuration' >>"${log}"
+	"${MORS_SETUP_DNS_TIMEOUT_CMD}" "${MORS_SETUP_DNS_CHECK_TIMEOUT}" \
+		"${MORS_SETUP_DNSCRYPT_BIN}" -config "${MORS_SETUP_DNSCRYPT_CONFIG}" -check >>"${log}" 2>&1
+}
+
+setup_dns__activate_dnscrypt_stack() {
+	local log dnscrypt_port dnsmasq_port
+	setup_dns__prepare_log || return 1
+	log=$(setup_dns__log_path) || return 1
+	dnscrypt_port=$(get_config_value DNS_CRYPT_PORT) || return 1
+	dnsmasq_port=$(get_config_value DNSMASQ_PORT) || return 1
+	printf '%s\n' 'restart dnscrypt' >>"${log}"
+	"${MORS_SETUP_DNSCRYPT_INIT}" restart >>"${log}" 2>&1 || return 1
+	setup_dns__wait_ready "${MORS_SETUP_DNSCRYPT_INIT}" 127.0.0.1 "${dnscrypt_port}" || return 1
+	printf '%s\n' 'restart dnsmasq' >>"${log}"
+	"${MORS_SETUP_DNSMASQ_INIT}" restart >>"${log}" 2>&1 || return 1
+	setup_dns__wait_ready "${MORS_SETUP_DNSMASQ_INIT}" 127.0.0.1 "${dnsmasq_port}"
+}
+
+setup_dns__verify_stack() {
+	local dnscrypt_port dnsmasq_port
+	setup_dns__prepare_log || return 1
+	dnscrypt_port=$(get_config_value DNS_CRYPT_PORT) || return 1
+	dnsmasq_port=$(get_config_value DNSMASQ_PORT) || return 1
+	setup_dns__service_running "${MORS_SETUP_DNSCRYPT_INIT}" || return 1
+	setup_dns__query 127.0.0.1 "${dnscrypt_port}" || return 1
+	setup_dns__service_running "${MORS_SETUP_DNSMASQ_INIT}" || return 1
+	setup_dns__query 127.0.0.1 "${dnsmasq_port}"
+}

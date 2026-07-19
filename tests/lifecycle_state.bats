@@ -167,7 +167,9 @@ setup() {
 	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
 	lifecycle_state__read >/dev/null
 	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	before_umask=$(umask)
 	lifecycle_snapshot__capture
+	[ "$(umask)" = "${before_umask}" ]
 
 	printf '%s\n' changed >"${original}"
 	printf '%s\n' unexpected >"${created}"

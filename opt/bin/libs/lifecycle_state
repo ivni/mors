@@ -39,13 +39,13 @@ lifecycle_state__valid_id() {
 	[ -n "${1:-}" ] && ! printf '%s' "${1}" | grep -q '[^a-zA-Z0-9._-]'
 }
 
-lifecycle_state__prepare_root() {
+lifecycle_state__prepare_root() (
 	umask 077
 	mkdir -p "${MORS_LIFECYCLE_TRANSACTION_ROOT}" || return 1
 	chmod 700 "${MORS_LIFECYCLE_ROOT}" "${MORS_LIFECYCLE_TRANSACTION_ROOT}" 2>/dev/null || return 1
-}
+)
 
-lifecycle_state__atomic_write() {
+lifecycle_state__atomic_write() (
 	local destination directory temporary
 	destination=${1}
 	directory=$(dirname "${destination}")
@@ -67,7 +67,7 @@ lifecycle_state__atomic_write() {
 	# Lifecycle changes are rare. Persist metadata before a network commit or
 	# reporting the operation as completed.
 	sync
-}
+)
 
 lifecycle_state__write() {
 	local state source now
@@ -154,7 +154,7 @@ lifecycle_transaction__snapshot_directory() {
 	printf '%s/snapshot\n' "$(lifecycle_transaction__directory "${1:-}")"
 }
 
-lifecycle_transaction__begin() {
+lifecycle_transaction__begin() (
 	local operation previous_state target_state id temporary directory now
 	operation=${1}
 	previous_state=${2:-$(lifecycle_state__read)}
@@ -191,7 +191,7 @@ lifecycle_transaction__begin() {
 	}
 	printf '%s\n' "${id}" | lifecycle_state__atomic_write "${MORS_LIFECYCLE_ACTIVE_FILE}" || return 1
 	printf '%s\n' "${id}"
-}
+)
 
 lifecycle_transaction__phase() {
 	local phase id journal now

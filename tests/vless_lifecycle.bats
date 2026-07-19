@@ -105,6 +105,18 @@ setup() {
 	grep -A2 'ready_status 1' <<<"${body}" | grep -q 'return 1'
 }
 
+@test "dnscrypt setup prepares config without restarting services before commit" {
+	local vpn=${REPO_ROOT}/opt/bin/libs/vpn
+	local install_body activation_body init_body
+	install_body=$(sed -n '/^dns_crypt_install()/,/^}/p' "${vpn}" | tr -d '\r')
+	activation_body=$(sed -n '/^cmd_dns_crypt_on()/,/^}/p' "${vpn}" | tr -d '\r')
+	init_body=$(sed -n '/^cmd_mors_init()/,/^}/p' "${vpn}" | tr -d '\r')
+	grep -q 'cmd_dns_crypt_on "${activation_mode}"' <<<"${install_body}"
+	grep -q 'dns_crypt_port_change "${dns_crypt_port}" norestart' <<<"${activation_body}"
+	grep -q '\[ "${activation_mode}" = prepare \] || cmd_mors_init' <<<"${activation_body}"
+	grep -q 'setup_commit) return 0' <<<"${init_body}"
+}
+
 @test "setup reports completion only after lifecycle verification is committed" {
 	local setup=${REPO_ROOT}/opt/bin/main/setup
 	local install_body wrapper finish_line completed_line

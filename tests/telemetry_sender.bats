@@ -29,7 +29,7 @@ setup() {
 	telemetry_store__write_key "${BATS_TEST_TMPDIR}/key"
 	telemetry_store__write_curl_config
 	printf '%s\n' '{"schema_version":1,"state":"ready"}' >"${MORS_LIFECYCLE_STATE_FILE}"
-	printf '%s\n' 'APP_VERSION=1.3.0~beta6' 'APP_RELEASE=1' 'INFACE_ENT=t2s21' >"${MORS_CONF_FILE}"
+	printf '%s\n' 'APP_VERSION=1.3.0~beta7' 'APP_RELEASE=1' 'INFACE_ENT=t2s21' >"${MORS_CONF_FILE}"
 	printf '%s\n' '{"schema_version":1,"cycle":1,"overall_state":"healthy","upstream_state":"up","active_id":"vless-a","last_cycle_at":null,"connections":{"vless-a":{"enabled":true,"status":"active","latency_ms":50,"consecutive_failures":0,"recent_failures":0}}}' >"${VLESS_STATE_FILE}"
 	: >"${VLESS_EVENTS_FILE}"
 	telemetry_otlp_cursor=''

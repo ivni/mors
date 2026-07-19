@@ -68,7 +68,12 @@ update_iptables(){
 # Пересоздаем таблицу ipset для AdGuard Home и перезапускаем сервис
 refresh_adguard_ipset_table(){
 	ready "${prefix}Заполняем AdGuard таблицу данными из защищенного списка."
-	/opt/apps/mors/bin/main/adguard &>/dev/null && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+	if /opt/apps/mors/bin/main/adguard &>/dev/null; then
+		when_ok "УСПЕШНО"
+		return 0
+	fi
+	when_bad "ОШИБКА"
+	return 1
 }
 
 update_ipset(){
@@ -78,18 +83,28 @@ update_ipset(){
 	# Worker участвует в общей runtime-транзакции. Запускаем синхронно, чтобы
 	# унаследованный reentrant token не позволял ему менять ipset параллельно с
 	# оставшейся частью init workflow.
-	/opt/apps/mors/bin/main/ipset &> /dev/null
-	[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+	if /opt/apps/mors/bin/main/ipset &> /dev/null; then
+		when_ok "УСПЕШНО"
+	else
+		when_bad "ОШИБКА"
+		return 1
+	fi
 
 	if [ -f /opt/etc/init.d/S56dnsmasq ] ; then
-		refresh_dnsmasq_ipset_table
+		refresh_dnsmasq_ipset_table || return 1
 	else
-		refresh_adguard_ipset_table
+		refresh_adguard_ipset_table || return 1
 		[ "${stage}" = initd ] || {
 			ready "${prefix}Перезапускаем сервис AdGuard Home"
-			/opt/etc/init.d/S99adguardhome restart &>/dev/null && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+			if /opt/etc/init.d/S99adguardhome restart &>/dev/null; then
+				when_ok "УСПЕШНО"
+			else
+				when_bad "ОШИБКА"
+				return 1
+			fi
 		}
 	fi
+	return 0
 }
 
 # ------------------------------------------------------------------------------------------
@@ -102,9 +117,15 @@ update_adblock(){
 	if [ -f '/opt/etc/init.d/S56dnsmasq' ]; then
 			if cat < '/opt/etc/dnsmasq.conf' | sed 's/^\(.*\)\(#.*\)/\2/; /^#/d; /^$/d' | grep -q "${ADBLOCK_HOSTS_FILE}" &> /dev/null; then
 				ready "${prefix}Обновляем данные списка блокировки рекламы."
-				/opt/apps/mors/bin/main/adblock &>/dev/null && when_ok "ГОТОВО" || when_bad "ОШИБКА"
+				if /opt/apps/mors/bin/main/adblock &>/dev/null; then
+					when_ok "ГОТОВО"
+				else
+					when_bad "ОШИБКА"
+					return 1
+				fi
 			fi
 	fi
+	return 0
 }
 
 # ------------------------------------------------------------------------------------------
@@ -129,30 +150,31 @@ current_cli_vpn_interface() {
 }
 
 reset_all_connection(){
+	local result=0
 	ready "${prefix}Перезапускаем VPN и ISP соединения..."
-	{
-		if is_shadowsocks_enabled ; then
+	if is_shadowsocks_enabled ; then
 			log_warning 'Перезапуск клиента ShadowSocks (рестарт тоннеля)'
 
-			/opt/etc/init.d/S22shadowsocks stop &>/dev/null
+			/opt/etc/init.d/S22shadowsocks stop &>/dev/null || result=1
 			# reset_ISP_connection
-			/opt/etc/init.d/S22shadowsocks start &>/dev/null
-		else
+			[ "${result}" -ne 0 ] || /opt/etc/init.d/S22shadowsocks start &>/dev/null || result=1
+	else
 			inface=$(current_cli_vpn_interface)
 			log_warning "Перезапуск сетевого интерфейса ${inface}"
 
 			if is_vless_over_proxy_enabled ; then
 				log_warning 'Перезапуск клиента VLESS (рестарт тоннеля)'
 
-				${XRAY_INIT} restart
+				${XRAY_INIT} restart || result=1
 			fi
 
 			cli_request="localhost:79/rci/interface/${inface}"
 #			curl -s -d '{"down":"true"}' "${cli_request}"  &>/dev/null
 #			reset_ISP_connection
-			curl -s -d '{"up":"true"}' "${cli_request}"  &>/dev/null
-		fi
-	} && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+			[ "${result}" -ne 0 ] || curl -fsS -d '{"up":"true"}' "${cli_request}" &>/dev/null || result=1
+	fi
+	[ "${result}" -eq 0 ] && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+	return "${result}"
 
 }
 
@@ -167,7 +189,7 @@ reset_all_connection(){
 cmd_mors_init(){
 	# Убираем ошибки сервисов, связанные с отсутствием /opt/etc/hosts, только в
 	# явно изменяющем init workflow.
-	[ -f /opt/etc/hosts ] || touch /opt/etc/hosts
+	mors_hosts__ensure_readable || return 1
 
 	stage="${1:-no}"
 	prefix=''
@@ -178,14 +200,18 @@ cmd_mors_init(){
 #	Производим перезапуск подключения к интернету
 #	если не режим update и если текущее подключение не ssr
 	if [ "${stage}" = refresh ] || ! has_ssr_enable ; then
-			reset_all_connection
+		reset_all_connection || return 1
 	fi
 
-	update_iptables
-	update_ipset "${stage}"
-	update_adblock
+	update_iptables || return 1
+	update_ipset "${stage}" || return 1
+	update_adblock || return 1
 
-	[ "${stage}" = initd ] && update_time || all_services_restart
+	case "${stage}" in
+		initd) update_time ;;
+		setup_commit) return 0 ;;
+		*) all_services_restart ;;
+	esac
 
 	#log_alert "${prefix}Сброс пакета МОРС в исходное состояние ЗАВЕРШЕН!"
 
@@ -201,30 +227,34 @@ service_restart(){
 	else
 		when_bad "ОШИБКА"
 		error "Запустите диагностику командой mors debug"
+		return 1
 	fi
+	return 0
 }
 
 all_services_restart() {
+	local result=0
 	if has_adguard_enable ; then
 		log_warning 'Перезапуск DNS сервера AdGuardHome'
 
-		service_restart 'DNS сервер AdGuardHome' 'S99adguardhome'
+		service_restart 'DNS сервер AdGuardHome' 'S99adguardhome' || result=1
 	else
 		log_warning 'Перезапуск служб DNS'
 
-		service_restart 'DNS сервер DNSMasq'  'S56dnsmasq'
-		service_restart 'DNS сервер DNSCrypt' 'S09dnscrypt-proxy2'
+		service_restart 'DNS сервер DNSMasq'  'S56dnsmasq' || result=1
+		service_restart 'DNS сервер DNSCrypt' 'S09dnscrypt-proxy2' || result=1
 	fi
 
 	if is_shadowsocks_enabled ; then
 		log_warning 'Перезапуск клиента ShadowSocks (рестарт всех служб)'
 
-		service_restart 'клиент ShadowSocks' 'S22shadowsocks'
+		service_restart 'клиент ShadowSocks' 'S22shadowsocks' || result=1
 	elif is_vless_over_proxy_enabled ; then
 		log_warning 'Перезапуск клиента VLESS'
 
-		service_restart 'клиент VLESS' 'S24xray'
+		service_restart 'клиент VLESS' 'S24xray' || result=1
 	fi
+	return "${result}"
 }
 
 
@@ -1448,15 +1478,19 @@ dnsmasq_install(){
 #
 # ------------------------------------------------------------------------------------------
 dnsmasq_dns_change() {
+	local result=0
 	dns_new=${1}; cmd=${2:-restart};
+	case "${cmd}" in restart|norestart) ;; *) return 64 ;; esac
     dns_old=$(grep -m1 '^server=' "${DNSMASQ_CONFIG}" | cut -d'=' -f2)
 	ready "Замена DNS ${dns_old} на ${dns_new} в dnsmasq завершена"
-	sed -i "s/\(server=\).*/\1${dns_new}/"  "${DNSMASQ_CONFIG}"
-	ipset_dns_change "${dns_new}"
-	set_config_value DNS_DEFAULT "${dns_new}"
-	/opt/etc/init.d/S56dnsmasq restart &> /dev/null
-#	[ "${cmd}" = restart ] && cmd_update_list &> /dev/null
-	[ $? = 0 ] && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+	sed -i "s/\(server=\).*/\1${dns_new}/" "${DNSMASQ_CONFIG}" || result=1
+	[ "${result}" -ne 0 ] || ipset_dns_change "${dns_new}" || result=1
+	[ "${result}" -ne 0 ] || set_config_value DNS_DEFAULT "${dns_new}" || result=1
+	if [ "${result}" -eq 0 ] && [ "${cmd}" = restart ]; then
+		/opt/etc/init.d/S56dnsmasq restart &> /dev/null || result=1
+	fi
+	[ "${result}" -eq 0 ] && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+	return "${result}"
 }
 # ------------------------------------------------------------------------------------------
 #
@@ -2540,13 +2574,14 @@ cmd_update_list() {
 #
 # ------------------------------------------------------------------------------------------
 dns_crypt_port_change() {
-
+	local result=0
 	port_new=${1}; cmd=${2:-restart}
+	case "${cmd}" in restart|norestart) ;; *) return 64 ;; esac
 	ready "Замена локального порта на ${port_new} в dnscrypt_proxy2 завершена"
 
-	set_config_value DNS_CRYPT_PORT "${port_new}"
-	sed -i "s/\(^listen_addresses.=.\).*$/\1['127.0.0.1:${port_new}']/g" "${DNSCRYPT_CONFIG}" &> /dev/null
-	sed -i "s/\(@.*\)\(:[0-9]\{2,6\}\)/\1:${port_new} /g" '/opt/apps/mors/bin/main/ipset_domain' &> /dev/null
+	set_config_value DNS_CRYPT_PORT "${port_new}" || result=1
+	[ "${result}" -ne 0 ] || sed -i "s/\(^listen_addresses.=.\).*$/\1['127.0.0.1:${port_new}']/g" "${DNSCRYPT_CONFIG}" &> /dev/null || result=1
+	[ "${result}" -ne 0 ] || sed -i "s/\(@.*\)\(:[0-9]\{2,6\}\)/\1:${port_new} /g" '/opt/apps/mors/bin/main/ipset_domain' &> /dev/null || result=1
 
 	[ -f /opt/apps/mors/bin/main/dnsmasq ] && {
 		# server_crypt_1="echo \"server=\/\${host}\/${LOCALHOST_IP}#${port_new}\" >> \/opt\/etc\/dnsmasq.d\/mors.dnsmasq"
@@ -2556,22 +2591,22 @@ dns_crypt_port_change() {
 	}
 
 
-	if [ "${cmd}" = restart ]; then
-		cmd_dnsmasq_dns_change "${LOCALHOST_IP}#${port_new}" restart &> /dev/null
+	[ "${result}" -ne 0 ] || cmd_dnsmasq_dns_change "${LOCALHOST_IP}#${port_new}" norestart &> /dev/null || result=1
+	if [ "${result}" -eq 0 ] && [ "${cmd}" = restart ]; then
 		if ! [ -f /opt/etc/init.d/S09dnscrypt-proxy2 ]; then
 			if [ -f "${MORS_BACKUP_PATH}/S09dnscrypt-proxy2" ]; then
-				cp "${MORS_BACKUP_PATH}/S09dnscrypt-proxy2" /opt/etc/init.d/S09dnscrypt-proxy2
+				cp "${MORS_BACKUP_PATH}/S09dnscrypt-proxy2" /opt/etc/init.d/S09dnscrypt-proxy2 || result=1
 			else
 				error "Нарушена работа пакета, файл /opt/etc/init.d/S09dnscrypt-proxy2 отсутствует"
-				exit 1
+				result=1
 			fi
 		fi
-		/opt/etc/init.d/S09dnscrypt-proxy2 restart &> /dev/null
-	else
-		cmd_dnsmasq_dns_change "${LOCALHOST_IP}#${port_new}" &> /dev/null
+		[ "${result}" -ne 0 ] || /opt/etc/init.d/S09dnscrypt-proxy2 restart &> /dev/null || result=1
+		[ "${result}" -ne 0 ] || /opt/etc/init.d/S56dnsmasq restart &> /dev/null || result=1
 	fi
 
-	[ $? = 0 ] && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+	[ "${result}" -eq 0 ] && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+	return "${result}"
 }
 
 
@@ -2584,13 +2619,16 @@ dns_crypt_port_change() {
 refresh_dnsmasq_ipset_table(){
 
 		ready "${prefix}Заполняем dnsmasq таблицу данными из защищенного списка"
-		if /opt/apps/mors/bin/main/dnsmasq  ; then #&>/dev/null
+		if /opt/apps/mors/bin/main/dnsmasq; then #&>/dev/null
 			when_ok "УСПЕШНО"
+			return 0
 		else
-			if /opt/apps/mors/bin/main/dnsmasq  ; then
+			if /opt/apps/mors/bin/main/dnsmasq; then
 				when_ok "УСПЕШНО"
+				return 0
 			else
 				when_bad "ОШИБКА"
+				return 1
 			fi
 		fi
 #		ready "${prefix}Перезапускаем сервис dnsmasq"
@@ -2628,6 +2666,8 @@ get_dns_crypt_status() {
 # ------------------------------------------------------------------------------------------
 dns_crypt_install() {
 	is_install_stage="${1}"
+	local activation_mode=runtime
+	[ -n "${is_install_stage}" ] && activation_mode=prepare
 #	В случае наличия архива файла запуска сервиса dnscrypt_proxy2
 	if [ -f /opt/etc/init.d/K09dnscrypt-proxy2 ]; then
 		#warning "Обнаружен архив файла S09dnscrypt-proxy2."
@@ -2679,7 +2719,8 @@ dns_crypt_install() {
 	#	Настраиваем сервис
 	ready "Настраиваем dnscrypt-proxy2..."
 	local activation_result
-	cmd_dns_crypt_on 1> /dev/null 2> "${ERROR_LOG_FILE}"
+	: >"${ERROR_LOG_FILE}"
+	cmd_dns_crypt_on "${activation_mode}" 1> /dev/null 2> "${ERROR_LOG_FILE}"
 	activation_result=$?
 	if [ "${activation_result}" -ne 0 ] || [ -s "${ERROR_LOG_FILE}" ]; then
 		ready_status 1 "Проблема при активации шифрования DNS трафика"
@@ -2694,42 +2735,47 @@ dns_crypt_install() {
 #
 # ------------------------------------------------------------------------------------------
 cmd_dns_crypt_on() {
+	local activation_mode=${1:-runtime}
+	case "${activation_mode}" in prepare|runtime) ;; *) return 64 ;; esac
 	exit_when_adguard_on status; [ "${status}" = 0 ] && {
 
 		crypt_port=$(get_config_value DNS_CRYPT_PORT)
-		if [ "$(get_dns_crypt_status)" = on ]; then
+		if [ "${activation_mode}" = runtime ] && [ "$(get_dns_crypt_status)" = on ]; then
 			ready "Шифрование DNS уже";	when_ok "ПОДКЛЮЧЕНО"
 		else
 			dns_crypt_port=$(get_config_value DNS_CRYPT_PORT)
 			ready "Шифрование DNS"
-			{
+			(
 				# кэш
-				sed -i "s/\(^cache.=.\).*$/\1true/g"           '/opt/etc/dnscrypt-proxy.toml'
-				sed -i "s/\(^cache_min_ttl.=.\).*$/\15/g"      '/opt/etc/dnscrypt-proxy.toml'
-				sed -i "s/\(^cache_max_ttl.=.\).*$/\1129600/g" '/opt/etc/dnscrypt-proxy.toml'
-				sed -i "s/\(^cache_neg_min_ttl.=.\).*$/\11/g"  '/opt/etc/dnscrypt-proxy.toml'
-				sed -i "s/\(^cache_neg_max_ttl.=.\).*$/\11/g"  '/opt/etc/dnscrypt-proxy.toml'
+				sed -i "s/\(^cache.=.\).*$/\1true/g"           "${DNSCRYPT_CONFIG}" || exit 1
+				sed -i "s/\(^cache_min_ttl.=.\).*$/\15/g"      "${DNSCRYPT_CONFIG}" || exit 1
+				sed -i "s/\(^cache_max_ttl.=.\).*$/\1129600/g" "${DNSCRYPT_CONFIG}" || exit 1
+				sed -i "s/\(^cache_neg_min_ttl.=.\).*$/\11/g"  "${DNSCRYPT_CONFIG}" || exit 1
+				sed -i "s/\(^cache_neg_max_ttl.=.\).*$/\11/g"  "${DNSCRYPT_CONFIG}" || exit 1
 				# требование безопасности к серверам
-				sed -i "s/\(^require_dnssec.=.\).*$/\1true/g" '/opt/etc/dnscrypt-proxy.toml'
+				sed -i "s/\(^require_dnssec.=.\).*$/\1true/g" "${DNSCRYPT_CONFIG}" || exit 1
 				# пока нет поддержки IPv6
-				sed -i "s/\(^block_ipv6.=.\).*$/\1true/g"    '/opt/etc/dnscrypt-proxy.toml'
-				sed -i "s/\(^ipv6_servers.=.\).*$/\1false/g" '/opt/etc/dnscrypt-proxy.toml'
+				sed -i "s/\(^block_ipv6.=.\).*$/\1true/g"    "${DNSCRYPT_CONFIG}" || exit 1
+				sed -i "s/\(^ipv6_servers.=.\).*$/\1false/g" "${DNSCRYPT_CONFIG}" || exit 1
 				# более тяжёлые для роутера
-				sed -i "s/^[# ]\{0,1\}[ ]\{0,1\}\(doh_servers.=.\).*$/\1false/g" '/opt/etc/dnscrypt-proxy.toml'
+				sed -i "s/^[# ]\{0,1\}[ ]\{0,1\}\(doh_servers.=.\).*$/\1false/g" "${DNSCRYPT_CONFIG}" || exit 1
 				# слушаем запросы только с роутера
-				sed -i "s/\(^listen_addresses.=.\).*$/\1['127.0.0.1:${crypt_port}'.*]/g" "${DNSCRYPT_CONFIG}" &> /dev/null
+				sed -i "s/\(^listen_addresses.=.\).*$/\1['127.0.0.1:${crypt_port}']/g" "${DNSCRYPT_CONFIG}" || exit 1
 				# в идеале выбрать быстрые для РФ без DoH и IPv6, пока просто динамические
-				sed -i "s/^\(server_names =.*\)/# \1/g" '/opt/etc/dnscrypt-proxy.toml'
+				sed -i "s/^\(server_names =.*\)/# \1/g" "${DNSCRYPT_CONFIG}" || exit 1
 
 				# разрешаем ECH
-				sed -i 's/.*\(filter-rr.*\)/# \1/' /opt/etc/dnsmasq.conf
+				sed -i 's/.*\(filter-rr.*\)/# \1/' "${DNSMASQ_CONFIG}" || exit 1
 
-				dns_crypt_port_change "${dns_crypt_port}" restart
+				dns_crypt_port_change "${dns_crypt_port}" norestart || exit 1
 
-				# множество конфигов должно обновиться и службы перезапуститься
-				cmd_mors_init 'no'
-			} 1> /dev/null 2> "${ERROR_LOG_FILE}"
-			ready_status "${?}" "Произошла непредвиденная ошибка." "ПОДКЛЮЧЕНО"
+				# В setup сервисы запускаются один раз в commit-фазе после проверки
+				# подготовленного конфига. Интерактивная команда сохраняет прежний runtime-контракт.
+				[ "${activation_mode}" = prepare ] || cmd_mors_init 'no'
+			) 1> /dev/null 2>> "${ERROR_LOG_FILE}"
+			activation_result=$?
+			ready_status "${activation_result}" "Произошла непредвиденная ошибка." "ПОДКЛЮЧЕНО"
+			return "${activation_result}"
 		fi
 	}
 }

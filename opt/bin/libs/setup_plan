@@ -25,6 +25,9 @@ setup_plan__inventory_json() {
 	printf '%s\n' "${raw}" | jq -ce \
 		--arg managed_proxy "${PROXY_VLESS_NAME:-Proxy21}" \
 		--arg managed_entware "${managed_vless_entware}" \
+		--arg managed_description "${PROXY_VLESS_DESC:-Mors-proxy-vless}" \
+		--arg legacy_description "${LEGACY_PROXY_VLESS_DESC:-Kvas-proxy-vless}" \
+		--argjson raw_interfaces "${raw}" \
 		--argjson managed_vless_available "${managed_vless_available}" '
 		[.[]
 		| select(.defaultgw != true)
@@ -32,22 +35,26 @@ setup_plan__inventory_json() {
 			.type == "OpenVPN" or .type == "Wireguard" or .type == "IKE" or
 			.type == "SSTP" or .type == "PPPOE" or .type == "L2TP" or
 			.type == "PPTP" or .type == "OpenConnect" or
-			(.type == "Proxy" and .id == $managed_proxy)
+			(.type == "Proxy" and .id == $managed_proxy and
+				(.description == $managed_description or .description == $legacy_description))
 		)
 		| select(.id != null and ."interface-name" != null)
 		| {
 			cli: .id,
 			entware: (if .type == "Proxy" and .id == $managed_proxy then $managed_entware else ."interface-name" end),
-			description: (.description // .id),
+			description: (if .type == "Proxy" and .id == $managed_proxy then "Mors VLESS" else (.description // .id) end),
+			original_description: (if .type == "Proxy" and .id == $managed_proxy then (.description // "") else "" end),
 			state: (.state // "unknown"),
-			provisioning: "existing"
+			provisioning: (if .type == "Proxy" and .id == $managed_proxy and .description == $legacy_description then "legacy_vless" else "existing" end)
 		}]
 		| unique_by(.cli)
-		| if $managed_vless_available and (any(.[]; .cli == $managed_proxy) | not) then
+		| if $managed_vless_available and
+			([ $raw_interfaces[] | select(.id == $managed_proxy) ] | length == 0) then
 			. + [{
 				cli: $managed_proxy,
 				entware: $managed_entware,
 				description: "Mors VLESS",
+				original_description: "",
 				state: "not_configured",
 				provisioning: "managed_vless"
 			}]
@@ -80,11 +87,13 @@ setup_plan__select() {
 	MORS_SETUP_INTERFACE_CLI=$(printf '%s\n' "${selected}" | jq -r '.[0].cli')
 	MORS_SETUP_INTERFACE_ENTWARE=$(printf '%s\n' "${selected}" | jq -r '.[0].entware')
 	MORS_SETUP_INTERFACE_DESCRIPTION=$(printf '%s\n' "${selected}" | jq -r '.[0].description')
+	MORS_SETUP_INTERFACE_ORIGINAL_DESCRIPTION=$(printf '%s\n' "${selected}" | jq -r '.[0].original_description // ""')
 	MORS_SETUP_INTERFACE_STATE=$(printf '%s\n' "${selected}" | jq -r '.[0].state')
 	MORS_SETUP_INTERFACE_PROVISIONING=$(printf '%s\n' "${selected}" | jq -r '.[0].provisioning')
 	MORS_SETUP_DNS_BACKEND=${dns}
 	export MORS_SETUP_INTERFACE_CLI MORS_SETUP_INTERFACE_ENTWARE
 	export MORS_SETUP_INTERFACE_DESCRIPTION MORS_SETUP_INTERFACE_STATE
+	export MORS_SETUP_INTERFACE_ORIGINAL_DESCRIPTION
 	export MORS_SETUP_INTERFACE_PROVISIONING MORS_SETUP_DNS_BACKEND
 }
 
@@ -122,8 +131,9 @@ setup_plan__print() {
 					interface: {cli: $cli, entware: $entware, description: $description, state: $state, provisioning: $provisioning},
 					dns_backend: $dns
 				},
-				changes: (["dns", "firewall", "routing", "services", "ndm_hooks"] +
-					(if $provisioning == "managed_vless" then ["keenetic_proxy_interface"] else [] end)),
+			changes: (["dns", "firewall", "routing", "services", "ndm_hooks"] +
+					(if $provisioning == "managed_vless" then ["keenetic_proxy_interface"]
+					 elif $provisioning == "legacy_vless" then ["keenetic_proxy_interface_migration"] else [] end)),
 				preserved: ["mors_config", "mors_list", "tunnel_credentials"],
 				may_require_reboot: false,
 				recovery_command: "mors setup recover --yes"
@@ -139,6 +149,7 @@ DNS: ${MORS_SETUP_DNS_BACKEND}
 Перезагрузка: не требуется
 
 Будут изменены DNS, Mors firewall/routes/ipset, сервисы и NDM-hooks.
+$(if [ "${MORS_SETUP_INTERFACE_PROVISIONING}" = legacy_vless ]; then printf '%s\n' 'Legacy Kvas Proxy21 будет принят Mors без удаления интерфейса.'; fi)
 Будут сохранены конфигурация Mors, пользовательский список и настройки тоннеля.
 До финального подтверждения постоянные изменения не выполняются.
 EOF
@@ -203,6 +214,7 @@ setup_plan__journal_store() {
 		--arg cli "${MORS_SETUP_INTERFACE_CLI}" \
 		--arg entware "${MORS_SETUP_INTERFACE_ENTWARE}" \
 		--arg description "${MORS_SETUP_INTERFACE_DESCRIPTION}" \
+		--arg original_description "${MORS_SETUP_INTERFACE_ORIGINAL_DESCRIPTION:-}" \
 		--arg state "${MORS_SETUP_INTERFACE_STATE}" \
 		--arg dns "${MORS_SETUP_DNS_BACKEND}" \
 		--arg provisioning "${MORS_SETUP_INTERFACE_PROVISIONING}" \
@@ -211,6 +223,7 @@ setup_plan__journal_store() {
 			interface_cli: $cli,
 			interface_entware: $entware,
 			interface_description: $description,
+			interface_original_description: $original_description,
 			interface_state: $state,
 			dns_backend: $dns,
 			provisioning: $provisioning,
@@ -222,7 +235,7 @@ setup_plan__journal_store() {
 
 setup_plan__journal_provision_state() {
 	local state=${1:-} journal now
-	case "${state}" in creating|created) ;; *) return 64 ;; esac
+	case "${state}" in creating|created|adopting|adopted) ;; *) return 64 ;; esac
 	journal=$(lifecycle_transaction__journal_file) || return 1
 	now=$(lifecycle_state__now) || return 1
 	jq --arg state "${state}" --arg now "${now}" '
@@ -238,9 +251,11 @@ setup_plan__journal_load() {
 	MORS_SETUP_DNS_BACKEND=$(jq -er '.plan.dns_backend' "${journal}") || return 1
 	MORS_SETUP_INTERFACE_PROVISIONING=$(jq -er '.plan.provisioning // "existing"' "${journal}") || return 1
 	MORS_SETUP_INTERFACE_DESCRIPTION=$(jq -er '.plan.interface_description // .plan.interface_cli' "${journal}") || return 1
+	MORS_SETUP_INTERFACE_ORIGINAL_DESCRIPTION=$(jq -er '.plan.interface_original_description // ""' "${journal}") || return 1
 	MORS_SETUP_INTERFACE_STATE=$(jq -er '.plan.interface_state // "unknown"' "${journal}") || return 1
 	export MORS_SETUP_INTERFACE_CLI MORS_SETUP_INTERFACE_ENTWARE
 	export MORS_SETUP_INTERFACE_DESCRIPTION MORS_SETUP_INTERFACE_STATE
+	export MORS_SETUP_INTERFACE_ORIGINAL_DESCRIPTION
 	export MORS_SETUP_INTERFACE_PROVISIONING MORS_SETUP_DNS_BACKEND
 	setup_plan__validate_selected
 }

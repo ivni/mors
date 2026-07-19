@@ -26,6 +26,7 @@ lifecycle_snapshot__files() {
 	cat <<'EOF'
 /opt/etc/mors.conf
 /opt/etc/mors.list
+/opt/etc/hosts
 /opt/etc/dnsmasq.conf
 /opt/etc/dnscrypt-proxy.toml
 /opt/etc/AdGuardHome/AdGuardHome.yaml
@@ -84,7 +85,7 @@ lifecycle_snapshot__services() {
 EOF
 }
 
-lifecycle_snapshot__capture() {
+lifecycle_snapshot__capture() (
 	local snapshot manifest services path index backup state target status_output telemetry_hook_state
 	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
 	manifest="${snapshot}/files.tsv"
@@ -155,7 +156,7 @@ lifecycle_snapshot__capture() {
 	chmod 600 "${services}.tmp" || return 1
 	mv -f "${services}.tmp" "${services}" || return 1
 	sync
-}
+)
 
 lifecycle_snapshot__restore_files() {
 	local snapshot manifest backup presence path parent target telemetry_hook_state

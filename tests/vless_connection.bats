@@ -60,3 +60,19 @@ setup() {
 	[ "${status}" -eq 1 ]
 	[[ "${output}" == *"Сервис Xray не запущен"* ]]
 }
+
+@test "legacy Proxy21 adoption changes only its description" {
+	LEGACY_PROXY_VLESS_DESC=Kvas-proxy-vless
+	PROXY_VLESS_NAME=Proxy21
+	PROXY_VLESS_PROTO=socks5
+	captured=''
+	api_post_query() { captured=$1; }
+	delete_proxy_interface() { return 99; }
+
+	rename_proxy_interface "${PROXY_VLESS_DESC}"
+
+	[ "$(jq -r '.[0].interface.name' <<<"${captured}")" = Proxy21 ]
+	[ "$(jq -r '.[0].interface.description' <<<"${captured}")" = Mors-proxy-vless ]
+	[ "$(jq -r '.[0].interface | keys | sort | join(",")' <<<"${captured}")" = description,name ]
+	[ "$(jq -r '.[0].interface.proxy // empty' <<<"${captured}")" = '' ]
+}

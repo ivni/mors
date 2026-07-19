@@ -45,6 +45,7 @@ SHADOWSOCKS_CONF=/opt/etc/shadowsocks.json
 DNSMASQ_IPSET_HOSTS=/opt/etc/dnsmasq.d/mors.dnsmasq
 DNSMASQ_CONFIG=/opt/etc/dnsmasq.conf
 DNSCRYPT_CONFIG=/opt/etc/dnscrypt-proxy.toml
+MORS_HOSTS_FILE=/opt/etc/hosts
 ADBLOCK_LIST_EXCEPTION=/opt/etc/adblock/exception.list
 ADBLOCK_HOSTS_FILE=/opt/etc/adblock/ads.mors.list
 ADBLOCK_SOURCES_LIST=/opt/etc/adblock/sources.list
@@ -111,6 +112,20 @@ INFACE_REQUEST="${LOCALHOST_IP}:79/rci/show/interface"
 INFACE_PART_REQUEST="${LOCALHOST_IP}:79/rci/interface"
 SSR_ENTWARE_TEMPL=ezcfg
 MINUS=9
+
+mors_hosts__ensure_readable() {
+	local parent
+	if [ -L "${MORS_HOSTS_FILE}" ] || { [ -e "${MORS_HOSTS_FILE}" ] && [ ! -f "${MORS_HOSTS_FILE}" ]; }; then
+		error "${MORS_HOSTS_FILE} должен быть обычным файлом."
+		return 1
+	fi
+	if [ ! -e "${MORS_HOSTS_FILE}" ]; then
+		parent=$(dirname "${MORS_HOSTS_FILE}") || return 1
+		mkdir -p "${parent}" || return 1
+		(umask 022; : >"${MORS_HOSTS_FILE}") || return 1
+	fi
+	chmod 644 "${MORS_HOSTS_FILE}"
+}
 
 
 #-------------------------------------------------------------------------------

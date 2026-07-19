@@ -8,6 +8,7 @@ telemetry_runtime__pin_production
 . /opt/apps/mors/bin/libs/lifecycle_state
 . /opt/apps/mors/bin/libs/lifecycle_snapshot
 . /opt/apps/mors/bin/libs/setup_plan
+. /opt/apps/mors/bin/libs/setup_dns
 . /opt/apps/mors/bin/libs/runtime_lock
 . /opt/apps/mors/bin/libs/telemetry
 
@@ -594,7 +595,6 @@ clear_previous_version_net_rules() {
 }
 
 setup__cmd_install_unlocked(){
-
 #	Если режим обновления, то не спрашиваем про выбор соединения,
 #	а просто берем его из файла конфигурации Морса
 	setup_require_supported_os || return 1
@@ -699,6 +699,10 @@ setup__cmd_install_unlocked(){
 		# DNSCRYPT-PROXY2
 		#------------------------------------------------------
 		dns_crypt_install 'install' || return 1
+		setup_dns__validate_dnscrypt || {
+			error "Подготовленная конфигурация DNSCrypt не прошла проверку. Журнал: ${MORS_SETUP_DNS_LOG}"
+			return 1
+		}
 		log_in_file "Шифрование DNS трафика (dnscrypt-proxy2) ВКЛЮЧЕНО."
 		#------------------------------------------------------
 		# Блокировка рекламы
@@ -732,19 +736,21 @@ setup__cmd_install_unlocked(){
 	setup__activate_core_hooks || return 1
 
 	ready "Запускаем МОРС в работу"
-	if cmd_mors_init &> /dev/null ; then
-		when_ok "УСПЕШНО"
-	else
-		when_bad "ОШИБКА"
-		ready "Пробуем перезапустить МОРС снова"
-		if cmd_mors_init &> /dev/null ; then
+	if [ "${ANSWER_AGH}" = n ]; then
+		if setup__activate_dnscrypt_runtime; then
 			when_ok "УСПЕШНО"
 		else
 			when_bad "ОШИБКА"
-			mess="Проблема при запуске МОРСа"
+			mess="Проблема при запуске DNS-стека Mors. Журнал: ${MORS_SETUP_DNS_LOG}"
 			log_in_file "ОШИБКА: ${mess}"
-			exit 1
+			error "${mess}"
+			return 1
 		fi
+	elif cmd_mors_init &> /dev/null; then
+		when_ok "УСПЕШНО"
+	else
+		when_bad "ОШИБКА"
+		return 1
 	fi
 
 }
@@ -1043,17 +1049,45 @@ setup__activate_core_hooks() {
 		/opt/etc/ndm/netfilter.d/100-dns-local || return 1
 }
 
-setup__managed_vless_live() {
+setup__proxy_vless_lookup() {
 	curl -fsS "${INFACE_REQUEST}" | jq -ce \
 		--arg id "${PROXY_VLESS_NAME}" \
 		--arg entware "${PROXY_VLESS_ENTWARE:-t2s21}" '
-		.[]
-		| select(.id == $id and .type == "Proxy" and ."interface-name" != null)
-		| {cli: .id, entware: $entware}
+		[.[] | select(.id == $id)]
+		| if length == 0 then
+			{presence: "missing", cli: $id, entware: $entware, type: "", interface_name: "", description: ""}
+		  elif length == 1 then
+			.[0] | {
+				presence: "present",
+				cli: .id,
+				entware: $entware,
+				type: (.type // ""),
+				interface_name: (."interface-name" // ""),
+				description: (.description // "")
+			}
+		  else error("duplicate Proxy21") end
 	'
 }
 
-setup__record_selected_interface_mapping() {
+setup__managed_vless_live() {
+	setup__proxy_vless_lookup | jq -ce --arg description "${PROXY_VLESS_DESC}" '
+		select(.presence == "present" and .type == "Proxy" and
+			.interface_name != "" and .description == $description)
+		| {cli: .cli, entware: .entware, description: .description}
+	'
+}
+
+setup__proxy_vless_stably_missing() {
+	local confirmations=3 proxy
+	while [ "${confirmations}" -gt 0 ]; do
+		proxy=$(setup__proxy_vless_lookup 2>/dev/null) || return 1
+		[ "$(printf '%s\n' "${proxy}" | jq -r '.presence')" = missing ] || return 1
+		confirmations=$((confirmations - 1))
+		[ "${confirmations}" -eq 0 ] || sleep 1
+	done
+}
+
+setup__record_selected_interface_mapping() (
 	local parent temporary description
 	[ -n "${MORS_SETUP_INTERFACE_CLI:-}" ] || return 1
 	[ -n "${MORS_SETUP_INTERFACE_ENTWARE:-}" ] || return 1
@@ -1086,7 +1120,7 @@ setup__record_selected_interface_mapping() {
 		return 1
 	}
 	mv -f "${temporary}" "${INFACE_NAMES_FILE}"
-}
+)
 
 setup__print_install_completed() {
 	local output
@@ -1114,13 +1148,60 @@ setup__print_install_completed() {
 }
 
 setup__prepare_selected_interface() {
-	local live attempt
+	local proxy presence live_description attempt provisioning
 	[ "${MORS_SETUP_INTERFACE_CLI:-}" = "${PROXY_VLESS_NAME}" ] || return 0
-	if live=$(setup__managed_vless_live 2>/dev/null); then
-		[ "$(printf '%s\n' "${live}" | jq -r '.entware')" = "${MORS_SETUP_INTERFACE_ENTWARE}" ]
-		return $?
+	provisioning=${MORS_SETUP_INTERFACE_PROVISIONING:-existing}
+	proxy=$(setup__proxy_vless_lookup 2>/dev/null) || {
+		error 'Не удалось однозначно прочитать Proxy21 через Keenetic RCI.'
+		return 1
+	}
+	presence=$(printf '%s\n' "${proxy}" | jq -r '.presence') || return 1
+	if [ "${presence}" = present ]; then
+		[ "$(printf '%s\n' "${proxy}" | jq -r '.entware')" = "${MORS_SETUP_INTERFACE_ENTWARE}" ] || return 1
+		[ "$(printf '%s\n' "${proxy}" | jq -r '.type')" = Proxy ] || {
+			error 'Proxy21 занят интерфейсом другого типа.'
+			return 1
+		}
+		[ -n "$(printf '%s\n' "${proxy}" | jq -r '.interface_name')" ] || {
+			error 'Proxy21 ещё не полностью опубликован Keenetic.'
+			return 1
+		}
+		live_description=$(printf '%s\n' "${proxy}" | jq -r '.description') || return 1
+		case "${provisioning}" in
+			legacy_vless)
+				[ "${live_description}" = "${LEGACY_PROXY_VLESS_DESC}" ] || {
+					error 'Legacy Proxy21 изменился после построения setup plan.'
+					return 1
+				}
+				setup_plan__journal_provision_state adopting || return 1
+				rename_proxy_interface "${PROXY_VLESS_DESC}" || return 1
+				attempt=10
+				while [ "${attempt}" -gt 0 ]; do
+					proxy=$(setup__proxy_vless_lookup 2>/dev/null) || return 1
+					if [ "$(printf '%s\n' "${proxy}" | jq -r '.presence')" = present ] && \
+						[ "$(printf '%s\n' "${proxy}" | jq -r '.type')" = Proxy ] && \
+						[ -n "$(printf '%s\n' "${proxy}" | jq -r '.interface_name')" ] && \
+						[ "$(printf '%s\n' "${proxy}" | jq -r '.description')" = "${PROXY_VLESS_DESC}" ]; then
+						setup_plan__journal_provision_state adopted
+						return $?
+					fi
+					attempt=$((attempt - 1))
+					sleep 1
+				done
+				error 'Keenetic не подтвердил принятие legacy Proxy21.'
+				return 1
+				;;
+			existing|managed_vless)
+				[ "${live_description}" = "${PROXY_VLESS_DESC}" ] || {
+					error 'Proxy21 занят интерфейсом, который не принадлежит Mors.'
+					return 1
+				}
+				return 0
+				;;
+			*) return 1 ;;
+		esac
 	fi
-	[ "${MORS_SETUP_INTERFACE_PROVISIONING:-}" = managed_vless ] || {
+	[ "${provisioning}" = managed_vless ] || {
 		error 'Выбранный Proxy21 исчез после построения setup plan.'
 		return 1
 	}
@@ -1129,7 +1210,7 @@ setup__prepare_selected_interface() {
 		return 1
 	}
 	setup_plan__journal_provision_state creating || return 1
-	create_proxy_interface || return 1
+	configure_proxy_interface "${PROXY_VLESS_DESC}" || return 1
 	attempt=10
 	while [ "${attempt}" -gt 0 ]; do
 		if live=$(setup__managed_vless_live 2>/dev/null); then
@@ -1145,21 +1226,66 @@ setup__prepare_selected_interface() {
 }
 
 setup__rollback_provisioned_interface() {
-	local journal provisioning provision_state attempt
+	local journal provisioning provision_state original_description attempt proxy presence description type interface_name
 	journal=$(lifecycle_transaction__journal_file) || return 1
 	provisioning=$(jq -r '.plan.provisioning // "existing"' "${journal}" 2>/dev/null) || return 1
 	provision_state=$(jq -r '.plan.provision_state // "none"' "${journal}" 2>/dev/null) || return 1
-	[ "${provisioning}" = managed_vless ] || return 0
-	case "${provision_state}" in creating|created) ;; *) return 0 ;; esac
-	setup__managed_vless_live >/dev/null 2>&1 || return 0
-	delete_proxy_interface || return 1
-	attempt=10
-	while [ "${attempt}" -gt 0 ]; do
-		setup__managed_vless_live >/dev/null 2>&1 || return 0
-		attempt=$((attempt - 1))
-		sleep 1
-	done
-	return 1
+	original_description=$(jq -r '.plan.interface_original_description // ""' "${journal}" 2>/dev/null) || return 1
+	case "${provisioning}:${provision_state}" in
+		managed_vless:creating|managed_vless:created)
+			proxy=$(setup__proxy_vless_lookup 2>/dev/null) || return 1
+			presence=$(printf '%s\n' "${proxy}" | jq -r '.presence') || return 1
+			if [ "${presence}" = missing ]; then
+				[ "${provision_state}" = created ] && return 0
+				setup__proxy_vless_stably_missing
+				return $?
+			fi
+			type=$(printf '%s\n' "${proxy}" | jq -r '.type') || return 1
+			description=$(printf '%s\n' "${proxy}" | jq -r '.description') || return 1
+			interface_name=$(printf '%s\n' "${proxy}" | jq -r '.interface_name') || return 1
+			[ "${type}" = Proxy ] && [ "${description}" = "${PROXY_VLESS_DESC}" ] && [ -n "${interface_name}" ] || return 1
+			delete_proxy_interface || return 1
+			attempt=10
+			while [ "${attempt}" -gt 0 ]; do
+				proxy=$(setup__proxy_vless_lookup 2>/dev/null) || return 1
+				presence=$(printf '%s\n' "${proxy}" | jq -r '.presence') || return 1
+				[ "${presence}" = missing ] && return 0
+				type=$(printf '%s\n' "${proxy}" | jq -r '.type') || return 1
+				description=$(printf '%s\n' "${proxy}" | jq -r '.description') || return 1
+				[ "${type}" = Proxy ] && [ "${description}" = "${PROXY_VLESS_DESC}" ] || return 1
+				attempt=$((attempt - 1))
+				sleep 1
+			done
+			return 1
+			;;
+		legacy_vless:adopting|legacy_vless:adopted)
+			[ "${original_description}" = "${LEGACY_PROXY_VLESS_DESC}" ] || return 1
+			proxy=$(setup__proxy_vless_lookup 2>/dev/null) || return 1
+			presence=$(printf '%s\n' "${proxy}" | jq -r '.presence') || return 1
+			[ "${presence}" = present ] || return 1
+			type=$(printf '%s\n' "${proxy}" | jq -r '.type') || return 1
+			description=$(printf '%s\n' "${proxy}" | jq -r '.description') || return 1
+			interface_name=$(printf '%s\n' "${proxy}" | jq -r '.interface_name') || return 1
+			[ "${type}" = Proxy ] && [ -n "${interface_name}" ] || return 1
+			[ "${description}" = "${LEGACY_PROXY_VLESS_DESC}" ] && return 0
+			[ "${description}" = "${PROXY_VLESS_DESC}" ] || return 1
+			rename_proxy_interface "${original_description}" || return 1
+			attempt=10
+			while [ "${attempt}" -gt 0 ]; do
+				proxy=$(setup__proxy_vless_lookup 2>/dev/null) || return 1
+				if [ "$(printf '%s\n' "${proxy}" | jq -r '.presence')" = present ] && \
+					[ "$(printf '%s\n' "${proxy}" | jq -r '.type')" = Proxy ] && \
+					[ -n "$(printf '%s\n' "${proxy}" | jq -r '.interface_name')" ] && \
+					[ "$(printf '%s\n' "${proxy}" | jq -r '.description')" = "${LEGACY_PROXY_VLESS_DESC}" ]; then
+					return 0
+				fi
+				attempt=$((attempt - 1))
+				sleep 1
+			done
+			return 1
+			;;
+		*) return 0 ;;
+	esac
 }
 
 setup__service_running() {
@@ -1174,6 +1300,18 @@ setup__service_running() {
 setup__verify_failed() {
 	error "Lifecycle verification: ${1}"
 	return 1
+}
+
+setup__activate_dnscrypt_runtime() {
+	cmd_mors_init setup_commit &> /dev/null || return 1
+	setup_dns__activate_dnscrypt_stack
+}
+
+setup__bind_transaction_dns_log() {
+	local transaction_directory
+	transaction_directory=$(lifecycle_transaction__directory) || return 1
+	MORS_SETUP_DNS_LOG="${transaction_directory}/dns-startup.log"
+	export MORS_SETUP_DNS_LOG
 }
 
 setup__verify_committed() {
@@ -1211,8 +1349,8 @@ setup__verify_committed() {
 				setup__verify_failed 'не читается конфигурация dnsmasq или DNSCrypt'
 				return 1
 			fi
-			setup__service_running "${DNSMASQ_DEMON}" || setup__verify_failed 'dnsmasq не запущен' || return 1
-			setup__service_running "${DNSCRYPT_DEMON}" || setup__verify_failed 'DNSCrypt не запущен' || return 1
+			setup_dns__verify_stack || \
+				setup__verify_failed "DNS-стек не прошёл end-to-end проверку; журнал: $(setup_dns__log_path)" || return 1
 			;;
 		*) setup__verify_failed "неизвестный DNS backend ${dns_backend}"; return 1 ;;
 	esac
@@ -1528,6 +1666,10 @@ setup__cmd_install_with_runtime() {
 			return 1
 		}
 	fi
+	setup__bind_transaction_dns_log || {
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 4
+	}
 	lifecycle_transaction__phase applying || {
 		runtime_mutation_lock__release >/dev/null 2>&1 || true
 		return 1

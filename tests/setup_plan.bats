@@ -6,13 +6,15 @@ setup() {
 		{"id":"ISP","interface-name":"eth2","description":"Провайдер","type":"PPPOE","defaultgw":true,"state":"up"},
 		{"id":"Wireguard0","interface-name":"nwg0","description":"Рабочий VPN","type":"Wireguard","defaultgw":false,"state":"up"},
 		{"id":"Proxy7","interface-name":"opkg7","description":"Чужой Proxy","type":"Proxy","defaultgw":false,"state":"up"},
-		{"id":"Proxy21","interface-name":"opkg21","description":"Mors VLESS","type":"Proxy","defaultgw":false,"state":"down"},
+		{"id":"Proxy21","interface-name":"opkg21","description":"Mors-proxy-vless","type":"Proxy","defaultgw":false,"state":"down"},
 		{"id":"Bridge0","interface-name":"br0","description":"Домашняя сеть","type":"Bridge","defaultgw":false,"state":"up"}
 	]'
 	export MORS_SETUP_PLAN_INTERFACE_JSON
 	PROXY_VLESS_NAME=Proxy21
 	PROXY_VLESS_ENTWARE=t2s21
-	export PROXY_VLESS_NAME PROXY_VLESS_ENTWARE
+	PROXY_VLESS_DESC=Mors-proxy-vless
+	LEGACY_PROXY_VLESS_DESC=Kvas-proxy-vless
+	export PROXY_VLESS_NAME PROXY_VLESS_ENTWARE PROXY_VLESS_DESC LEGACY_PROXY_VLESS_DESC
 	. "${REPO_ROOT}/opt/bin/libs/setup_plan"
 }
 
@@ -45,6 +47,34 @@ setup() {
 @test "inventory does not promise managed VLESS without required Keenetic components" {
 	MORS_SETUP_PROXY_AVAILABLE=false
 	MORS_SETUP_PLAN_INTERFACE_JSON='[]'
+	export MORS_SETUP_PROXY_AVAILABLE MORS_SETUP_PLAN_INTERFACE_JSON
+
+	run setup_plan__inventory_json
+
+	[ "${status}" -eq 0 ]
+	[ "$(jq -r 'length' <<<"${output}")" -eq 0 ]
+}
+
+@test "inventory recognizes only exact legacy Proxy21 and marks transactional adoption" {
+	MORS_SETUP_PROXY_AVAILABLE=true
+	MORS_SETUP_PLAN_INTERFACE_JSON='[
+		{"id":"Proxy21","interface-name":"opkg21","description":"Kvas-proxy-vless","type":"Proxy","defaultgw":false,"state":"up"}
+	]'
+	export MORS_SETUP_PROXY_AVAILABLE MORS_SETUP_PLAN_INTERFACE_JSON
+
+	run setup_plan__inventory_json
+
+	[ "${status}" -eq 0 ]
+	[ "$(jq -r 'length' <<<"${output}")" -eq 1 ]
+	[ "$(jq -r '.[0].provisioning' <<<"${output}")" = legacy_vless ]
+	[ "$(jq -r '.[0].original_description' <<<"${output}")" = Kvas-proxy-vless ]
+}
+
+@test "foreign Proxy21 is neither adopted nor replaced by a synthetic target" {
+	MORS_SETUP_PROXY_AVAILABLE=true
+	MORS_SETUP_PLAN_INTERFACE_JSON='[
+		{"id":"Proxy21","interface-name":"opkg21","description":"Operator proxy","type":"Proxy","defaultgw":false,"state":"up"}
+	]'
 	export MORS_SETUP_PROXY_AVAILABLE MORS_SETUP_PLAN_INTERFACE_JSON
 
 	run setup_plan__inventory_json
@@ -148,17 +178,19 @@ setup() {
 
 @test "setup records the selected interface atomically and replaces stale aliases" {
 	local setup_file=${REPO_ROOT}/opt/bin/main/setup
-	source <(sed -n '/^setup__record_selected_interface_mapping()/,/^}/p' "${setup_file}")
+	source <(sed -n '/^setup__record_selected_interface_mapping()/,/^)/p' "${setup_file}")
 	INFACE_NAMES_FILE=${BATS_TEST_TMPDIR}/inface_equals
 	MORS_SETUP_INTERFACE_CLI=Proxy21
 	MORS_SETUP_INTERFACE_ENTWARE=t2s21
 	MORS_SETUP_INTERFACE_DESCRIPTION='Mors|VLESS'
 	printf 'Proxy21|old21|old\nWireguard0|nwg0|Рабочий VPN\n' >"${INFACE_NAMES_FILE}"
 
+	before_umask=$(umask)
 	setup__record_selected_interface_mapping
 
 	[ "$(grep -c '^Proxy21|' "${INFACE_NAMES_FILE}")" -eq 1 ]
 	grep -q '^Proxy21|t2s21|Mors VLESS$' "${INFACE_NAMES_FILE}"
 	grep -q '^Wireguard0|nwg0|Рабочий VPN$' "${INFACE_NAMES_FILE}"
-	[ "$(stat -c '%a' "${INFACE_NAMES_FILE}")" = 600 ]
+	case "$(uname -s)" in MINGW*|MSYS*) ;; *) [ "$(stat -c '%a' "${INFACE_NAMES_FILE}")" = 600 ] ;; esac
+	[ "$(umask)" = "${before_umask}" ]
 }

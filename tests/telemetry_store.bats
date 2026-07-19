@@ -26,7 +26,7 @@ make_payload() {
 		resourceLogs: [{
 			resource: {attributes: [
 				{key: "service.name", value: {stringValue: "mors"}},
-				{key: "service.version", value: {stringValue: "1.3.0~beta6-1"}},
+				{key: "service.version", value: {stringValue: "1.3.0~beta7-1"}},
 				{key: "service.instance.id", value: {stringValue: $instance}},
 				{key: "telemetry.sdk.name", value: {stringValue: "mors"}}
 			]},
@@ -146,7 +146,7 @@ make_payload() {
 	run telemetry_store__payload_valid "${BATS_TEST_TMPDIR}/secret-attribute"
 	[ "${status}" -ne 0 ]
 	jq '(.resourceLogs[0].resource.attributes[] |
-		select(.key == "service.version").value.stringValue) = "1.3.0~beta6-AQVN0123456789_example_key"' \
+		select(.key == "service.version").value.stringValue) = "1.3.0~beta7-AQVN0123456789_example_key"' \
 		"${BATS_TEST_TMPDIR}/payload" >"${BATS_TEST_TMPDIR}/secret-version"
 	run telemetry_store__payload_valid "${BATS_TEST_TMPDIR}/secret-version"
 	[ "${status}" -ne 0 ]
