@@ -12,6 +12,7 @@ setup() {
 	export MORS_LIFECYCLE_TRANSACTION_ROOT MORS_LIFECYCLE_ACTIVE_FILE
 	export MORS_LIFECYCLE_CONF_FILE MORS_LIFECYCLE_LEGACY_START_FILE
 	. "${REPO_ROOT}/opt/bin/libs/lifecycle_state"
+	. "${REPO_ROOT}/opt/bin/libs/ipv6_bypass"
 	. "${REPO_ROOT}/opt/bin/libs/test_probe"
 	MORS_CONF_FILE=${BATS_TEST_TMPDIR}/mors.conf
 	MORS_LIST_FILE=${BATS_TEST_TMPDIR}/mors.list

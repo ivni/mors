@@ -19,6 +19,8 @@ required_paths=(
 	opt/bin/libs/lifecycle_snapshot
 	opt/bin/libs/setup_plan
 	opt/bin/libs/setup_dns
+	opt/bin/libs/ipv6_bypass
+	opt/bin/libs/service_action
 	opt/bin/libs/runtime_lock
 	opt/bin/libs/telemetry
 	opt/bin/libs/telemetry_runtime
@@ -57,6 +59,11 @@ required_paths=(
 	docs/telemetry-architecture.md
 	tests/setup_plan.bats
 	tests/setup_dns.bats
+	tests/setup_backup.bats
+	tests/setup_dataplane.bats
+	tests/ndm_failures.bats
+	tests/vpn_failures.bats
+	tests/ipv6_bypass.bats
 	tests/setup_proxy.bats
 	tests/dns_prepare.bats
 	tests/dnsmasq_worker.bats

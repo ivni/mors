@@ -23,6 +23,7 @@
 . /opt/apps/mors/bin/libs/vless_store
 . /opt/apps/mors/bin/libs/vless_config
 . /opt/apps/mors/bin/libs/vless_runtime
+. /opt/apps/mors/bin/libs/service_action
 
 XRAY_INIT=/opt/etc/init.d/S24xray
 
@@ -38,11 +39,32 @@ PROXY_VLESS_PROTO=socks5
 DOMAIN_FOR_CHECK="https://ifconfig.me/ip"
 VLESS_SUPERVISOR_INIT=/opt/etc/init.d/S25mors-vless
 
+vless__service_action() {
+	local service action log
+	service=${1}
+	action=${2}
+	log=${MORS_SETUP_DNS_LOG:-}
+	service_action__run "${service}" "${action}" "${log}" \
+		"${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT:-15}" \
+		"${MORS_SETUP_DNS_SERVICE_KILL_AFTER:-2}" \
+		"${MORS_SETUP_DNS_TIMEOUT_CMD:-/opt/bin/timeout}"
+}
+
+vless__service_state() {
+	local service log
+	service=${1}
+	log=${MORS_SETUP_DNS_LOG:-}
+	service_action__state "${service}" status "${log}" \
+		"${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT:-15}" \
+		"${MORS_SETUP_DNS_SERVICE_KILL_AFTER:-2}" \
+		"${MORS_SETUP_DNS_TIMEOUT_CMD:-/opt/bin/timeout}"
+}
+
 vless_runtime__supervisor_service() (
 	# The supervisor is long-lived. It must never inherit a transaction token
 	# owned by the CLI/setup process that starts it.
 	unset MORS_RUNTIME_LOCK_TOKEN MORS_RUNTIME_LOCK_DEPTH
-	"${VLESS_SUPERVISOR_INIT}" "${1}"
+	vless__service_action "${VLESS_SUPERVISOR_INIT}" "${1}"
 )
 
 
@@ -70,9 +92,7 @@ has_xray_enable(){
 #	Функция проверяет, включен ли Xray
 #
 #-------------------------------------------------------------------------------
-    [ -f "${XRAY_INIT}" ] && {
-        "${XRAY_INIT}" status 2>/dev/null | grep -qF 'alive'
-    }
+    [ -f "${XRAY_INIT}" ] && [ "$(vless__service_state "${XRAY_INIT}")" = running ]
 }
 
 xray_version_check() {
@@ -545,6 +565,10 @@ vless_cli__state_label() {
 		draining) printf '%s' 'ВЫВОДИТСЯ ИЗ РАБОТЫ' ;;
 		disabled) printf '%s' 'ВЫКЛЮЧЕНО' ;;
 		invalid) printf '%s' 'ОШИБКА КОНФИГУРАЦИИ' ;;
+		not_configured) printf '%s' 'НЕ НАСТРОЕНО' ;;
+		recovery_required) printf '%s' 'ТРЕБУЕТСЯ ВОССТАНОВЛЕНИЕ' ;;
+		lifecycle_operation_active) printf '%s' 'ВЫПОЛНЯЕТСЯ ИЗМЕНЕНИЕ' ;;
+		unknown) printf '%s' 'НЕИЗВЕСТНО' ;;
 		*) printf '%s' "${1:-НЕИЗВЕСТНО}" ;;
 	esac
 }
@@ -583,9 +607,28 @@ vless_cli__name_by_id() {
 	vless_store__get "${id}" | jq -r '.name // empty'
 }
 
+vless_cli__lifecycle_state() {
+	if command -v lifecycle_state__read >/dev/null 2>&1; then
+		lifecycle_state__read 2>/dev/null || printf '%s\n' recovery_required
+	else
+		# The packaged CLI always has lifecycle_state. Keeping this fallback makes
+		# the library usable by isolated tooling that predates package lifecycle.
+		printf '%s\n' ready
+	fi
+}
+
+vless_cli__lifecycle_transaction_active() {
+	command -v lifecycle_state__has_active_marker >/dev/null 2>&1 || return 1
+	lifecycle_state__has_active_marker
+}
+
 vless_cli__status_json() {
-	local state_json active_id now
+	local state_json active_id now lifecycle_state lifecycle_transaction_active=false
 	now=$(vless_store__now)
+	lifecycle_state=$(vless_cli__lifecycle_state)
+	if vless_cli__lifecycle_transaction_active; then
+		lifecycle_transaction_active=true
+	fi
 	if [ -f "${VLESS_STATE_FILE}" ] && state_json=$(jq -c . "${VLESS_STATE_FILE}" 2>/dev/null); then
 		:
 	else
@@ -599,16 +642,36 @@ vless_cli__status_json() {
 	fi
 	jq -n \
 		--slurpfile registry "${VLESS_REGISTRY_FILE}" \
+		--arg lifecycle_state "${lifecycle_state}" \
+		--argjson lifecycle_transaction_active "${lifecycle_transaction_active}" \
+		--arg now "${now}" \
 		--argjson state "${state_json}" '
+		(($lifecycle_state == "ready") and ($lifecycle_transaction_active | not)) as $runtime_current |
 		{
-			schema_version: 1,
-			status: $state.overall_state,
-			upstream_status: $state.upstream_state,
-			active_id: $state.active_id,
+			schema_version: 2,
+			lifecycle_state: $lifecycle_state,
+			lifecycle_transaction_active: $lifecycle_transaction_active,
+			runtime_current: $runtime_current,
+			status: (
+				if $lifecycle_transaction_active then "lifecycle_operation_active"
+				elif $runtime_current then $state.overall_state
+				else $lifecycle_state
+				end
+			),
+			upstream_status: (if $runtime_current then $state.upstream_state else "unknown" end),
+			active_id: (if $runtime_current then $state.active_id else null end),
 			policy: $registry[0].policy,
-			last_updated: $state.last_updated,
-			last_cycle_at: $state.last_cycle_at,
-			last_switch: $state.last_switch,
+			last_updated: (if $runtime_current then $state.last_updated else $now end),
+			last_cycle_at: (if $runtime_current then $state.last_cycle_at else null end),
+			last_switch: (if $runtime_current then $state.last_switch else null end),
+			last_runtime: {
+				status: $state.overall_state,
+				upstream_status: $state.upstream_state,
+				active_id: $state.active_id,
+				last_updated: $state.last_updated,
+				last_cycle_at: $state.last_cycle_at,
+				last_switch: $state.last_switch
+			},
 			connections: [
 				$registry[0].connections[] as $metadata |
 				($state.connections[$metadata.id] // {}) as $runtime |
@@ -616,21 +679,38 @@ vless_cli__status_json() {
 					id: $metadata.id,
 					name: $metadata.name,
 					enabled: $metadata.enabled,
-					status: ($runtime.status // (if $metadata.enabled then "checking" else "disabled" end)),
-					latency_ms: ($runtime.latency_ms // null),
-					consecutive_failures: ($runtime.consecutive_failures // 0),
-					recent_failures: ($runtime.recent_failures // 0),
-					last_checked: ($runtime.last_checked // null),
-					last_success: ($runtime.last_success // null),
-					last_error: ($runtime.last_error // null)
+					runtime_current: $runtime_current,
+					status: (
+						if $metadata.enabled == false then "disabled"
+						elif $lifecycle_transaction_active then "unknown"
+						elif $lifecycle_state == "unconfigured" then "not_configured"
+						elif $lifecycle_state != "ready" then "unknown"
+						else ($runtime.status // "checking")
+						end
+					),
+					latency_ms: (if $runtime_current then ($runtime.latency_ms // null) else null end),
+					consecutive_failures: (if $runtime_current then ($runtime.consecutive_failures // 0) else 0 end),
+					recent_failures: (if $runtime_current then ($runtime.recent_failures // 0) else 0 end),
+					last_checked: (if $runtime_current then ($runtime.last_checked // null) else null end),
+					last_success: (if $runtime_current then ($runtime.last_success // null) else null end),
+					last_error: (if $runtime_current then ($runtime.last_error // null) else null end),
+					last_runtime: {
+						status: ($runtime.status // null),
+						latency_ms: ($runtime.latency_ms // null),
+						consecutive_failures: ($runtime.consecutive_failures // 0),
+						recent_failures: ($runtime.recent_failures // 0),
+						last_checked: ($runtime.last_checked // null),
+						last_success: ($runtime.last_success // null),
+						last_error: ($runtime.last_error // null)
+					}
 				}
 			]
 		}'
 }
 
 cmd_vless_status() {
-	local json=false status_json overall active_id active_name enabled_count standby_count direct_fallback last_switch last_cycle_at
-	local row name state latency checked failures error switch_at switch_from switch_to switch_reason
+	local json=false status_json overall active_id active_name enabled_count standby_count direct_fallback last_switch last_cycle_at runtime_current
+	local row name state latency checked failures error switch_at switch_from switch_to switch_reason saved_state
 
 	case "$#" in
 		0) ;;
@@ -644,6 +724,7 @@ cmd_vless_status() {
 	fi
 
 	overall=$(printf '%s\n' "${status_json}" | jq -r '.status')
+	runtime_current=$(printf '%s\n' "${status_json}" | jq -r '.runtime_current')
 	active_id=$(printf '%s\n' "${status_json}" | jq -r '.active_id // empty')
 	active_name=$(printf '%s\n' "${status_json}" | jq -r --arg id "${active_id}" '.connections[] | select(.id == $id) | .name')
 	enabled_count=$(printf '%s\n' "${status_json}" | jq -r '[.connections[] | select(.enabled)] | length')
@@ -681,8 +762,12 @@ cmd_vless_status() {
 		checked=$(printf '%s\n' "${row}" | jq -r '.last_checked // "ещё не проверялось"')
 		failures=$(printf '%s\n' "${row}" | jq -r '.consecutive_failures')
 		error=$(printf '%s\n' "${row}" | jq -r '.last_error // empty')
+		saved_state=$(printf '%s\n' "${row}" | jq -r '.last_runtime.status // empty')
 		printf '%s\n' "${name}"
 		printf '  Состояние: %s\n' "$(vless_cli__state_label "${state}")"
+		if [ "${runtime_current}" != true ] && [ -n "${saved_state}" ]; then
+			printf '  Последнее сохранённое состояние: %s\n' "$(vless_cli__state_label "${saved_state}")"
+		fi
 		printf '  Задержка: %s\n' "${latency}"
 		printf '  Последняя проверка: %s\n' "${checked}"
 		printf '  Ошибок подряд: %s\n' "${failures}"
@@ -698,7 +783,7 @@ cmd_vless_list() {
 		*) return 64 ;;
 	esac
 	if [ "${json}" = true ]; then
-		vless_cli__status_json | jq '{schema_version, connections}'
+		vless_cli__status_json | jq '{schema_version, lifecycle_state, lifecycle_transaction_active, runtime_current, connections}'
 	else
 		cmd_vless_status
 	fi
@@ -813,7 +898,7 @@ vless_domain__apply_generated() {
 	if ! vless_domain__sync_endpoint_exclusions "${VLESS_CONFIG_FILE}" "${restart_runtime}"; then
 		vless_domain__restore_file "${backup}" "${VLESS_CONFIG_FILE}"
 		if [ -f "${VLESS_CONFIG_FILE}" ] && ! vless_domain__sync_endpoint_exclusions "${VLESS_CONFIG_FILE}" true >/dev/null 2>&1; then
-			[ -f "${XRAY_INIT}" ] && "${XRAY_INIT}" stop >/dev/null 2>&1 || true
+			[ ! -f "${XRAY_INIT}" ] || vless__service_action "${XRAY_INIT}" stop >/dev/null 2>&1 || true
 			vless_runtime__set_overall unavailable unknown "$(vless_runtime__active_id)" >/dev/null 2>&1 || true
 			return 3
 		fi
@@ -822,15 +907,15 @@ vless_domain__apply_generated() {
 	fi
 
 	if [ "${restart_runtime}" = true ] && [ -f "${XRAY_INIT}" ]; then
-		if ! "${XRAY_INIT}" restart >/dev/null 2>&1; then
+		if ! vless__service_action "${XRAY_INIT}" restart >/dev/null 2>&1; then
 			vless_domain__restore_file "${backup}" "${VLESS_CONFIG_FILE}"
 			if [ -f "${VLESS_CONFIG_FILE}" ] && ! vless_domain__sync_endpoint_exclusions "${VLESS_CONFIG_FILE}" true >/dev/null 2>&1; then
-				"${XRAY_INIT}" stop >/dev/null 2>&1 || true
+				vless__service_action "${XRAY_INIT}" stop >/dev/null 2>&1 || true
 				vless_runtime__set_overall unavailable unknown "$(vless_runtime__active_id)" >/dev/null 2>&1 || true
 				return 3
 			fi
-			if ! "${XRAY_INIT}" restart >/dev/null 2>&1; then
-				"${XRAY_INIT}" stop >/dev/null 2>&1 || true
+			if ! vless__service_action "${XRAY_INIT}" restart >/dev/null 2>&1; then
+				vless__service_action "${XRAY_INIT}" stop >/dev/null 2>&1 || true
 				vless_runtime__ensure >/dev/null 2>&1 || true
 				vless_runtime__set_overall unavailable unknown "$(vless_runtime__active_id)" >/dev/null 2>&1 || true
 				printf '%s\n' 'Критическая ошибка: Xray не запустился и со старой конфигурацией; runtime остановлен.' >&2
@@ -865,19 +950,19 @@ vless_domain__restore_declared_runtime() {
 	if ! vless_config__generate "${rollback_config}" "${active_id}" || \
 		! "${XRAY}" run -test -c "${rollback_config}" >/dev/null 2>&1; then
 		rm -f "${rollback_config}"
-		[ -f "${XRAY_INIT}" ] && "${XRAY_INIT}" stop >/dev/null 2>&1 || true
+		[ ! -f "${XRAY_INIT}" ] || vless__service_action "${XRAY_INIT}" stop >/dev/null 2>&1 || true
 		vless_runtime__set_overall unavailable unknown "${active_id}" >/dev/null 2>&1 || true
 		return 3
 	fi
 	if ! mv -f "${rollback_config}" "${VLESS_CONFIG_FILE}" || \
 		! vless_domain__sync_endpoint_exclusions "${VLESS_CONFIG_FILE}" true; then
-		[ -f "${XRAY_INIT}" ] && "${XRAY_INIT}" stop >/dev/null 2>&1 || true
+		[ ! -f "${XRAY_INIT}" ] || vless__service_action "${XRAY_INIT}" stop >/dev/null 2>&1 || true
 		vless_runtime__set_overall unavailable unknown "${active_id}" >/dev/null 2>&1 || true
 		return 3
 	fi
 	if [ "${restart_runtime}" = true ] && [ -f "${XRAY_INIT}" ]; then
-		if ! "${XRAY_INIT}" restart >/dev/null 2>&1; then
-			"${XRAY_INIT}" stop >/dev/null 2>&1 || true
+		if ! vless__service_action "${XRAY_INIT}" restart >/dev/null 2>&1; then
+			vless__service_action "${XRAY_INIT}" stop >/dev/null 2>&1 || true
 			vless_runtime__set_overall unavailable unknown "${active_id}" >/dev/null 2>&1 || true
 			return 3
 		fi

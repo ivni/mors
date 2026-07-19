@@ -415,21 +415,14 @@ test_probe__fingerprint() {
 }
 
 test_probe__ipv6_risk() {
-	local aaaa=false default_route=false
-	if test_probe__dns_command_aaaa "${MORS_TEST_TARGET}" | grep -q ':'; then
-		aaaa=true
-	fi
-	if "${MORS_TEST_IP}" -6 route show default 2>/dev/null | grep -q .; then
-		default_route=true
-	fi
-	if [ "${aaaa}" = true ] && [ "${default_route}" = true ]; then
-		test_probe__set degraded ipv6_bypass_risk \
-			'Доступен IPv6-путь, который Mors не маршрутизирует.' \
-			'{"aaaa":true,"global_route":true,"mors_ipv6":false}'
+	MORS_IPV6_IP_COMMAND=${MORS_TEST_IP}
+	if ipv6_bypass__detect "${MORS_TEST_TARGET}" test_probe__dns_command_aaaa; then
+		test_probe__set degraded "${MORS_IPV6_BYPASS_REASON}" \
+			"${MORS_IPV6_BYPASS_MESSAGE}" "${MORS_IPV6_BYPASS_EVIDENCE}"
 		return 1
 	fi
-	test_probe__set working no_ipv6_bypass_evidence 'Явный риск обхода через IPv6 не обнаружен.' \
-		"{\"aaaa\":${aaaa},\"global_route\":${default_route},\"mors_ipv6\":false}"
+	test_probe__set working "${MORS_IPV6_BYPASS_REASON}" \
+		"${MORS_IPV6_BYPASS_MESSAGE}" "${MORS_IPV6_BYPASS_EVIDENCE}"
 }
 
 test_probe__dns_command_aaaa() {

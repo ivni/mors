@@ -248,13 +248,19 @@ cmd_tunnel() {
 
 cmd_route_refresh() {
 	echo -n 'Очистка цепочек iptables...'
-	ip4__flush 'chain'
+	if ! ip4__flush 'chain'; then
+		echo 'ошибка.'
+		return 1
+	fi
 	echo 'сделана.'
 
 	echo -n 'Создание недостающих правил iptables...'
-	ip4__dns__add_routing_for_home
-	ip4_firewall_set_all_rules
+	if ! ip4__dns__add_routing_for_home || ! ip4_firewall_set_all_rules; then
+		echo 'ошибка.'
+		return 1
+	fi
 	echo 'сделано.'
+	return 0
 }
 
 route__show_block() {

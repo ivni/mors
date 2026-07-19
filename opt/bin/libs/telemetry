@@ -4,6 +4,7 @@ MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
 . "${MORS_LIB_DIR}/telemetry_store"
 . "${MORS_LIB_DIR}/telemetry_process"
 . "${MORS_LIB_DIR}/lifecycle"
+. "${MORS_LIB_DIR}/service_action"
 
 TELEMETRY_INIT=${TELEMETRY_INIT:-/opt/etc/init.d/S98mors-telemetry}
 TELEMETRY_INIT_SOURCE=${TELEMETRY_INIT_SOURCE:-/opt/apps/mors/etc/init.d/S98mors-telemetry}
@@ -13,6 +14,20 @@ TELEMETRY_ADMIN_LOCK_OWNED=false
 TELEMETRY_TERMINAL_STATE=''
 TELEMETRY_TEMP_SECRET_FILE=''
 TELEMETRY_LIFECYCLE_LOCK_OWNED=false
+MORS_TELEMETRY_SERVICE_ACTION_TIMEOUT=${MORS_TELEMETRY_SERVICE_ACTION_TIMEOUT:-15}
+MORS_TELEMETRY_SERVICE_KILL_AFTER=${MORS_TELEMETRY_SERVICE_KILL_AFTER:-2}
+MORS_TELEMETRY_TIMEOUT_CMD=${MORS_TELEMETRY_TIMEOUT_CMD:-/opt/bin/timeout}
+
+telemetry_lifecycle__stop_sender() {
+	local log
+	log=${MORS_SETUP_DNS_LOG:-}
+	service_action__run "${TELEMETRY_INIT_SOURCE}" stop "${log}" \
+		"${MORS_TELEMETRY_SERVICE_ACTION_TIMEOUT}" \
+		"${MORS_TELEMETRY_SERVICE_KILL_AFTER}" \
+		"${MORS_TELEMETRY_TIMEOUT_CMD}" || return $?
+	telemetry_process__running_pid >/dev/null 2>&1 && return 1
+	return 0
+}
 
 telemetry_cli__process_start() {
 	[ -r "/proc/${1}/stat" ] || return 1
@@ -435,7 +450,7 @@ telemetry_lifecycle__quiesce_for_upgrade() {
 	fi
 	if [ "${running}" = true ] || [ "${hook_state}" = managed ]; then
 		[ -x "${TELEMETRY_INIT_SOURCE}" ] || return 1
-		"${TELEMETRY_INIT_SOURCE}" stop >/dev/null 2>&1 || return 1
+		telemetry_lifecycle__stop_sender >/dev/null 2>&1 || return 1
 	fi
 }
 
@@ -481,7 +496,7 @@ telemetry_lifecycle__deactivate() {
 	telemetry_process__running_pid >/dev/null 2>&1 && running=true
 	if [ "${running}" = true ] || [ "${hook_state}" = managed ]; then
 		[ -x "${TELEMETRY_INIT_SOURCE}" ] || return 1
-		"${TELEMETRY_INIT_SOURCE}" stop >/dev/null 2>&1 || return 1
+		telemetry_lifecycle__stop_sender >/dev/null 2>&1 || return 1
 	fi
 	if telemetry_store__config_valid; then
 		telemetry_store__set_enabled false || return 1

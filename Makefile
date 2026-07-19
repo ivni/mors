@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mors
 PKG_VERSION:=1.3.0~beta7
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)-$(PKG_RELEASE)
 MOLOT_UNINSTALL:=mors uninstall full
 
@@ -166,7 +166,6 @@ operation=$$1
 rm -f /opt/bin/mors \
 	/opt/etc/init.d/S96mors \
 	/opt/etc/init.d/S25mors-vless \
-	/opt/etc/init.d/S97xray \
 	/opt/etc/ndm/fs.d/15-mors-start.sh \
 	/opt/etc/ndm/netfilter.d/100-dns-local \
 	/opt/etc/ndm/netfilter.d/100-vpn-mark \

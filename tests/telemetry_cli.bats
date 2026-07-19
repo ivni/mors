@@ -14,6 +14,8 @@ setup() {
 	export TELEMETRY_QUEUE_FILE="${TELEMETRY_DATA_ROOT}/outbox.jsonl"
 	export TELEMETRY_ADMIN_LOCK_DIR="${BATS_TEST_TMPDIR}/admin.lock"
 	export TELEMETRY_PROCESS_ROOT="${BATS_TEST_TMPDIR}/proc"
+	export MORS_TELEMETRY_TIMEOUT_CMD
+	MORS_TELEMETRY_TIMEOUT_CMD=$(PATH=/usr/bin:/bin command -v timeout)
 	export TELEMETRY_PID_FILE="${TELEMETRY_STATE_ROOT}/sender.pid"
 	export TELEMETRY_PROCESS_LOCK_DIR="${TELEMETRY_STATE_ROOT}/sender.lock"
 	export TELEMETRY_INIT="${BATS_TEST_TMPDIR}/init/S98mors-telemetry"

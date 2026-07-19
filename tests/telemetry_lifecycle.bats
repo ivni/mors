@@ -3,6 +3,8 @@
 setup() {
 	REPO_ROOT=$(cd "${BATS_TEST_DIRNAME}/.." && pwd)
 	export MORS_LIB_DIR="${REPO_ROOT}/opt/bin/libs"
+	export MORS_LIFECYCLE_TIMEOUT_CMD="$(PATH=/usr/bin:/bin command -v timeout)"
+	export MORS_TELEMETRY_TIMEOUT_CMD="${MORS_LIFECYCLE_TIMEOUT_CMD}"
 	export TELEMETRY_CONFIG_ROOT="${BATS_TEST_TMPDIR}/etc/telemetry"
 	export TELEMETRY_CONFIG_FILE="${TELEMETRY_CONFIG_ROOT}/config.json"
 	export TELEMETRY_KEY_FILE="${TELEMETRY_CONFIG_ROOT}/monium.key"
@@ -71,8 +73,30 @@ begin_snapshot() {
 @test "uninstall deactivates telemetry before stopping data-plane services" {
 	uninstall_body=$(sed -n '/^setup__cmd_uninstall_unlocked()/,/^}/p' "${REPO_ROOT}/opt/bin/main/setup")
 	telemetry_line=$(printf '%s\n' "${uninstall_body}" | grep -n 'telemetry_lifecycle__deactivate' | head -n 1 | cut -d: -f1)
-	vless_line=$(printf '%s\n' "${uninstall_body}" | grep -n 'vless_runtime__supervisor_service stop' | head -n 1 | cut -d: -f1)
+	vless_line=$(printf '%s\n' "${uninstall_body}" | grep -n 'setup__quiesce_managed_vless_runtime' | head -n 1 | cut -d: -f1)
 	[ "${telemetry_line}" -lt "${vless_line}" ]
+}
+
+@test "telemetry lifecycle stop is protected by an outer hard timeout" {
+	local started elapsed
+	ln -s "${TELEMETRY_INIT_SOURCE}" "${TELEMETRY_INIT}"
+	cat >"${TELEMETRY_INIT_SOURCE}" <<'SH'
+#!/bin/sh
+case "${1:-}" in
+	stop) trap '' TERM; sleep 10 ;;
+esac
+SH
+	chmod +x "${TELEMETRY_INIT_SOURCE}"
+	MORS_TELEMETRY_SERVICE_ACTION_TIMEOUT=1
+	MORS_TELEMETRY_SERVICE_KILL_AFTER=1
+	started=$(date +%s)
+
+	run telemetry_lifecycle__deactivate false
+
+	elapsed=$(($(date +%s) - started))
+	[ "${status}" -ne 0 ]
+	[ "${elapsed}" -lt 6 ]
+	[ -L "${TELEMETRY_INIT}" ]
 }
 
 @test "snapshot restores protected telemetry credentials hook cursor and running service" {

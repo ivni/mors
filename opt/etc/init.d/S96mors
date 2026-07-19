@@ -63,13 +63,20 @@ case ${1} in
 		runtime_mutation_lock__acquire_wait 'mors init service' "${MORS_INIT_LOCK_WAIT:-60}" || exit $?
 		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
 		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
-		cmd_mors_init no
+		cmd_mors_init no || exit 1
 		if has_ssr_enable; then
-			while /opt/etc/init.d/S22shadowsocks status | grep -q dead
-			do
-				/opt/etc/init.d/S22shadowsocks restart
-				sleep 2
+			attempt=1
+			while [ "${attempt}" -le "${MORS_INIT_SSR_ATTEMPTS:-5}" ]; do
+				ssr_state=$(vpn__service_state /opt/etc/init.d/S22shadowsocks) || exit 1
+				[ "${ssr_state}" = running ] && break
+				[ "${ssr_state}" = stopped ] || exit 1
+				vpn__service_action /opt/etc/init.d/S22shadowsocks restart >/dev/null 2>&1 || exit 1
+				attempt=$((attempt + 1))
+				[ "${attempt}" -gt "${MORS_INIT_SSR_ATTEMPTS:-5}" ] || sleep "${MORS_INIT_SSR_RETRY_INTERVAL:-2}"
 			done
+			[ "${ssr_state}" = running ] || \
+				ssr_state=$(vpn__service_state /opt/etc/init.d/S22shadowsocks) || exit 1
+			[ "${ssr_state}" = running ] || exit 1
 		elif is_vless_over_proxy_enabled; then
 			if [ "$(vless_store__is_paused)" = false ] && [ "$(vless_store__enabled_count)" -gt 0 ]; then
 				start_vless=true

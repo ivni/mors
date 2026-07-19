@@ -1,0 +1,60 @@
+#!/bin/sh
+
+# Passive IPv6 bypass classifier shared by setup diagnostics and `mors test`.
+# A remote IPv6 address observed inside a tunnel is not evidence of a local
+# bypass. Risk exists only when the routed client can resolve AAAA and the
+# router has a usable default IPv6 route while Mors remains IPv4-only.
+
+MORS_IPV6_IP_COMMAND=${MORS_IPV6_IP_COMMAND:-/opt/sbin/ip}
+MORS_IPV6_HOME_INTERFACE=${MORS_IPV6_HOME_INTERFACE:-}
+
+ipv6_bypass__home_interface() {
+	if [ -n "${MORS_IPV6_HOME_INTERFACE}" ]; then
+		printf '%s\n' "${MORS_IPV6_HOME_INTERFACE}"
+	elif command -v get_local_inface >/dev/null 2>&1; then
+		get_local_inface
+	else
+		return 1
+	fi
+}
+
+ipv6_bypass__has_usable_default_route() {
+	"${MORS_IPV6_IP_COMMAND}" -6 route show default 2>/dev/null | \
+		grep -E '^default([[:space:]]|$)' | \
+		grep -Evq '(^|[[:space:]])(unreachable|blackhole|prohibit|throw|linkdown)([[:space:]]|$)'
+}
+
+ipv6_bypass__has_client_facing_lan() {
+	local home_interface
+	home_interface=$(ipv6_bypass__home_interface) || return 1
+	"${MORS_IPV6_IP_COMMAND}" -6 addr show dev "${home_interface}" scope global 2>/dev/null | \
+		grep -E 'inet6[[:space:]]+[0-9a-fA-F:]+' | \
+		grep -Evq '(^|[[:space:]])(tentative|dadfailed|linkdown)([[:space:]]|$)'
+}
+
+ipv6_bypass__detect() {
+	local target resolver aaaa=false global_route=false client_facing_lan=false answer
+	target=${1}
+	resolver=${2}
+
+	answer=$("${resolver}" "${target}" 2>/dev/null || true)
+	if printf '%s\n' "${answer}" | grep -q ':'; then
+		aaaa=true
+	fi
+	if ipv6_bypass__has_usable_default_route; then
+		global_route=true
+	fi
+	if ipv6_bypass__has_client_facing_lan; then
+		client_facing_lan=true
+	fi
+
+	MORS_IPV6_BYPASS_EVIDENCE="{\"aaaa\":${aaaa},\"global_route\":${global_route},\"client_facing_lan\":${client_facing_lan},\"mors_ipv6\":false}"
+	if [ "${aaaa}" = true ] && [ "${global_route}" = true ] && [ "${client_facing_lan}" = true ]; then
+		MORS_IPV6_BYPASS_REASON=ipv6_bypass_risk
+		MORS_IPV6_BYPASS_MESSAGE='Для домашней сети доступен IPv6-путь, который Mors не маршрутизирует.'
+		return 0
+	fi
+	MORS_IPV6_BYPASS_REASON=no_ipv6_bypass_evidence
+	MORS_IPV6_BYPASS_MESSAGE='Явный риск обхода через IPv6 не обнаружен.'
+	return 1
+}

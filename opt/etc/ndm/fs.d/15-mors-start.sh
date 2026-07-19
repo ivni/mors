@@ -21,7 +21,9 @@ if [ "${1}" = 'start' ] ; then
 		ndm_runtime__begin filesystem_start || exit $?
 		# стартуем ipset'ы, используемые DNS-серверами
 		# до старта самих DNS-серверов
-		ip4__ipset__create_list
-		ndm_runtime__end
+		result=0
+		ip4__ipset__create_list || result=$?
+		ndm_runtime__finish "${result}"
+		exit $?
 	fi
 fi

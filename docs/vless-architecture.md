@@ -130,6 +130,26 @@ disabled -> checking -> standby -> unstable -> unavailable
 - `/opt/var/lib/mors/vless` содержит последнее выбранное VLESS-соединение для восстановления и ограниченную историю событий; это сохранённое предпочтение не считается текущим `active_id`, пока data-plane переведён в `direct_fallback` или fail-closed;
 - `/opt/var/run/mors/vless` содержит только runtime-файлы.
 
+`mors vless status|list` дополнительно ограничивает оперативное состояние
+lifecycle-пакета: роли `active` и `standby` являются текущими только в `ready`
+без active lifecycle marker. Незавершённая транзакция публикуется отдельно как
+`lifecycle_transaction_active: true`, скрывает текущие роли и не меняет
+сохранённый стабильный `lifecycle_state`.
+В `unconfigured` включённые профили имеют состояние `not_configured`, а в
+`recovery_required` — `unknown`; прежний health snapshot публикуется отдельно
+как `last_runtime` и не выдаётся за работающий data-plane.
+
+Системный runtime Xray использует `/opt/etc/init.d/S24xray`, принадлежащий
+Entware-пакету `xray`; Mors не владеет этим файлом и не удаляет его при uninstall.
+Managed exact symlink `/opt/etc/init.d/S97xray`, созданный предыдущими версиями,
+сохраняется в snapshot, снимается при успешном apply и восстанавливается при
+rollback. Внешний `S97xray` определяется до первой мутации setup, фиксируется как
+`external` без копирования, никогда не изменяется rollback и блокирует VLESS activation во избежание
+двух конкурирующих boot hooks. Lifecycle rollback до восстановления файлов
+останавливает Xray и supervisor, затем подтверждает их отсутствие по процессам.
+Восстановление исходно работающих сервисов считается успешным только после
+проверки poststate.
+
 После успешного add/update/enable Mors до запуска Xray синхронизирует IP всех включённых endpoint в `MORS_DESTINATION_EXCLUDED`: сначала добавляет новые, затем удаляет только ранее управляемые VLESS-адреса.
 
 Событие включает время, тип, предыдущее и новое соединение, безопасную причину и результат. История ротируется по размеру. Системный журнал получает краткую копию без секретов.

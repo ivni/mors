@@ -2,15 +2,23 @@
 
 setup() {
 	REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+	MORS_LIB_DIR=${REPO_ROOT}/opt/bin/libs
 	MORS_LIFECYCLE_ROOT=${BATS_TEST_TMPDIR}/lifecycle
 	MORS_LIFECYCLE_STATE_FILE=${MORS_LIFECYCLE_ROOT}/state.json
 	MORS_LIFECYCLE_TRANSACTION_ROOT=${MORS_LIFECYCLE_ROOT}/transactions
 	MORS_LIFECYCLE_ACTIVE_FILE=${MORS_LIFECYCLE_ROOT}/active
+	MORS_LIFECYCLE_SERVICE_BASELINE_FILE=${MORS_LIFECYCLE_ROOT}/service-baseline.tsv
 	MORS_LIFECYCLE_CONF_FILE=${BATS_TEST_TMPDIR}/mors.conf
 	MORS_LIFECYCLE_LEGACY_START_FILE=${BATS_TEST_TMPDIR}/S96mors
+	MORS_LIFECYCLE_TIMEOUT_CMD=$(PATH=/usr/bin:/bin command -v timeout)
+	MORS_LIFECYCLE_SERVICE_ACTION_TIMEOUT=2
+	MORS_LIFECYCLE_SERVICE_KILL_AFTER=1
 	export MORS_LIFECYCLE_ROOT MORS_LIFECYCLE_STATE_FILE
 	export MORS_LIFECYCLE_TRANSACTION_ROOT MORS_LIFECYCLE_ACTIVE_FILE
+	export MORS_LIFECYCLE_SERVICE_BASELINE_FILE
 	export MORS_LIFECYCLE_CONF_FILE MORS_LIFECYCLE_LEGACY_START_FILE
+	export MORS_LIB_DIR MORS_LIFECYCLE_TIMEOUT_CMD
+	export MORS_LIFECYCLE_SERVICE_ACTION_TIMEOUT MORS_LIFECYCLE_SERVICE_KILL_AFTER
 	. "${REPO_ROOT}/opt/bin/libs/lifecycle_state"
 	. "${REPO_ROOT}/opt/bin/libs/lifecycle_snapshot"
 }
@@ -181,6 +189,85 @@ setup() {
 	[ "$(cat "${service_state}")" = running ]
 }
 
+@test "setup snapshot persists the pre-Mors service baseline" {
+	local service=${BATS_TEST_TMPDIR}/dnscrypt-service
+	printf '%s\n' '#!/bin/sh' 'printf "%s\n" stopped' >"${service}"
+	chmod +x "${service}"
+	lifecycle_snapshot__files() { :; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { printf '%s\n' "${service}"; }
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	lifecycle_snapshot__capture
+
+	lifecycle_snapshot__persist_service_baseline
+
+	[ "$(lifecycle_snapshot__baseline_service_state "${service}")" = stopped ]
+	case "$(uname -s)" in MINGW*|MSYS*) ;; *) [ "$(stat -c '%a' "${MORS_LIFECYCLE_SERVICE_BASELINE_FILE}")" = 600 ] ;; esac
+}
+
+@test "ready upgrade migrates a missing baseline from the completed setup snapshot" {
+	local service=${BATS_TEST_TMPDIR}/dnscrypt-service
+	printf '%s\n' '#!/bin/sh' 'printf "%s\n" alive' >"${service}"
+	chmod +x "${service}"
+	lifecycle_snapshot__files() { :; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { printf '%s\n' "${service}"; }
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	lifecycle_snapshot__capture
+	lifecycle_transaction__phase prepared
+	lifecycle_transaction__finish
+	[ ! -e "${MORS_LIFECYCLE_SERVICE_BASELINE_FILE}" ]
+
+	[ "$(lifecycle_snapshot__baseline_service_state "${service}")" = running ]
+	[ -r "${MORS_LIFECYCLE_SERVICE_BASELINE_FILE}" ]
+}
+
+@test "snapshot preserves unrecognized service status as unknown" {
+	local service=${BATS_TEST_TMPDIR}/ambiguous-service
+	printf '%s\n' '#!/bin/sh' 'printf "%s\n" ambiguous; exit 7' >"${service}"
+	chmod +x "${service}"
+	lifecycle_snapshot__files() { :; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { printf '%s\n' "${service}"; }
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	run lifecycle_snapshot__capture
+
+	[ "${status}" -ne 0 ]
+	[ "$(lifecycle_snapshot__captured_service_state "${service}")" = unknown ]
+}
+
+@test "snapshot hard-kills a TERM-ignoring service status" {
+	local service=${BATS_TEST_TMPDIR}/hanging-service log
+	cat >"${service}" <<'EOF'
+#!/bin/sh
+printf '%s\n' alive
+trap '' TERM
+sleep 10
+EOF
+	chmod +x "${service}"
+	lifecycle_snapshot__files() { :; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { printf '%s\n' "${service}"; }
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	MORS_LIFECYCLE_SERVICE_ACTION_TIMEOUT=1
+	MORS_LIFECYCLE_SERVICE_KILL_AFTER=1
+
+	run lifecycle_snapshot__capture
+
+	[ "${status}" -ne 0 ]
+	[ "$(lifecycle_snapshot__captured_service_state "${service}")" = unknown ]
+	log=$(lifecycle_snapshot__service_log_path)
+	grep -q 'service-action-timeout .*action=status timeout=1 kill-after=1' "${log}"
+}
+
 @test "snapshot restore treats an already stopped service as restored" {
 	local service=${BATS_TEST_TMPDIR}/service
 	local stop_called=${BATS_TEST_TMPDIR}/stop.called
@@ -202,6 +289,105 @@ setup() {
 	lifecycle_snapshot__restore
 
 	[ ! -e "${stop_called}" ]
+}
+
+@test "snapshot restore rejects restart exit zero without running poststate" {
+	local service=${BATS_TEST_TMPDIR}/lying-restart state=${BATS_TEST_TMPDIR}/service.state
+	cat >"${service}" <<'EOF'
+#!/bin/sh
+case "$1" in
+	status) [ "$(cat "${SERVICE_STATE}")" = running ] && echo alive || echo dead ;;
+	restart) exit 0 ;;
+esac
+EOF
+	chmod +x "${service}"
+	export SERVICE_STATE=${state}
+	printf '%s\n' running >"${state}"
+	lifecycle_snapshot__files() { :; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { printf '%s\n' "${service}"; }
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	lifecycle_snapshot__capture
+	printf '%s\n' stopped >"${state}"
+	MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT=0
+
+	run lifecycle_snapshot__restore
+
+	[ "${status}" -ne 0 ]
+}
+
+@test "snapshot restore rejects stop exit zero without stopped poststate" {
+	local service=${BATS_TEST_TMPDIR}/lying-stop state=${BATS_TEST_TMPDIR}/service.state
+	cat >"${service}" <<'EOF'
+#!/bin/sh
+case "$1" in
+	status) [ "$(cat "${SERVICE_STATE}")" = running ] && echo alive || echo dead ;;
+	stop) exit 0 ;;
+esac
+EOF
+	chmod +x "${service}"
+	export SERVICE_STATE=${state}
+	printf '%s\n' stopped >"${state}"
+	lifecycle_snapshot__files() { :; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { printf '%s\n' "${service}"; }
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	lifecycle_snapshot__capture
+	printf '%s\n' running >"${state}"
+	MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT=0
+
+	run lifecycle_snapshot__restore
+
+	[ "${status}" -ne 0 ]
+}
+
+@test "snapshot restore does not poll after service-state budget is exhausted" {
+	local service=${BATS_TEST_TMPDIR}/no-extra-status calls=${BATS_TEST_TMPDIR}/status.calls
+	cat >"${service}" <<'EOF'
+#!/bin/sh
+case "$1" in
+	status) printf 'called\n' >>"${STATUS_CALLS}"; printf 'alive\n' ;;
+esac
+EOF
+	chmod +x "${service}"
+	export STATUS_CALLS=${calls}
+	lifecycle_snapshot__prepare_service_log
+	MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT=0
+
+	run lifecycle_snapshot__wait_service_state "${service}" running
+
+	[ "${status}" -ne 0 ]
+	[ ! -e "${calls}" ]
+}
+
+@test "snapshot quiesces a newly created service before removing its hook" {
+	local service=${BATS_TEST_TMPDIR}/new-service state=${BATS_TEST_TMPDIR}/service.state
+	export SERVICE_STATE=${state}
+	lifecycle_snapshot__files() { printf '%s\n' "${service}"; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { printf '%s\n' "${service}"; }
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	lifecycle_snapshot__capture
+	cat >"${service}" <<'EOF'
+#!/bin/sh
+case "$1" in
+	status) [ "$(cat "${SERVICE_STATE}")" = running ] && echo alive || echo dead ;;
+	stop) printf '%s\n' stopped >"${SERVICE_STATE}" ;;
+esac
+EOF
+	chmod +x "${service}"
+	printf '%s\n' running >"${state}"
+
+	lifecycle_snapshot__restore
+
+	[ "$(cat "${state}")" = stopped ]
+	[ ! -e "${service}" ]
 }
 
 @test "snapshot preserves symlinks and managed directories" {
@@ -230,4 +416,52 @@ setup() {
 	[ "$(readlink "${link}")" = "${target}" ]
 	[ "$(cat "${managed}/secret")" = secret ]
 	[ ! -e "${managed}/extra" ]
+}
+
+@test "snapshot classifies an external legacy Xray hook and never restores over it" {
+	local legacy=${BATS_TEST_TMPDIR}/S97xray source=${BATS_TEST_TMPDIR}/packaged-S97xray
+	local snapshot=${BATS_TEST_TMPDIR}/snapshot manifest
+	TEST_SNAPSHOT=${snapshot}
+	TEST_TRANSACTION=${BATS_TEST_TMPDIR}
+	MORS_LEGACY_XRAY_INIT=${legacy}
+	MORS_XRAY_INIT_SOURCE=${source}
+	mkdir -p "${snapshot}"
+	lifecycle_transaction__snapshot_directory() { printf '%s\n' "${TEST_SNAPSHOT}"; }
+	lifecycle_transaction__directory() { printf '%s\n' "${TEST_TRANSACTION}"; }
+	lifecycle_snapshot__files() { printf '%s\n' "${MORS_LEGACY_XRAY_INIT}"; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { :; }
+	printf '%s\n' before >"${legacy}"
+
+	lifecycle_snapshot__capture
+	manifest="${snapshot}/files.tsv"
+	grep -Fq $'\texternal\t' "${manifest}"
+	printf '%s\n' after >"${legacy}"
+	lifecycle_snapshot__restore_files
+
+	[ "$(cat "${legacy}")" = after ]
+}
+
+@test "snapshot refuses to replace a new external Xray hook during managed rollback" {
+	local legacy=${BATS_TEST_TMPDIR}/S97xray source=${BATS_TEST_TMPDIR}/packaged-S97xray
+	local snapshot=${BATS_TEST_TMPDIR}/snapshot
+	TEST_SNAPSHOT=${snapshot}
+	TEST_TRANSACTION=${BATS_TEST_TMPDIR}
+	MORS_LEGACY_XRAY_INIT=${legacy}
+	MORS_XRAY_INIT_SOURCE=${source}
+	mkdir -p "${snapshot}"
+	lifecycle_transaction__snapshot_directory() { printf '%s\n' "${TEST_SNAPSHOT}"; }
+	lifecycle_transaction__directory() { printf '%s\n' "${TEST_TRANSACTION}"; }
+	lifecycle_snapshot__files() { printf '%s\n' "${MORS_LEGACY_XRAY_INIT}"; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { :; }
+	: >"${source}"
+	ln -s "${source}" "${legacy}"
+	lifecycle_snapshot__capture
+	rm -f "${legacy}"
+	printf '%s\n' external >"${legacy}"
+
+	run lifecycle_snapshot__restore_files
+	[ "${status}" -ne 0 ]
+	[ "$(cat "${legacy}")" = external ]
 }

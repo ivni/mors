@@ -75,19 +75,22 @@ setup_print_welcome(){
 	log_in_file line
 }
 setup_adguard(){
+	local adguard_state
 	case "${MORS_SETUP_DNS_BACKEND:-}" in
 		adguard)
 			setup_plan__adguard_available || return 1
 			ANSWER_AGH=y
 			adguardhome_setup || return 1
-			"${ADGUARDHOME_DEMON}" restart >/dev/null 2>&1 || return 1
+			setup_dns__service_action "${ADGUARDHOME_DEMON}" restart >/dev/null 2>&1 || return 1
 			log_in_file 'Существующий AdGuard Home настроен как основной DNS сервер.'
 			;;
 		dnscrypt)
 			ANSWER_AGH=n
-			if [ -x "${ADGUARDHOME_DEMON}" ] && \
-				"${ADGUARDHOME_DEMON}" status 2>/dev/null | grep -q alive; then
-				"${ADGUARDHOME_DEMON}" stop >/dev/null 2>&1 || return 1
+			if [ -x "${ADGUARDHOME_DEMON}" ]; then
+				adguard_state=$(setup_dns__service_state "${ADGUARDHOME_DEMON}") || return 1
+				if [ "${adguard_state}" = running ]; then
+					setup_dns__stop_service "${ADGUARDHOME_DEMON}" adguard >/dev/null 2>&1 || return 1
+				fi
 			fi
 			if [ -r "${ADGUARDHOME_CONFIG}" ]; then
 				cp -p "${ADGUARDHOME_CONFIG}" "${MORS_BACKUP_PATH}/AdGuardHome.yaml" || return 1
@@ -152,20 +155,25 @@ restore_backup(){
 cmd_pause_mors(){
 
 	ready "Временно приостановливаем работу Морса..."
-	{
-		ip4__flush &> /dev/null
+	if {
+		ip4__flush &> /dev/null || return 1
 
 		# Архивируем файлы механизма ndm
 		[ -f /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ] && {
-			mv /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ${MORS_BACKUP_PATH}/100-mors-vpn-layer
+			mv /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ${MORS_BACKUP_PATH}/100-mors-vpn-layer || return 1
 		}
 		[ -f /opt/etc/ndm/netfilter.d/100-proxy-redirect ] && {
-			mv /opt/etc/ndm/netfilter.d/100-proxy-redirect ${MORS_BACKUP_PATH}/100-proxy-redirect
+			mv /opt/etc/ndm/netfilter.d/100-proxy-redirect ${MORS_BACKUP_PATH}/100-proxy-redirect || return 1
 		}
 		[ -f /opt/etc/ndm/netfilter.d/100-vpn-mark ] && {
-			mv /opt/etc/ndm/netfilter.d/100-vpn-mark ${MORS_BACKUP_PATH}/100-vpn-mark
+			mv /opt/etc/ndm/netfilter.d/100-vpn-mark ${MORS_BACKUP_PATH}/100-vpn-mark || return 1
 		}
-	} &> /dev/null && when_ok "УСПЕШНО" || when_bad "C ОШИБКАМИ"
+	} &> /dev/null; then
+		when_ok "УСПЕШНО"
+		return 0
+	fi
+	when_bad "C ОШИБКАМИ"
+	return 1
 }
 
 restart_all_services(){
@@ -195,22 +203,27 @@ restart_all_services(){
 cmd_unpause_mors(){
 
 	ready "Восстанавливаем работу Морса после паузы..."
-	{
+	if {
 		#  Восстанавливаем из архива файлы механизма ndm
 		[ -f ${MORS_BACKUP_PATH}/100-mors-vpn-layer ] && {
-			mv ${MORS_BACKUP_PATH}/100-mors-vpn-layer /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
+			mv ${MORS_BACKUP_PATH}/100-mors-vpn-layer /opt/etc/ndm/iflayerchanged.d/100-mors-vpn || return 1
 		}
 		[ -f ${MORS_BACKUP_PATH}/100-proxy-redirect ] && {
-			mv ${MORS_BACKUP_PATH}/100-proxy-redirect /opt/etc/ndm/netfilter.d/100-proxy-redirect
+			mv ${MORS_BACKUP_PATH}/100-proxy-redirect /opt/etc/ndm/netfilter.d/100-proxy-redirect || return 1
 		}
 		[ -f ${MORS_BACKUP_PATH}/100-vpn-mark ] && {
-			mv ${MORS_BACKUP_PATH}/100-vpn-mark /opt/etc/ndm/netfilter.d/100-vpn-mark
+			mv ${MORS_BACKUP_PATH}/100-vpn-mark /opt/etc/ndm/netfilter.d/100-vpn-mark || return 1
 		}
 
-		cmd_mors_init
-		restart_all_services
+		cmd_mors_init || return 1
+		restart_all_services || return 1
 
-	} &> /dev/null && when_ok "УСПЕШНО" || when_bad "C ОШИБКАМИ"
+	} &> /dev/null; then
+		when_ok "УСПЕШНО"
+		return 0
+	fi
+	when_bad "C ОШИБКАМИ"
+	return 1
 
 }
 
@@ -220,6 +233,7 @@ cmd_unpause_mors(){
 # 	КОТОРОЕ БЫЛО ПЕРЕД УСТАНОВКОЙ ПАКЕТА МОРС
 #------------------------------------------------------
 restore_adguard(){
+	local adguard_state
 
 	agh_service=/opt/etc/init.d/S99adguardhome
 	ready "Восстанавливаем службу AdGuardHome"
@@ -230,22 +244,24 @@ restore_adguard(){
 			cp /opt/etc/AdGuardHome/AdGuardHome.yaml /opt/bin/AdGuardHome.yaml
 	fi
 
-	if /opt/etc/init.d/S99adguardhome status | grep -q "alive" ; then
+	adguard_state=$(setup_dns__service_state "${agh_service}") || return 1
+	if [ "${adguard_state}" = running ]; then
 		sed -i '/case/,/esac/ s/^\(.*\)/#\1/; /\*)/,/;;/ s/#\(.*rc.func\)/\1/' "${agh_service}"
-		"${agh_service}" restart &> /dev/null
+		setup_dns__service_action "${agh_service}" restart &> /dev/null || return 1
 	fi
-	[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+	when_ok "УСПЕШНО"
 }
 
 #------------------------------------------------------
 # 	ОСТАНАВЛИВАЕМ dnsmasq
 #------------------------------------------------------
 stop_dnsmasq(){
-
-	if /opt/etc/init.d/S56dnsmasq status | grep -q "alive"; then
+	local dnsmasq_state
+	dnsmasq_state=$(setup_dns__service_state /opt/etc/init.d/S56dnsmasq dnsmasq) || return 1
+	if [ "${dnsmasq_state}" = running ]; then
 		ready "Останавливаем службу dnsmasq "
-		service_action dnsmasq stop &> /dev/null
-		[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+		setup_dns__stop_service /opt/etc/init.d/S56dnsmasq dnsmasq &> /dev/null || return 1
+		when_ok "УСПЕШНО"
 	fi
 	ready "Архивируем файл службы S56dnsmasq"
 	mv /opt/etc/init.d/S56dnsmasq /opt/etc/init.d/K56dnsmasq
@@ -260,10 +276,12 @@ stop_dnsmasq(){
 # 	ОСТАНАВЛИВАЕМ dnscrypt-proxy2
 #------------------------------------------------------
 stop_crypt(){
-	if /opt/etc/init.d/S09dnscrypt-proxy2 status | grep -q "alive"; then
+	local dnscrypt_state
+	dnscrypt_state=$(setup_dns__service_state /opt/etc/init.d/S09dnscrypt-proxy2 dnscrypt) || return 1
+	if [ "${dnscrypt_state}" = running ]; then
 		ready "Останавливаем службу dnscrypt-proxy2 "
-		service_action dnscrypt-proxy2 stop &> /dev/null
-		[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+		setup_dns__stop_service /opt/etc/init.d/S09dnscrypt-proxy2 dnscrypt &> /dev/null || return 1
+		when_ok "УСПЕШНО"
 	fi
 
 	ready "Архивируем файл службы S09dnscrypt-proxy2"
@@ -339,18 +357,18 @@ restore_backups(){
 
 # Сохраняем все значимые файлы конфигурации пакета Морс
 save_backups(){
-	backup_copy "${MORS_CONF_FILE}" "${MORS_CONFIG_BACKUP}"
-	backup_copy "${MORS_LIST_FILE}" "${MORS_LIST_FILE_BACKUP}"
+	backup_copy "${MORS_CONF_FILE}" "${MORS_CONFIG_BACKUP}" || return 1
+	backup_copy "${MORS_LIST_FILE}" "${MORS_LIST_FILE_BACKUP}" || return 1
 
-	backup_copy "${ADGUARDHOME_CONFIG}" "${ADGUARDHOME_CONFIG_BACKUP}"
-	backup_copy "${ADGUARD_IPSET_FILE}" "${ADGUARD_IPSET_FILE_BACKUP}"
+	backup_copy "${ADGUARDHOME_CONFIG}" "${ADGUARDHOME_CONFIG_BACKUP}" || return 1
+	backup_copy "${ADGUARD_IPSET_FILE}" "${ADGUARD_IPSET_FILE_BACKUP}" || return 1
 
-	backup_copy "${SHADOWSOCKS_CONF}" "${SHADOWSOCKS_CONF_BACKUP}"
+	backup_copy "${SHADOWSOCKS_CONF}" "${SHADOWSOCKS_CONF_BACKUP}" || return 1
 
-	backup_copy "${DNSMASQ_CONFIG}" "${DNSMASQ_CONFIG_BACKUP}"
-	backup_copy "${DNSMASQ_IPSET_HOSTS}" "${DNSMASQ_IPSET_HOSTS_BACKUP}"
+	backup_copy "${DNSMASQ_CONFIG}" "${DNSMASQ_CONFIG_BACKUP}" || return 1
+	backup_copy "${DNSMASQ_IPSET_HOSTS}" "${DNSMASQ_IPSET_HOSTS_BACKUP}" || return 1
 
-	backup_copy "${VLESS_CONFIG_FILE}" "${VLESS_CONFIG_FILE_BACKUP}"
+	backup_copy "${VLESS_CONFIG_FILE}" "${VLESS_CONFIG_FILE_BACKUP}" || return 1
 	if [ -d "${VLESS_STORE_ROOT}" ]; then
 		local backup_candidate="${MORS_BACKUP_PATH}/vless-store.candidate"
 		local previous_backup="${MORS_BACKUP_PATH}/vless-store.previous"
@@ -386,11 +404,11 @@ save_backups(){
 		rm -rf "${previous_backup}"
 	fi
 
-	backup_copy "${DNSCRYPT_CONFIG}" "${DNSCRYPT_CONFIG_BACKUP}"
+	backup_copy "${DNSCRYPT_CONFIG}" "${DNSCRYPT_CONFIG_BACKUP}" || return 1
 
-	backup_copy "${ADBLOCK_HOSTS_FILE}" "${ADBLOCK_HOSTS_FILE_BACKUP}"
-	backup_copy "${ADBLOCK_SOURCES_LIST}" "${ADBLOCK_SOURCES_LIST_BACKUP}"
-	backup_copy "${ADBLOCK_LIST_EXCEPTION}" "${ADBLOCK_LIST_EXCEPTION_BACKUP}"
+	backup_copy "${ADBLOCK_HOSTS_FILE}" "${ADBLOCK_HOSTS_FILE_BACKUP}" || return 1
+	backup_copy "${ADBLOCK_SOURCES_LIST}" "${ADBLOCK_SOURCES_LIST_BACKUP}" || return 1
+	backup_copy "${ADBLOCK_LIST_EXCEPTION}" "${ADBLOCK_LIST_EXCEPTION_BACKUP}" || return 1
 
 #	backup_copy "${}" "${}"
 }
@@ -534,64 +552,76 @@ rm_previous_version_files() {
 	# Полное удаление архивов выполняется только через rm_package_files full.
 }
 
-clear_previous_version_net_rules() {
-	ip4__rule__delete_mark_to_table
-	ip4__route__flush_table
+legacy_cleanup__run() {
+	"$@" && return 0
+	legacy_cleanup_result=1
+	[ "${legacy_cleanup_mode}" = best_effort ]
+}
 
-	ip4__chain__delete_jump 'nat'    'MORS_DNS'
-	ip4__chain__delete      'nat'    'MORS_DNS'
+clear_previous_version_net_rules() {
+	local legacy_cleanup_mode=${1:-fail_fast} legacy_cleanup_result=0
+	case ${legacy_cleanup_mode} in
+		fail_fast|best_effort) ;;
+		*) return 1 ;;
+	esac
+	legacy_cleanup__run ip4__rule__delete_mark_to_table || return 1
+	legacy_cleanup__run ip4__route__flush_table || return 1
+
+	legacy_cleanup__run ip4__chain__delete_jump 'nat'    'MORS_DNS' || return 1
+	legacy_cleanup__run ip4__chain__delete      'nat'    'MORS_DNS' || return 1
 
 	#24-12-21 7791b886b2f233a71447c985ec8dfe57c53cab40
-	ip4__chain__delete_jump 'mangle' 'MORS_MARK'
-	ip4__chain__delete      'mangle' 'MORS_MARK'
+	legacy_cleanup__run ip4__chain__delete_jump 'mangle' 'MORS_MARK' || return 1
+	legacy_cleanup__run ip4__chain__delete      'mangle' 'MORS_MARK' || return 1
 	#24-11-27 7bda08de3472da3a8e6f17903f65ff10c899ceb7
-	ip4__chain__delete_jump 'mangle' 'MORS_MARK_TO_TABLE'
-	ip4__chain__delete      'mangle' 'MORS_MARK_TO_TABLE'
-	ip4__chain__delete_jump 'nat'    'MORS_DNAT_TO_PORT'
-	ip4__chain__delete      'nat'    'MORS_DNAT_TO_PORT'
+	legacy_cleanup__run ip4__chain__delete_jump 'mangle' 'MORS_MARK_TO_TABLE' || return 1
+	legacy_cleanup__run ip4__chain__delete      'mangle' 'MORS_MARK_TO_TABLE' || return 1
+	legacy_cleanup__run ip4__chain__delete_jump 'nat'    'MORS_DNAT_TO_PORT' || return 1
+	legacy_cleanup__run ip4__chain__delete      'nat'    'MORS_DNAT_TO_PORT' || return 1
 	#24-11-26 10c31fcf4c1a9b201b7e21946a9ee055a82a9183
-	ip4__chain__delete_jump 'mangle' 'MORS_VPN_FAST'
-	ip4__chain__delete      'mangle' 'MORS_VPN_FAST'
+	legacy_cleanup__run ip4__chain__delete_jump 'mangle' 'MORS_VPN_FAST' || return 1
+	legacy_cleanup__run ip4__chain__delete      'mangle' 'MORS_VPN_FAST' || return 1
 	#24-11-26 df8b36e2e64ae3844073518ce9a6db64c8bb7efd
-	ip4__chain__delete_jump 'nat'    'MORS_PROXY_TCP'
-	ip4__chain__delete      'nat'    'MORS_PROXY_TCP'
-	ip4__chain__delete_jump 'nat'    'MORS_PROXY_UDP'
-	ip4__chain__delete      'nat'    'MORS_PROXY_UDP'
+	legacy_cleanup__run ip4__chain__delete_jump 'nat'    'MORS_PROXY_TCP' || return 1
+	legacy_cleanup__run ip4__chain__delete      'nat'    'MORS_PROXY_TCP' || return 1
+	legacy_cleanup__run ip4__chain__delete_jump 'nat'    'MORS_PROXY_UDP' || return 1
+	legacy_cleanup__run ip4__chain__delete      'nat'    'MORS_PROXY_UDP' || return 1
 	#24-11-26 0e67e8aa45ba287c02a1e270f9f56afe76b72b2c
-	ip4__chain__delete_jump 'mangle' 'MORS_VPN'
-	ip4__chain__delete      'mangle' 'MORS_VPN'
+	legacy_cleanup__run ip4__chain__delete_jump 'mangle' 'MORS_VPN' || return 1
+	legacy_cleanup__run ip4__chain__delete      'mangle' 'MORS_VPN' || return 1
 	# давно
-	ip4__chain__delete_jump 'mangle' 'VPNREDIR'
-	ip4__chain__delete      'mangle' 'VPNREDIR'
-	ip4__chain__delete_jump 'nat'    'SHADOWSOCKS'
-	ip4__chain__delete      'nat'    'SHADOWSOCKS'
-	ip4__chain__delete_jump 'nat'    'SHADOWSOCKS_UDP_MARK'
-	ip4__chain__delete      'nat'    'SHADOWSOCKS_UDP_MARK'
+	legacy_cleanup__run ip4__chain__delete_jump 'mangle' 'VPNREDIR' || return 1
+	legacy_cleanup__run ip4__chain__delete      'mangle' 'VPNREDIR' || return 1
+	legacy_cleanup__run ip4__chain__delete_jump 'nat'    'SHADOWSOCKS' || return 1
+	legacy_cleanup__run ip4__chain__delete      'nat'    'SHADOWSOCKS' || return 1
+	legacy_cleanup__run ip4__chain__delete_jump 'nat'    'SHADOWSOCKS_UDP_MARK' || return 1
+	legacy_cleanup__run ip4__chain__delete      'nat'    'SHADOWSOCKS_UDP_MARK' || return 1
 
 	# ss доцепочечных времён
-	iptables__delete_rules 'nat' 'MORS_LIST'
-	iptables__delete_rules 'nat' 'mors_ipset'
-	iptables__delete_rules 'nat' 'mors'
-	iptables__delete_rules 'nat' 'unblock'
+	legacy_cleanup__run iptables__delete_rules 'nat' 'MORS_LIST' || return 1
+	legacy_cleanup__run iptables__delete_rules 'nat' 'mors_ipset' || return 1
+	legacy_cleanup__run iptables__delete_rules 'nat' 'mors' || return 1
+	legacy_cleanup__run iptables__delete_rules 'nat' 'unblock' || return 1
 
 	# dns доцепочечных времён
-	iptables__delete_rules 'nat' '--dport 9753 -j DNAT'
-	iptables__delete_rules 'nat' '--dport 53 -j DNAT'
+	legacy_cleanup__run iptables__delete_rules 'nat' '--dport 9753 -j DNAT' || return 1
+	legacy_cleanup__run iptables__delete_rules 'nat' '--dport 53 -j DNAT' || return 1
 
 	#24-12-15 b3dec7293bb8e3de59cce200b4e8dc8d4b9f3dac
-	ip4__ipset__destroy 'MORS_DESTINATION_EXCLUDED'
+	legacy_cleanup__run ip4__ipset__destroy 'MORS_DESTINATION_EXCLUDED' || return 1
 	#24-11-26 5efb5035c33fffb18c5d17cd7c56e453b0b64ac8
-	ip4__ipset__destroy 'MORS_RESERVED'
+	legacy_cleanup__run ip4__ipset__destroy 'MORS_RESERVED' || return 1
 
 	#ToDo: найти почему вываливаются с ошибкой
 	#24-11-29 0dabaa19b8dc788d56650b20092dec4a9dce1acc
-	ip4__ipset__destroy 'MORS_LIST'
+	legacy_cleanup__run ip4__ipset__destroy 'MORS_LIST' || return 1
 	#24-11-09 fb1f8cb5755dd4c7b683b314096ccf903ee05525
-	ip4__ipset__destroy 'mors_ipset'
+	legacy_cleanup__run ip4__ipset__destroy 'mors_ipset' || return 1
 	#24-09-07 f78979503e9866f2dca3770455b241c3db8f850d
-	ip4__ipset__destroy 'mors'
+	legacy_cleanup__run ip4__ipset__destroy 'mors' || return 1
 	# давно
-	ip4__ipset__destroy 'unblock'
+	legacy_cleanup__run ip4__ipset__destroy 'unblock' || return 1
+	return "${legacy_cleanup_result}"
 }
 
 setup__cmd_install_unlocked(){
@@ -602,6 +632,9 @@ setup__cmd_install_unlocked(){
 		error 'Выбранный setup plan больше не соответствует состоянию роутера.'
 		return 1
 	}
+	# VLESS ownership и внешний init-hook проверяются до подготовки интерфейса,
+	# очистки dataplane и любых service actions транзакции.
+	setup__preflight_xray_hooks || return 1
 	setup__prepare_selected_interface || return $?
 	setup_plan__validate_selected || {
 		error 'Подготовленный VPN-интерфейс не соответствует setup plan.'
@@ -620,10 +653,16 @@ setup__cmd_install_unlocked(){
 	rm_previous_version_files && when_ok || when_bad
 
 	echo 'Очищаем сетевые правила предыдущих версий'
-	clear_previous_version_net_rules
+	clear_previous_version_net_rules || {
+		error 'Не удалось очистить сетевые правила предыдущих версий.'
+		return 1
+	}
 
 	# Стартуем ipset'ы, используемые DNS-серверами, до старта DNS.
-	ip4__ipset__create_list
+	ip4__ipset__create_list || {
+		error 'Не удалось создать рабочий набор IP Mors.'
+		return 1
+	}
 
 	# Обязательные пакеты принадлежат dependency graph opkg. Setup не меняет
 	# их user/auto-installed ownership и не переустанавливает конфиги.
@@ -643,8 +682,8 @@ setup__cmd_install_unlocked(){
 	# Xray нужен только для VLESS: проблемы с ним не должны блокировать
 	# настройку Mors для OpenVPN/WireGuard и других интерфейсов.
 	xray_version_check || warning "VLESS будет недоступен до установки совместимой версии Xray."
-	# Создаем ссылку на наш скрипт для запуска xray в /opt/etc/init.d
-	[ -f "${XRAY_INIT}" ] || ln -s /opt/apps/mors/etc/init.d/S97xray ${XRAY_INIT}
+	# S24xray принадлежит Entware-пакету xray. Mors управляет его процессом,
+	# но не создаёт и не заменяет init-скрипт зависимости.
 	ln -sf /opt/apps/mors/etc/init.d/S25mors-vless "${VLESS_SUPERVISOR_INIT}"
 	chmod +x "${VLESS_SUPERVISOR_INIT}"
 
@@ -684,13 +723,6 @@ setup__cmd_install_unlocked(){
 	#----------------------------------------------------------
 
 	if [ "${ANSWER_AGH}" = n ]; then
-
-		if [ -f "${ADGUARDHOME_DEMON}" ]; then
-			if "${ADGUARDHOME_DEMON}" status | grep -q alive; then
-				"${ADGUARDHOME_DEMON}" stop &> /dev/null
-			fi
-		fi
-
 		#------------------------------------------------------
 		# DNSMASQ
 		#------------------------------------------------------
@@ -764,42 +796,44 @@ setup__cmd_install_unlocked(){
 #  Обрабатываем режим тестировщика
 #  удаляем под ноль все запущенные службы
 #------------------------------------------------------
+setup__develop_remove_service() {
+	local service label config package
+	service=${1}
+	label=${2}
+	config=${3}
+	package=${4}
+	ready "Останавливаем и удаляем службу ${label} "
+	setup_dns__stop_service "${service}" "${label}" &>/dev/null || {
+		when_bad "ОШИБКА"
+		return 1
+	}
+	rm -f "${config}" || {
+		when_bad "ОШИБКА"
+		return 1
+	}
+	opkg remove "${package}" --force-depends &>/dev/null || {
+		when_bad "ОШИБКА"
+		return 1
+	}
+	when_ok "УСПЕШНО"
+}
+
 all_services_rm_develop_mode() {
-
-	if cmd_adguardhome_status | grep -q "ВКЛЮЧЕН" ; then
-		ready "Останавливаем и удаляем службу AdGuardHome "
-		{
-			${ADGUARDHOME_DEMON} stop &> /dev/null
-			rm_file /opt/etc/AdGuardHome/AdGuardHome.yaml
-			opkg remove adguardhome-go --force-depends &> /dev/null
-		} && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
-
+	local adguard_state=missing
+	if [ -x "${ADGUARDHOME_DEMON}" ]; then
+		adguard_state=$(setup_dns__service_state "${ADGUARDHOME_DEMON}") || return 1
+	fi
+	if [ "${adguard_state}" = running ]; then
+		setup__develop_remove_service "${ADGUARDHOME_DEMON}" AdGuardHome \
+			/opt/etc/AdGuardHome/AdGuardHome.yaml adguardhome-go
+	elif has_ssr_enable; then
+		setup__develop_remove_service /opt/etc/init.d/S22shadowsocks Shadowsocks \
+			/opt/etc/shadowsocks.json shadowsocks-libev
 	else
-
-		if has_ssr_enable ; then
-			ready "Останавливаем службу Shadowsocks "
-			{
-				# Останавливаем сервер SSR
-				/opt/etc/init.d/S22shadowsocks stop &> /dev/null
-				rm_file /opt/etc/shadowsocks.json
-				opkg remove shadowsocks-libev --force-depends &> /dev/null
-
-			} && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
-		else
-			ready "Останавливаем службу dnsmasq "
-			{
-				/opt/etc/init.d/S56dnsmasq stop &> /dev/null
-				rm_file /opt/etc/dnsmasq.conf
-				opkg remove dnsmasq --force-depends &> /dev/null
-			} && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
-
-			ready "Останавливаем службу dnscrypt-proxy2 "
-			{
-				/opt/etc/init.d/S09dnscrypt-proxy2 stop &> /dev/null
-				rm_file /opt/etc/dnscrypt-proxy.toml
-				opkg remove dnscrypt-proxy2 --force-depends &> /dev/null
-			} && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
-		fi
+		setup__develop_remove_service /opt/etc/init.d/S56dnsmasq dnsmasq \
+			/opt/etc/dnsmasq.conf dnsmasq || return 1
+		setup__develop_remove_service /opt/etc/init.d/S09dnscrypt-proxy2 dnscrypt-proxy2 \
+			/opt/etc/dnscrypt-proxy.toml dnscrypt-proxy2
 	fi
 }
 
@@ -817,6 +851,7 @@ all_services_rm_develop_mode() {
 #
 # ------------------------------------------------------------------------------------------
 setup__cmd_uninstall_unlocked() {
+	local adguard_state
 
 	rm_type=${1}; sure="${2}";
 	answer_yes='y|Y|Yes|yes|YES|да|Да|ДА'
@@ -850,7 +885,7 @@ setup__cmd_uninstall_unlocked() {
 			mess="Удаляем все архивные данные и все зависимые пакеты..."
 			rm -f /opt/etc/init/K56dnsmasq  /opt/etc/init/K09dnscrypt-proxy2
 		elif [ "${rm_type}" == develop ] ; then
-			all_services_rm_develop_mode
+			all_services_rm_develop_mode || return 1
 		else
 #			Сохраняем значимые файлы конфигурации
 			save_backups || {
@@ -875,26 +910,47 @@ setup__cmd_uninstall_unlocked() {
 
 		if has_ssr_enable ; then
 			ready 'Останавливаем службу Shadowsocks '
-			/opt/etc/init.d/S22shadowsocks stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
+			setup_dns__service_action /opt/etc/init.d/S22shadowsocks stop &>/dev/null && when_ok 'УСПЕШНО' || {
+				when_bad 'ОШИБКА'
+				return 1
+			}
 			config__restore_from_opkg "${SHADOWSOCKS_CONF}"
 		fi
 		uninstall_dns_backend=dnsmasq
-		if cmd_adguardhome_status | grep -q 'ВКЛЮЧЕН' ; then
+		adguard_state=missing
+		if [ -x "${ADGUARDHOME_DEMON}" ]; then
+			adguard_state=$(setup_dns__service_state "${ADGUARDHOME_DEMON}") || {
+				error "Удаление остановлено: состояние AdGuard Home неизвестно. Журнал: $(setup_dns__log_path)"
+				return 1
+			}
+		fi
+		if [ "${adguard_state}" = running ] ; then
 			uninstall_dns_backend=adguard
 			ready 'Останавливаем службу AdGuardHome '
-			${ADGUARDHOME_DEMON} stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
+			setup_dns__stop_service "${ADGUARDHOME_DEMON}" adguard && when_ok 'УСПЕШНО' || {
+				when_bad 'ОШИБКА'
+				error "Удаление остановлено: AdGuard Home не завершился. Журнал: $(setup_dns__log_path)"
+				return 1
+			}
 			config__restore_from_opkg "${ADGUARDHOME_CONFIG}"
 		else
 			ready 'Останавливаем службу DNSMasq '
-			${DNSMASQ_DEMON} stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
+			setup_dns__stop_service "${DNSMASQ_DEMON}" dnsmasq && when_ok 'УСПЕШНО' || {
+				when_bad 'ОШИБКА'
+				error "Удаление остановлено: DNSMasq не завершился. Журнал: $(setup_dns__log_path)"
+				return 1
+			}
 			config__restore_from_opkg "${DNSMASQ_CONFIG}"
 
 			ready 'Останавливаем службу DNSCrypt '
-			${DNSCRYPT_DEMON} stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
+			setup_dns__stop_service "${DNSCRYPT_DEMON}" dnscrypt && when_ok 'УСПЕШНО' || {
+				when_bad 'ОШИБКА'
+				error "Удаление остановлено: DNSCrypt не завершился. Журнал: $(setup_dns__log_path)"
+				return 1
+			}
 			config__restore_from_opkg "${DNSCRYPT_CONFIG}"
 		fi
-		[ -f "${VLESS_SUPERVISOR_INIT}" ] && vless_runtime__supervisor_service stop &>/dev/null || true
-		[ -f "${XRAY_INIT}" ] && "${XRAY_INIT}" stop &>/dev/null || true
+		setup__quiesce_managed_vless_runtime || return 1
 
 		# Подключаем библиотеку keen_api
 		#source /opt/apps/mors/bin/libs/keen_api
@@ -922,31 +978,43 @@ setup__cmd_uninstall_unlocked() {
 		#if [ $? = 0 ]; then when_ok 'УСПЕШНО'; else when_bad 'ОШИБКА'; fi
 
 		ready 'Очищаем всевозможные сетевые правила...'
-		clear_previous_version_net_rules &> /dev/null
-		if [ $? = 0 ]; then when_ok 'УСПЕШНО'; else when_bad 'ОШИБКА'; fi
+		if clear_previous_version_net_rules &> /dev/null; then
+			when_ok 'УСПЕШНО'
+		else
+			when_bad 'ОШИБКА'
+			error 'Удаление остановлено: не удалось очистить сетевые правила Mors.'
+			return 1
+		fi
 
 		ready 'Восстанавливаем штатный DNS после очистки Mors...'
 		if [ "${uninstall_dns_backend}" = adguard ] && [ -x /opt/etc/init.d/S99adguardhome ]; then
-			restore_adguard >/dev/null 2>&1 || true
-			/opt/etc/init.d/S99adguardhome restart >/dev/null 2>&1 || {
+			restore_adguard >/dev/null 2>&1 || return 1
+			setup_dns__restart_service /opt/etc/init.d/S99adguardhome adguard || {
 				when_bad 'ОШИБКА'
-				error 'Удаление остановлено: штатный AdGuard Home не запустился.'
+				error "Удаление остановлено: штатный AdGuard Home не запустился. Журнал: $(setup_dns__log_path)"
 				return 1
 			}
 		elif [ -x /opt/etc/init.d/S56dnsmasq ]; then
-			/opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1 || {
+			setup_dns__restart_service /opt/etc/init.d/S56dnsmasq dnsmasq || {
 				when_bad 'ОШИБКА'
-				error 'Удаление остановлено: штатный DNSMasq не запустился.'
+				error "Удаление остановлено: штатный DNSMasq не запустился. Журнал: $(setup_dns__log_path)"
 				return 1
 			}
-			if [ -x /opt/etc/init.d/S09dnscrypt-proxy2 ]; then
-				/opt/etc/init.d/S09dnscrypt-proxy2 restart >/dev/null 2>&1 || true
-			fi
+			setup__restore_baseline_service_if_running /opt/etc/init.d/S09dnscrypt-proxy2 dnscrypt "$(get_router_ip)" 53 || {
+				when_bad 'ОШИБКА'
+				error "Удаление остановлено: исходно активный DNSCrypt не запустился. Журнал: $(setup_dns__log_path)"
+				return 1
+			}
 		else
 			when_bad 'ОШИБКА'
 			error 'Удаление остановлено: штатный DNS-сервис не найден.'
 			return 1
 		fi
+		setup_dns__wait_resolver "$(get_router_ip)" 53 || {
+			when_bad 'ОШИБКА'
+			error "Удаление остановлено: штатный DNS не отвечает. Журнал: $(setup_dns__log_path)"
+			return 1
+		}
 		when_ok 'УСПЕШНО'
 
 		ready 'Отключаем init- и NDM-интеграции Mors...'
@@ -982,13 +1050,13 @@ setup__deactivate_core_hooks() {
 	rm_file /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
 	rm_file /opt/etc/init.d/S96mors
 	rm_file /opt/etc/init.d/S25mors-vless
-	rm_file /opt/etc/init.d/S97xray
+	setup__remove_managed_legacy_xray_hook || return 1
 	rm_file /opt/etc/cron.5mins/vless-watchdog
 	rm_file /opt/etc/cron.5mins/check_vpn
 }
 
 setup__verify_runtime_removed() {
-	local iptables_state ipset_state
+	local iptables_state ipset_state legacy_xray_state
 	iptables_state=$(save_iptables 2>/dev/null) || return 1
 	printf '%s\n' "${iptables_state}" | grep -qE '(^|[[:space:]:])MORS(_|[[:space:]])' && return 1
 	if command -v ipset >/dev/null 2>&1; then
@@ -1002,7 +1070,6 @@ setup__verify_runtime_removed() {
 	for path in \
 		/opt/etc/init.d/S96mors \
 		/opt/etc/init.d/S25mors-vless \
-		/opt/etc/init.d/S97xray \
 		/opt/etc/ndm/fs.d/15-mors-start.sh \
 		/opt/etc/ndm/netfilter.d/100-dns-local \
 		/opt/etc/ndm/netfilter.d/100-vpn-mark \
@@ -1014,7 +1081,104 @@ setup__verify_runtime_removed() {
 		/opt/etc/cron.5mins/check_vpn; do
 		[ ! -e "${path}" ] && [ ! -L "${path}" ] || return 1
 	done
+	legacy_xray_state=$(setup__legacy_xray_hook_state) || return 1
+	[ "${legacy_xray_state}" != managed ] || return 1
+	setup__managed_vless_processes_stopped || return 1
+	setup__verify_legacy_dataplane_absent || return 1
 	telemetry_lifecycle__passive_runtime_removed
+}
+
+setup__vless_supervisor_process_running() {
+	local proc_dir pid
+	for proc_dir in "${VLESS_SUPERVISOR_PROC_ROOT:-/proc}"/[0-9]*; do
+		[ -d "${proc_dir}" ] || continue
+		pid=${proc_dir##*/}
+		vless_process__pid_is_service "${pid}" && return 0
+	done
+	return 1
+}
+
+setup__xray_process_running() {
+	local proc_dir pid
+	for proc_dir in "${VLESS_SUPERVISOR_PROC_ROOT:-/proc}"/[0-9]*; do
+		[ -d "${proc_dir}" ] || continue
+		pid=${proc_dir##*/}
+		vless_process__pid_has_argument "${pid}" "${XRAY:-/opt/sbin/xray}" || continue
+		vless_process__pid_has_argument "${pid}" "${VLESS_CONFIG_FILE}" && return 0
+	done
+	return 1
+}
+
+setup__managed_vless_processes_stopped() {
+	! setup__vless_supervisor_process_running && ! setup__xray_process_running
+}
+
+setup__legacy_xray_hook_state() {
+	local path source target
+	path=${MORS_LEGACY_XRAY_INIT:-/opt/etc/init.d/S97xray}
+	source=${MORS_XRAY_INIT_SOURCE:-/opt/apps/mors/etc/init.d/S97xray}
+	if [ -L "${path}" ]; then
+		target=$(readlink "${path}") || return 1
+		[ "${target}" = "${source}" ] && printf '%s\n' managed || printf '%s\n' external
+	elif [ -e "${path}" ]; then
+		printf '%s\n' external
+	else
+		printf '%s\n' missing
+	fi
+}
+
+setup__selected_interface_is_vless() {
+	local selected
+	selected=${MORS_SETUP_INTERFACE_CLI:-}
+	[ -n "${selected}" ] || selected=$(get_config_value INFACE_CLI 2>/dev/null || true)
+	[ "${selected}" = "${PROXY_VLESS_NAME}" ]
+}
+
+setup__remove_managed_legacy_xray_hook() {
+	local state path
+	path=${MORS_LEGACY_XRAY_INIT:-/opt/etc/init.d/S97xray}
+	state=$(setup__legacy_xray_hook_state) || return 1
+	[ "${state}" = managed ] || return 0
+	rm -f "${path}"
+}
+
+setup__retire_legacy_xray_hook() {
+	local state
+	state=$(setup__legacy_xray_hook_state) || return 1
+	case "${state}" in
+		managed) setup__remove_managed_legacy_xray_hook ;;
+		external)
+			setup__selected_interface_is_vless || return 0
+			error 'Обнаружен внешний /opt/etc/init.d/S97xray. Mors не будет изменять чужой Xray hook.'
+			return 1
+			;;
+		missing) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+setup__preflight_xray_hooks() {
+	local state
+	setup__selected_interface_is_vless || return 0
+	state=$(setup__legacy_xray_hook_state) || return 1
+	if [ "${state}" = external ]; then
+		error 'Обнаружен внешний /opt/etc/init.d/S97xray. Mors не будет изменять чужой Xray hook.'
+		return 1
+	fi
+	[ -x "${XRAY_INIT}" ] || {
+		error 'Init-скрипт Entware /opt/etc/init.d/S24xray отсутствует или не исполняемый.'
+		return 1
+	}
+}
+
+setup__quiesce_managed_vless_runtime() {
+	if [ -x "${VLESS_SUPERVISOR_INIT}" ]; then
+		setup_dns__stop_service "${VLESS_SUPERVISOR_INIT}" vless-supervisor || return 1
+	fi
+	if [ -x "${XRAY_INIT}" ]; then
+		setup_dns__stop_service "${XRAY_INIT}" xray || return 1
+	fi
+	setup__managed_vless_processes_stopped
 }
 
 setup__activate_core_hooks() {
@@ -1023,7 +1187,13 @@ setup__activate_core_hooks() {
 		/opt/etc/ndm/iflayerchanged.d /opt/etc/cron.5mins || return 1
 	cp -f /opt/apps/mors/etc/init.d/S96mors /opt/etc/init.d/S96mors || return 1
 	ln -sf /opt/apps/mors/etc/init.d/S25mors-vless /opt/etc/init.d/S25mors-vless || return 1
-	ln -sf /opt/apps/mors/etc/init.d/S97xray /opt/etc/init.d/S97xray || return 1
+	setup__retire_legacy_xray_hook || return 1
+	if setup__selected_interface_is_vless; then
+		[ -x "${XRAY_INIT}" ] || {
+			error 'Init-скрипт Entware /opt/etc/init.d/S24xray отсутствует или не исполняемый.'
+			return 1
+		}
+	fi
 	cp -f /opt/apps/mors/etc/ndm/fs.d/15-mors-start.sh /opt/etc/ndm/fs.d/15-mors-start.sh || return 1
 	cp -f /opt/apps/mors/etc/ndm/netfilter.d/100-dns-local /opt/etc/ndm/netfilter.d/100-dns-local || return 1
 	ln -sf /opt/apps/mors/etc/ndm/ifcreated.d/mors-iface-add /opt/etc/ndm/ifcreated.d/mors-iface-add || return 1
@@ -1289,12 +1459,11 @@ setup__rollback_provisioned_interface() {
 }
 
 setup__service_running() {
-	local service output
+	local service state
 	service=${1}
 	[ -x "${service}" ] || return 1
-	output=$("${service}" status 2>/dev/null || true)
-	printf '%s\n' "${output}" | grep -qiE 'dead|not[[:space:]]+running|stopped' && return 1
-	printf '%s\n' "${output}" | grep -qiE '(^|[[:space:]])(alive|running)([[:space:].]|$)'
+	state=$(setup_dns__service_state "${service}") || return 1
+	[ "${state}" = running ]
 }
 
 setup__verify_failed() {
@@ -1314,8 +1483,347 @@ setup__bind_transaction_dns_log() {
 	export MORS_SETUP_DNS_LOG
 }
 
+setup__restore_baseline_service_if_running() {
+	local service label resolver_host resolver_port state log
+	service=${1}
+	label=${2:-service}
+	resolver_host=${3:-}
+	resolver_port=${4:-53}
+	state=$(lifecycle_snapshot__baseline_service_state "${service}" 2>/dev/null || printf '%s\n' unknown)
+	case "${state}" in
+		running) setup_dns__restart_service "${service}" "${label}"; return $? ;;
+		stopped|missing|external) ;;
+		unknown)
+			setup_dns__prepare_log || return 1
+			log=$(setup_dns__log_path) || return 1
+			printf 'restore-baseline-unknown service=%s label=%s\n' "${service}" "${label}" >>"${log}"
+			if [ -n "${resolver_host}" ] && setup_dns__wait_resolver "${resolver_host}" "${resolver_port}"; then
+				printf 'restore-skip service=%s label=%s baseline=unknown resolver=ready\n' \
+					"${service}" "${label}" >>"${log}"
+				return 0
+			fi
+			setup_dns__restart_service "${service}" "${label}"
+			return $?
+			;;
+		*) return 1 ;;
+	esac
+	if [ "${state}" != running ]; then
+		setup_dns__prepare_log || return 1
+		log=$(setup_dns__log_path) || return 1
+		printf 'restore-skip service=%s label=%s baseline=%s\n' \
+			"${service}" "${label}" "${state}" >>"${log}"
+		return 0
+	fi
+}
+
+setup__dataplane_ip_command() {
+	if [ -n "${MORS_SETUP_IP_COMMAND:-}" ]; then
+		printf '%s\n' "${MORS_SETUP_IP_COMMAND}"
+	elif command -v ip >/dev/null 2>&1; then
+		command -v ip
+	elif [ -x /opt/sbin/ip ]; then
+		printf '%s\n' /opt/sbin/ip
+	else
+		return 1
+	fi
+}
+
+setup__dataplane_invalid() {
+	MORS_SETUP_DATAPLANE_ERROR=${1}
+	return 1
+}
+
+setup__iptables_home_jump_exists() {
+	local home_interface ipset_name target
+	home_interface=${1}
+	ipset_name=${2}
+	target=${3}
+	awk -v expected_interface="${home_interface}" -v expected_ipset="${ipset_name}" -v expected_target="${target}" '
+		$1 == "-A" && $2 == "PREROUTING" {
+			interface = ipset = direction = jump = ""
+			interface_count = match_count = module_count = jump_count = invalid = 0
+			for (i = 3; i <= NF; i++) {
+				if ($i == "-i" && i < NF) {
+					interface = $(i + 1); interface_count++; i++
+				} else if ($i == "-m" && i < NF) {
+					if ($(i + 1) == "set") module_count++; else invalid = 1
+					i++
+				} else if ($i == "--match-set" && i + 2 <= NF) {
+					ipset = $(i + 1)
+					direction = $(i + 2)
+					match_count++; i += 2
+				} else if ($i == "-j" && i < NF) {
+					jump = $(i + 1); jump_count++; i++
+				} else invalid = 1
+			}
+			if (!invalid && interface_count == 1 && module_count == 1 &&
+				match_count == 1 && jump_count == 1 &&
+				interface == expected_interface && ipset == expected_ipset &&
+				direction == "dst" && jump == expected_target) found = 1
+		}
+		END { exit(found ? 0 : 1) }
+	'
+}
+
+setup__iptables_mark_rule_exists() {
+	local chain mark
+	chain=${1}
+	mark=${2}
+	awk -v expected_chain="${chain}" -v expected_mark="${mark}" '
+		$1 == "-A" && $2 == expected_chain {
+			jump = value = ""
+			jump_count = mark_count = invalid = 0
+			for (i = 3; i <= NF; i++) {
+				if ($i == "-j" && i < NF) {
+					jump = $(i + 1); jump_count++; i++
+				} else if (($i == "--set-mark" || $i == "--set-xmark") && i < NF) {
+					value = $(i + 1); mark_count++; i++
+				} else invalid = 1
+			}
+			parts_count = split(value, parts, "/")
+			if (!invalid && jump_count == 1 && mark_count == 1 &&
+				jump == "MARK" && parts[1] == expected_mark &&
+				(parts_count == 1 || (parts_count == 2 && parts[2] == "0xffffffff"))) found = 1
+		}
+		END { exit(found ? 0 : 1) }
+	'
+}
+
+setup__iptables_redirect_rule_exists() {
+	local chain protocol port
+	chain=${1}
+	protocol=${2}
+	port=${3}
+	awk -v expected_chain="${chain}" -v expected_protocol="${protocol}" -v expected_port="${port}" '
+		$1 == "-A" && $2 == expected_chain {
+			jump = rule_protocol = redirect_port = ""
+			jump_count = protocol_count = port_count = invalid = 0
+			for (i = 3; i <= NF; i++) {
+				if ($i == "-j" && i < NF) {
+					jump = $(i + 1); jump_count++; i++
+				} else if ($i == "-p" && i < NF) {
+					rule_protocol = $(i + 1); protocol_count++; i++
+				} else if (($i == "--to-port" || $i == "--to-ports") && i < NF) {
+					redirect_port = $(i + 1); port_count++; i++
+				} else invalid = 1
+			}
+			if (!invalid && jump_count == 1 && protocol_count == 1 && port_count == 1 &&
+				jump == "REDIRECT" && rule_protocol == expected_protocol &&
+				redirect_port == expected_port) found = 1
+		}
+		END { exit(found ? 0 : 1) }
+	'
+}
+
+setup__policy_rule_exists() {
+	local mark table
+	mark=${1}
+	table=${2}
+	awk -v expected_mark="${mark}/${mark}" -v expected_table="${table}" '
+		{
+			mark_value = table_value = from_value = ""
+			mark_count = table_count = from_count = invalid = 0
+			for (i = 1; i <= NF; i++) {
+				if (i == 1 && $i ~ /^[0-9]+:$/) continue
+				if ($i == "from" && i < NF) {
+					from_value = $(i + 1); from_count++; i++
+				} else if ($i == "fwmark" && i < NF) {
+					mark_value = $(i + 1); mark_count++; i++
+				} else if (($i == "lookup" || $i == "table") && i < NF) {
+					table_value = $(i + 1); table_count++; i++
+				} else invalid = 1
+			}
+			if (!invalid && from_count == 1 && mark_count == 1 && table_count == 1 &&
+				from_value == "all" && mark_value == expected_mark &&
+				table_value == expected_table) found = 1
+		}
+		END { exit(found ? 0 : 1) }
+	'
+}
+
+setup__expected_default_route_exists() {
+	local expected_interface=${1:-} expected_gateway=${2:-}
+	[ -n "${expected_interface}" ] || return 1
+	awk -v expected_interface="${expected_interface}" -v expected_gateway="${expected_gateway}" '
+		$1 == "unreachable" || $1 == "blackhole" || $1 == "prohibit" ||
+		$1 == "throw" { if ($2 == "default") { defaults++; bad = 1 }; next }
+		$1 == "default" {
+			defaults++; dev = via = ""; dev_count = via_count = invalid = 0
+			for (i = 2; i <= NF; i++) {
+				if ($i == "dev" && i < NF) { dev = $(++i); dev_count++ }
+				else if ($i == "via" && i < NF) { via = $(++i); via_count++ }
+				else if (($i == "metric" || $i == "proto" || $i == "scope" ||
+					$i == "src" || $i == "pref" || $i == "mtu") && i < NF) i++
+				else if ($i == "onlink") continue
+				else invalid = 1
+			}
+			if (invalid || dev_count != 1 || dev != expected_interface || via_count > 1) bad = 1
+			if (expected_gateway == "" && via_count != 0) bad = 1
+			if (expected_gateway != "" && (via_count != 1 || via != expected_gateway)) bad = 1
+		}
+		END { exit(defaults == 1 && !bad ? 0 : 1) }
+	'
+}
+
+setup__dataplane_validate() {
+	local expected_entware expected_gateway expected_chain expected_table expected_redirect_port home_interface rules table_rules policy_rules routes ip_binary mark table
+	expected_entware=${MORS_SETUP_INTERFACE_ENTWARE:-$(get_config_value INFACE_ENT)}
+	expected_gateway=$(get_config_value ADDR_MAN 2>/dev/null || true)
+	home_interface=${MORS_SETUP_HOME_INTERFACE:-$(get_local_inface)}
+	mark=${MARK_NUM:-0xd1000}
+	table=${ROUTE_TABLE_ID:-1001}
+	[ -n "${home_interface}" ] || {
+		setup__dataplane_invalid 'не определён интерфейс домашней сети'
+		return 1
+	}
+	rules=$(save_iptables 2>/dev/null) || {
+		setup__dataplane_invalid 'не удалось прочитать iptables'
+		return 1
+	}
+	if [ -n "${SSR_ENTWARE_TEMPL:-}" ] && [[ "${expected_entware}" =~ ${SSR_ENTWARE_TEMPL} ]]; then
+		expected_chain=MORS_DNAT_TO_PORT
+		expected_table=nat
+	else
+		expected_chain=MORS_MARK
+		expected_table=mangle
+	fi
+	table_rules=$(printf '%s\n' "${rules}" | awk -v section="*${expected_table}" '
+		$0 == section { inside = 1; next }
+		inside && $0 == "COMMIT" { exit }
+		inside { print }
+	')
+	if ! printf '%s\n' "${table_rules}" | \
+		setup__iptables_home_jump_exists "${home_interface}" "${IPSET_TABLE_NAME}" "${expected_chain}"; then
+		setup__dataplane_invalid "домашний интерфейс ${home_interface} не ведёт ${IPSET_TABLE_NAME} в ${expected_chain} таблицы ${expected_table}"
+		return 1
+	fi
+	if [ "${expected_chain}" = MORS_DNAT_TO_PORT ]; then
+		expected_redirect_port=$(get_config_value SSR_DNS_PORT)
+		case "${expected_redirect_port}" in ''|*[!0-9]*)
+			setup__dataplane_invalid 'не определён корректный SSR_DNS_PORT'
+			return 1
+			;;
+		esac
+		if ! printf '%s\n' "${table_rules}" | \
+			setup__iptables_redirect_rule_exists MORS_DNAT_TO_PORT tcp "${expected_redirect_port}"; then
+			setup__dataplane_invalid "цепочка MORS_DNAT_TO_PORT не содержит TCP redirect на порт ${expected_redirect_port}"
+			return 1
+		fi
+		if ! printf '%s\n' "${table_rules}" | \
+			setup__iptables_redirect_rule_exists MORS_DNAT_TO_PORT udp "${expected_redirect_port}"; then
+			setup__dataplane_invalid "цепочка MORS_DNAT_TO_PORT не содержит UDP redirect на порт ${expected_redirect_port}"
+			return 1
+		fi
+		return 0
+	fi
+	if ! printf '%s\n' "${table_rules}" | setup__iptables_mark_rule_exists MORS_MARK "${mark}"; then
+		setup__dataplane_invalid "цепочка MORS_MARK не устанавливает метку ${mark}"
+		return 1
+	fi
+	ip_binary=$(setup__dataplane_ip_command) || {
+		setup__dataplane_invalid 'команда ip недоступна'
+		return 1
+	}
+	policy_rules=$("${ip_binary}" rule show 2>/dev/null) || {
+		setup__dataplane_invalid 'не удалось прочитать policy rules'
+		return 1
+	}
+	if ! printf '%s\n' "${policy_rules}" | setup__policy_rule_exists "${mark}" "${table}"; then
+		setup__dataplane_invalid "отсутствует policy rule ${mark} для таблицы ${table}"
+		return 1
+	fi
+	routes=$("${ip_binary}" route show table "${table}" 2>/dev/null) || {
+		setup__dataplane_invalid "не удалось прочитать таблицу ${table}"
+		return 1
+	}
+	if ! printf '%s\n' "${routes}" | \
+		setup__expected_default_route_exists "${expected_entware}" "${expected_gateway}"; then
+		setup__dataplane_invalid "в таблице ${table} нет единственного default route через ${expected_entware}"
+		return 1
+	fi
+}
+
+setup__verify_dataplane() {
+	MORS_SETUP_DATAPLANE_ERROR=''
+	setup__dataplane_validate && return 0
+	setup__verify_failed "${MORS_SETUP_DATAPLANE_ERROR:-неполное состояние firewall/routes}"
+}
+
+setup__verify_legacy_dataplane_absent() {
+	local snapshot ipset_state legacy_name
+	snapshot=$(save_iptables 2>/dev/null) || {
+		setup__verify_failed 'не удалось прочитать firewall для проверки legacy dataplane'
+		return 1
+	}
+	for legacy_name in \
+		MORS_MARK_TO_TABLE MORS_VPN_FAST MORS_PROXY_TCP MORS_PROXY_UDP \
+		MORS_VPN VPNREDIR SHADOWSOCKS SHADOWSOCKS_UDP_MARK mors_ipset mors unblock; do
+		if printf '%s\n' "${snapshot}" | awk -v legacy="${legacy_name}" '
+			substr($1, 1, 1) == ":" && substr($1, 2) == legacy { found = 1 }
+			{
+				for (i = 1; i < NF; i++) {
+					if (($i == "-j" || $i == "-g" || $i == "--goto" || $i == "--match-set") &&
+						$(i + 1) == legacy) found = 1
+				}
+			}
+			END { exit(found ? 0 : 1) }
+		'; then
+			setup__verify_failed "обнаружен legacy firewall object ${legacy_name}"
+			return 1
+		fi
+	done
+	if command -v ipset >/dev/null 2>&1; then
+		ipset_state=$(ipset list -n 2>/dev/null) || {
+			setup__verify_failed 'не удалось прочитать ipset для проверки legacy dataplane'
+			return 1
+		}
+	elif [ -x /opt/sbin/ipset ]; then
+		ipset_state=$(/opt/sbin/ipset list -n 2>/dev/null) || {
+			setup__verify_failed 'не удалось прочитать ipset для проверки legacy dataplane'
+			return 1
+		}
+	else
+		setup__verify_failed 'команда ipset недоступна для проверки legacy dataplane'
+		return 1
+	fi
+	for legacy_name in MORS_RESERVED mors_ipset mors unblock; do
+		if printf '%s\n' "${ipset_state}" | grep -Fqx -- "${legacy_name}"; then
+			setup__verify_failed "обнаружен legacy ipset ${legacy_name}"
+			return 1
+		fi
+	done
+}
+
+setup__refresh_dataplane() {
+	ip4__flush chain || return 1
+	ip4__dns__add_routing_for_home || return 1
+	ip4_firewall_set_all_rules
+}
+
+setup__converge_dataplane() {
+	local attempt=1 stable required_stable attempts interval
+	attempts=${MORS_SETUP_DATAPLANE_ATTEMPTS:-3}
+	required_stable=${MORS_SETUP_DATAPLANE_STABLE_CHECKS:-2}
+	interval=${MORS_SETUP_DATAPLANE_SETTLE_INTERVAL:-2}
+	while [ "${attempt}" -le "${attempts}" ]; do
+		setup__refresh_dataplane || {
+			attempt=$((attempt + 1))
+			continue
+		}
+		stable=0
+		while [ "${stable}" -lt "${required_stable}" ]; do
+			setup__dataplane_validate || break
+			stable=$((stable + 1))
+			[ "${stable}" -ge "${required_stable}" ] || sleep "${interval}"
+		done
+		[ "${stable}" -eq "${required_stable}" ] && return 0
+		attempt=$((attempt + 1))
+	done
+	setup__verify_failed "dataplane не стабилизировался: ${MORS_SETUP_DATAPLANE_ERROR:-ошибка обновления правил}"
+}
+
 setup__verify_committed() {
-	local expected_cli expected_entware dns_backend iptables_state ipset_state ip_binary rule_state route_state path
+	local expected_cli expected_entware dns_backend ipset_state path
 	expected_cli=${MORS_SETUP_INTERFACE_CLI:-$(get_config_value INFACE_CLI)}
 	expected_entware=${MORS_SETUP_INTERFACE_ENTWARE:-$(get_config_value INFACE_ENT)}
 	if [ -z "${expected_cli}" ] || [ -z "${expected_entware}" ]; then
@@ -1358,9 +1866,8 @@ setup__verify_committed() {
 		setup__managed_vless_live >/dev/null 2>&1 || setup__verify_failed 'Proxy21 не опубликован Keenetic' || return 1
 		setup__service_running "${XRAY_INIT}" || setup__verify_failed 'Xray не запущен' || return 1
 	fi
-	iptables_state=$(save_iptables 2>/dev/null) || setup__verify_failed 'не удалось прочитать iptables' || return 1
-	printf '%s\n' "${iptables_state}" | grep -qE '(^|[[:space:]:])MORS(_|[[:space:]])' || \
-		setup__verify_failed 'отсутствуют цепочки MORS в iptables' || return 1
+	setup__verify_dataplane || return 1
+	setup__verify_legacy_dataplane_absent || return 1
 	if command -v ipset >/dev/null 2>&1; then
 		ipset_state=$(ipset list -n 2>/dev/null) || setup__verify_failed 'не удалось прочитать ipset' || return 1
 	elif [ -x /opt/sbin/ipset ]; then
@@ -1370,26 +1877,10 @@ setup__verify_committed() {
 		return 1
 	fi
 	printf '%s\n' "${ipset_state}" | grep -qE '^MORS($|_)' || setup__verify_failed 'отсутствуют таблицы MORS в ipset' || return 1
-	if ! [[ "${expected_entware}" =~ ${SSR_ENTWARE_TEMPL} ]]; then
-		if command -v ip >/dev/null 2>&1; then
-			ip_binary=$(command -v ip)
-		elif [ -x /opt/sbin/ip ]; then
-			ip_binary=/opt/sbin/ip
-		else
-			setup__verify_failed 'команда ip недоступна'
-			return 1
-		fi
-		rule_state=$("${ip_binary}" rule show 2>/dev/null) || setup__verify_failed 'не удалось прочитать policy rules' || return 1
-		printf '%s\n' "${rule_state}" | grep -qE "lookup[[:space:]]+${ROUTE_TABLE_ID:-1001}([[:space:]]|$)" || \
-			setup__verify_failed "отсутствует policy rule для таблицы ${ROUTE_TABLE_ID:-1001}" || return 1
-		route_state=$("${ip_binary}" route show table "${ROUTE_TABLE_ID:-1001}" 2>/dev/null) || \
-			setup__verify_failed "не удалось прочитать таблицу ${ROUTE_TABLE_ID:-1001}" || return 1
-		[ -n "${route_state}" ] || setup__verify_failed "таблица ${ROUTE_TABLE_ID:-1001} пуста" || return 1
-	fi
 }
 
 setup__rollback_transaction() {
-	local previous_state phase result=0
+	local previous_state phase result=0 snapshot_restored=0
 	previous_state=$(jq -er '.previous_state' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
 	phase=$(jq -er '.phase' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
 	if [ "${phase}" = completed ]; then
@@ -1403,17 +1894,32 @@ setup__rollback_transaction() {
 	lifecycle_transaction__phase rolling_back || return 1
 	MORS_LIFECYCLE_APPLY=true
 	export MORS_LIFECYCLE_APPLY
-	clear_previous_version_net_rules >/dev/null 2>&1 || true
+	setup__quiesce_managed_vless_runtime || result=1
+	clear_previous_version_net_rules best_effort >/dev/null 2>&1 || result=1
 	setup__deactivate_core_hooks || result=1
-	[ "${result}" -ne 0 ] || setup__rollback_provisioned_interface || result=1
-	[ "${result}" -ne 0 ] || lifecycle_snapshot__restore || result=1
-	if [ "${result}" -eq 0 ] && [ "${previous_state}" = ready ]; then
-		(
+	setup__rollback_provisioned_interface || result=1
+	if lifecycle_snapshot__restore; then
+		snapshot_restored=1
+	else
+		result=1
+	fi
+	if [ "${snapshot_restored}" -eq 1 ] && [ "${previous_state}" = ready ]; then
+		if ! setup__bind_transaction_dns_log; then
+			result=1
+		elif ! (
 			export MORS_LIFECYCLE_APPLY
 			cmd_mors_init no
-		) >/dev/null 2>&1 || result=1
-		[ "${result}" -ne 0 ] || setup__verify_committed || result=1
-	elif [ "${result}" -eq 0 ]; then
+		) >/dev/null 2>&1; then
+			result=1
+		elif ! (
+			export MORS_LIFECYCLE_APPLY
+			setup__converge_dataplane
+		) >/dev/null 2>&1; then
+			result=1
+		elif ! setup__verify_committed; then
+			result=1
+		fi
+	elif [ "${snapshot_restored}" -eq 1 ]; then
 		setup__verify_runtime_removed || result=1
 	fi
 	[ "${result}" -ne 0 ] || lifecycle_transaction__rollback_finish || result=1
@@ -1649,6 +2155,12 @@ setup__cmd_install_with_runtime() {
 			runtime_mutation_lock__release >/dev/null 2>&1 || true
 			return "${result}"
 		}
+		setup__bind_transaction_dns_log || {
+			result=$?
+			lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
+			runtime_mutation_lock__release >/dev/null 2>&1 || true
+			return "${result}"
+		}
 		setup_plan__journal_store || {
 			result=$?
 			lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
@@ -1686,8 +2198,18 @@ setup__cmd_install_with_runtime() {
 		return 0
 	fi
 	if [ "${result}" -eq 0 ]; then
+		(
+			MORS_LIFECYCLE_APPLY=true
+			export MORS_LIFECYCLE_APPLY
+			setup__converge_dataplane
+		) || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
 		lifecycle_transaction__phase verifying || result=1
 		setup__verify_committed || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		lifecycle_snapshot__persist_service_baseline || result=1
 	fi
 	if [ "${result}" -eq 0 ]; then
 		lifecycle_transaction__finish || result=1
@@ -1718,6 +2240,12 @@ setup__cmd_uninstall_with_runtime() {
 		runtime_mutation_lock__release >/dev/null 2>&1 || true
 		return "${result}"
 	}
+	setup__bind_transaction_dns_log || {
+		result=$?
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return "${result}"
+	}
 	lifecycle_snapshot__capture || {
 		result=$?
 		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
@@ -1727,6 +2255,10 @@ setup__cmd_uninstall_with_runtime() {
 	lifecycle_transaction__phase prepared || {
 		runtime_mutation_lock__release >/dev/null 2>&1 || true
 		return 1
+	}
+	setup__bind_transaction_dns_log || {
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 4
 	}
 	lifecycle_transaction__phase cleanup || {
 		runtime_mutation_lock__release >/dev/null 2>&1 || true

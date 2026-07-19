@@ -10,6 +10,8 @@
 #	Дата: 21/05/2022
 #	Лицензия: Apache License 2.0
 # ------------------------------------------------------------------------------------------
+. /opt/apps/mors/bin/libs/service_action
+
 RED="\033[1;31m";
 GREEN="\033[1;32m";
 BLUE="\033[36m";
@@ -363,9 +365,16 @@ clean_escape(){
 # Делаем копию файла
 #
 backup_copy(){
+	local source_file backup_file
 	source_file=${1}
 	backup_file=${2}
-	[ -f "${source_file}" ] && cp -f "${source_file}" "${backup_file}"
+
+	# Backup inputs are optional, but an existing input must be copied
+	# successfully. This lets callers distinguish a legitimate absence from an
+	# I/O or permissions failure without special-casing every optional file.
+	[ -e "${source_file}" ] || [ -L "${source_file}" ] || return 0
+	[ -f "${source_file}" ] || return 1
+	cp -f "${source_file}" "${backup_file}"
 }
 
 
@@ -643,11 +652,14 @@ is_vless_over_proxy_enabled() {
 
 
 has_adguard_enable() {
-	if [ -f "${ADGUARDHOME_DEMON}" ]; then  
-		"${ADGUARDHOME_DEMON}" status | grep -q alive
-	else
-		return 1
-	fi
+	local state
+	[ -f "${ADGUARDHOME_DEMON}" ] || return 1
+	state=$(service_action__state "${ADGUARDHOME_DEMON}" status \
+		"${MORS_SETUP_DNS_LOG:-}" \
+		"${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT:-15}" \
+		"${MORS_SETUP_DNS_SERVICE_KILL_AFTER:-2}" \
+		"${MORS_SETUP_DNS_TIMEOUT_CMD:-/opt/bin/timeout}") || return 1
+	[ "${state}" = running ]
 }
 
 # ------------------------------------------------------------------------------------------

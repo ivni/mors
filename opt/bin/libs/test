@@ -4,6 +4,7 @@ MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
 . "${MORS_LIB_DIR}/runtime_lock"
 . "${MORS_LIB_DIR}/lifecycle_state"
 . "${MORS_LIB_DIR}/test_result"
+. "${MORS_LIB_DIR}/ipv6_bypass"
 . "${MORS_LIB_DIR}/test_probe"
 . "${MORS_LIB_DIR}/test_tunnel"
 . "${MORS_LIB_DIR}/test_cold"

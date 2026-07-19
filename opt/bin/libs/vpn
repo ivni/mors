@@ -5,6 +5,8 @@
 . /opt/apps/mors/bin/libs/adblock
 . /opt/apps/mors/bin/libs/tags
 . /opt/apps/mors/bin/libs/vless
+. /opt/apps/mors/bin/libs/ipv6_bypass
+. /opt/apps/mors/bin/libs/service_action
 
 MINUS=10
 
@@ -59,6 +61,12 @@ update_iptables(){
 	fi
 }
 
+adguardhome_rebuild_dataplane() {
+	ip4__flush 'chain' || return 1
+	ip4__dns__add_routing_for_home || return 1
+	ip4_firewall_set_all_rules
+}
+
 # ------------------------------------------------------------------------------------------
 #
 # Обновляем правила ipset
@@ -96,7 +104,7 @@ update_ipset(){
 		refresh_adguard_ipset_table || return 1
 		[ "${stage}" = initd ] || {
 			ready "${prefix}Перезапускаем сервис AdGuard Home"
-			if /opt/etc/init.d/S99adguardhome restart &>/dev/null; then
+			if vpn__service_action /opt/etc/init.d/S99adguardhome restart &>/dev/null; then
 				when_ok "УСПЕШНО"
 			else
 				when_bad "ОШИБКА"
@@ -155,9 +163,9 @@ reset_all_connection(){
 	if is_shadowsocks_enabled ; then
 			log_warning 'Перезапуск клиента ShadowSocks (рестарт тоннеля)'
 
-			/opt/etc/init.d/S22shadowsocks stop &>/dev/null || result=1
+			vpn__service_action /opt/etc/init.d/S22shadowsocks stop &>/dev/null || result=1
 			# reset_ISP_connection
-			[ "${result}" -ne 0 ] || /opt/etc/init.d/S22shadowsocks start &>/dev/null || result=1
+			[ "${result}" -ne 0 ] || vpn__service_action /opt/etc/init.d/S22shadowsocks start &>/dev/null || result=1
 	else
 			inface=$(current_cli_vpn_interface)
 			log_warning "Перезапуск сетевого интерфейса ${inface}"
@@ -165,7 +173,7 @@ reset_all_connection(){
 			if is_vless_over_proxy_enabled ; then
 				log_warning 'Перезапуск клиента VLESS (рестарт тоннеля)'
 
-				${XRAY_INIT} restart || result=1
+				vpn__service_action "${XRAY_INIT}" restart || result=1
 			fi
 
 			cli_request="localhost:79/rci/interface/${inface}"
@@ -218,11 +226,34 @@ cmd_mors_init(){
 }
 
 
+vpn__service_action() {
+	local service action log
+	service=${1}
+	action=${2}
+	log=${MORS_SETUP_DNS_LOG:-}
+	service_action__run "${service}" "${action}" "${log}" \
+		"${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT:-15}" \
+		"${MORS_SETUP_DNS_SERVICE_KILL_AFTER:-2}" \
+		"${MORS_SETUP_DNS_TIMEOUT_CMD:-/opt/bin/timeout}"
+}
+
+vpn__service_state() {
+	local service log
+	service=${1}
+	log=${MORS_SETUP_DNS_LOG:-}
+	service_action__state "${service}" status "${log}" \
+		"${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT:-15}" \
+		"${MORS_SETUP_DNS_SERVICE_KILL_AFTER:-2}" \
+		"${MORS_SETUP_DNS_TIMEOUT_CMD:-/opt/bin/timeout}"
+}
+
 service_restart(){
+	local srv_name srv_initd service
 	srv_name=${1}
 	srv_initd=${2}
+	service="/opt/etc/init.d/${srv_initd}"
 	ready "Перезапускаем ${srv_name}"
-	if "/opt/etc/init.d/${srv_initd}" restart &> /dev/null; then
+	if vpn__service_action "${service}" restart &> /dev/null; then
 		when_ok "УСПЕШНО"
 	else
 		when_bad "ОШИБКА"
@@ -233,8 +264,11 @@ service_restart(){
 }
 
 all_services_restart() {
-	local result=0
-	if has_adguard_enable ; then
+	local result=0 adguard_state=missing
+	if [ -x "${ADGUARDHOME_DEMON}" ]; then
+		adguard_state=$(vpn__service_state "${ADGUARDHOME_DEMON}") || return 1
+	fi
+	if [ "${adguard_state}" = running ]; then
 		log_warning 'Перезапуск DNS сервера AdGuardHome'
 
 		service_restart 'DNS сервер AdGuardHome' 'S99adguardhome' || result=1
@@ -366,17 +400,40 @@ hint__if_ndnproxy_disabled() {
 		' system reboot'
 }
 
+ipv6_bypass__active_dns_aaaa() {
+	local target port timeout_command
+	target=${1}
+	if has_adguard_enable; then
+		port=${MAIN_DNS_PORT}
+	else
+		port=$(get_config_value DNSMASQ_PORT)
+	fi
+	[ -n "${port}" ] || return 1
+	if command -v timeout >/dev/null 2>&1; then
+		timeout_command=$(command -v timeout)
+	elif [ -x /opt/bin/timeout ]; then
+		timeout_command=/opt/bin/timeout
+	else
+		return 1
+	fi
+	if command -v kdig >/dev/null 2>&1; then
+		"${timeout_command}" 5 kdig @127.0.0.1 -p "${port}" "${target}" AAAA +short
+	elif command -v dig >/dev/null 2>&1; then
+		"${timeout_command}" 5 dig @127.0.0.1 -p "${port}" "${target}" AAAA +short
+	else
+		return 1
+	fi
+}
+
 hint__if_dns_ipv6() {
-	local dhcpv6_status
-	dhcpv6_status=$(get_dhcpv6_status)
-	if [ "${dhcpv6_status}" != 'DHCPv6 включен' ] && [ "${dhcpv6_status}" != 'сегмент IPv6 привязан' ] ; then
-		return
+	if ! ipv6_bypass__detect example.com ipv6_bypass__active_dns_aaaa; then
+		return 0
 	fi
 
 	local commands_title
 	commands_title="$(hint__commands_title)"
 	printf '%b\n' \
-		"Вероятно, часть ${YELLOW}DNS проходит через IPv6${NOCL}." \
+		"${MORS_IPV6_BYPASS_MESSAGE}" \
 		"${commands_title}" \
 		' ipv6 subnet Default' \
 		' no mode' \
@@ -614,6 +671,7 @@ adguardhome_change_and_get_config_ip() {
 #
 # ------------------------------------------------------------------------------------------
 adguardhome_setup() {
+	local dnsmasq_state dnscrypt_state
 
 	ip=$(adguardhome_change_and_get_config_ip)
 	port=${MAIN_DNS_PORT}
@@ -623,16 +681,21 @@ adguardhome_setup() {
 
 #	в случае установленного dnsmasq останавливаем его и архивируем
 	[ -f /opt/etc/init.d/S56dnsmasq ] && {
-		/opt/etc/init.d/S56dnsmasq status | grep -q alive && /opt/etc/init.d/S56dnsmasq stop &> /dev/null
+		dnsmasq_state=$(vpn__service_state /opt/etc/init.d/S56dnsmasq) || return 1
+		[ "${dnsmasq_state}" != running ] || \
+			vpn__service_action /opt/etc/init.d/S56dnsmasq stop &> /dev/null || return 1
 		mv -f /opt/etc/init.d/S56dnsmasq "${MORS_BACKUP_PATH}"
 	}
 #	в случае наличия сервиса dnscrypt_proxy2 останавливаем его и архивируем
 	[ -f /opt/etc/init.d/S09dnscrypt-proxy2 ] && {
-		/opt/etc/init.d/S09dnscrypt-proxy2 status | grep -q alive && /opt/etc/init.d/S09dnscrypt-proxy2 stop &> /dev/null
+		dnscrypt_state=$(vpn__service_state /opt/etc/init.d/S09dnscrypt-proxy2) || return 1
+		[ "${dnscrypt_state}" != running ] || \
+			vpn__service_action /opt/etc/init.d/S09dnscrypt-proxy2 stop &> /dev/null || return 1
 		mv -f /opt/etc/init.d/S09dnscrypt-proxy2 "${MORS_BACKUP_PATH}"
 	}
 
-	[ -f "${ADGUARDHOME_DEMON}" ] && ${ADGUARDHOME_DEMON} stop &> /dev/null
+	[ ! -f "${ADGUARDHOME_DEMON}" ] || \
+		vpn__service_action "${ADGUARDHOME_DEMON}" stop &> /dev/null || return 1
 	if [ -f "${ADGUARDHOME_CONFIG}" ]; then
 		config__backup_as_opkg_if_not_exist "${ADGUARDHOME_CONFIG}"
 	fi
@@ -673,20 +736,22 @@ adguardhome_setup() {
 #	ndm_interface_change
 
 #	Обновляем правила ip4tables для доступного соединения
-	ip4__flush 'chain'
-	ip4__dns__add_routing_for_home
-	ip4_firewall_set_all_rules
+	if ! adguardhome_rebuild_dataplane; then
+		when_bad "СБОЙ"
+		error "AdGuard Home не запущен: не удалось восстановить dataplane Mors."
+		return 1
+	fi
 
-	[ -f "${ADGUARDHOME_DEMON}" ] && "${ADGUARDHOME_DEMON}" start &> /dev/null
-#	отслеживаем результат запуска сервиса adguard
-	if [ $? = 0 ]; then
+	# Отслеживаем результат запуска сервиса adguard.
+	if [ -f "${ADGUARDHOME_DEMON}" ] && \
+		vpn__service_action "${ADGUARDHOME_DEMON}" start &> /dev/null; then
 		when_ok "УСПЕШНО"
 	else
 		when_bad "СБОЙ";
 		error "Возникла ошибка при установке AdGuard Home в качестве основного DNS сервера."
 		print_line
 		cat < "${ADGUARDHOME_LOG}" | tail
-		exit 1
+		return 1
 	fi
 }
 # ------------------------------------------------------------------------------------------
@@ -707,7 +772,7 @@ get_adguardhome_ip_port() {
 #
 # ------------------------------------------------------------------------------------------
 cmd_adguardhome_status() {
-	local local_ip=""
+	local local_ip="" adguard_state
 	if [ -f /opt/etc/AdGuardHome/AdGuardHome.yaml ] ; then
 		local_ip="[$(grep address /opt/etc/AdGuardHome/AdGuardHome.yaml | cut -d":" -f2) ]"
 	fi
@@ -719,7 +784,8 @@ cmd_adguardhome_status() {
 		if [ -f /opt/etc/AdGuardHome/AdGuardHome.yaml ] && grep -q 'mors.ipset' /opt/etc/AdGuardHome/AdGuardHome.yaml; then
 #			Проверяем наличие сервиса AdGuardHome
 			if [ -f "${ADGUARDHOME_DEMON}" ] ; then
-				if "${ADGUARDHOME_DEMON}" status | grep -q alive; then when_ok "ВКЛЮЧЕН"; else when_bad "ОТКЛЮЧЕН"; fi
+				adguard_state=$(vpn__service_state "${ADGUARDHOME_DEMON}") || adguard_state=unknown
+				if [ "${adguard_state}" = running ]; then when_ok "ВКЛЮЧЕН"; else when_bad "ОТКЛЮЧЕН"; fi
 			else
 				when_bad "НУЖНО ПЕРЕУСТАНОВИТЬ"
 			fi
@@ -998,28 +1064,31 @@ cmd_adguardhome_off(){
 #
 # ------------------------------------------------------------------------------------------
 bridge_vpn_access_del() {
-        guest_bridge_id="${1}"
-		_id=$(echo "${guest_bridge_id}" | sed 's/[a-z]//g')
-		cli_inface=$(curl -s "${INFACE_REQUEST}" | jq -r '.[] | select(.address != null and .id == "'"Bridge${_id}"'") | .description')
-		ready "Удаление гостевого интерфейса '${cli_inface}' завершено"
-		{
+	local guest_bridge_id _id cli_inface guest_net_ip
+	guest_bridge_id="${1}"
+	_id=$(echo "${guest_bridge_id}" | sed 's/[a-z]//g') || return 1
+	cli_inface=$(curl -fsS "${INFACE_REQUEST}" | jq -er '.[] | select(.address != null and .id == "'"Bridge${_id}"'") | .description') || return 1
+	ready "Удаление гостевого интерфейса '${cli_inface}' завершено"
+	if ! ip4__delete_routing_by_list_for_net "${guest_bridge_id}"; then
+		when_bad "С ОШИБКОЙ"
+		return 1
+	fi
 
-			ip4__delete_routing_by_list_for_net "${guest_bridge_id}"
-
-			#       Слушаем 53 порт гостевого интерфейса
-			guest_net_ip=$(/opt/sbin/ip a | grep global | grep -E ' '"${guest_bridge_id}" | sed 's/inet \(.*\)\/.*/\1/' | tr -d ' ')
-			if cmd_adguardhome_status | grep -q "ВКЛЮЧЕН" ; then
+	guest_net_ip=$(/opt/sbin/ip a | grep global | grep -E ' '"${guest_bridge_id}" | sed 's/inet \(.*\)\/.*/\1/' | tr -d ' ') || return 1
+	[ -n "${guest_net_ip}" ] || return 1
+	if cmd_adguardhome_status | grep -q "ВКЛЮЧЕН" ; then
 	#               Если доступен ADGUARDHOME
-					sed -i -e '/bind_hosts/,/port/{ /- '"${guest_net_ip}"'/d }' "${ADGUARDHOME_CONFIG}"
+		sed -i -e '/bind_hosts/,/port/{ /- '"${guest_net_ip}"'/d }' "${ADGUARDHOME_CONFIG}" || return 1
 #                       grep -v '    -'"${guest_net_ip}" /opt/tmp/agh.conf
 #                       mv -f /opt/tmp/agh.conf "${ADGUARDHOME_CONFIG}"
-			else
+	else
 	#               Если сейчас работает только dnsmasq
-					sed -i -e '/listen-address/,/port/{ /listen-address='"${guest_net_ip}"'/d}' "${DNSMASQ_CONFIG}"
+		sed -i -e '/listen-address/,/port/{ /listen-address='"${guest_net_ip}"'/d}' "${DNSMASQ_CONFIG}" || return 1
 #                       grep -v 'listen-address='"${guest_net_ip}" "${DNSMASQ_CONFIG}" > /opt/tmp/dnsmasq.conf
 #                       mv -f /opt/tmp/dnsmasq.conf "${DNSMASQ_CONFIG}"
-			fi
-        } && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+	fi
+	when_alert "УСПЕШНО"
+	return 0
 }
 
 # ------------------------------------------------------------------------------------------
@@ -1173,9 +1242,13 @@ del_ikev2_net_from_config(){
 }
 
 ikev2_net_access_del() {
-	ready "Удаление интерфейса \"VPN-сервер IKEv2\" завершено" && {
-		ip4__delete_routing_by_list_for_net 'ikev2'
-	} && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+	ready "Удаление интерфейса \"VPN-сервер IKEv2\" завершено"
+	if ip4__delete_routing_by_list_for_net 'ikev2'; then
+		when_alert "УСПЕШНО"
+		return 0
+	fi
+	when_bad "С ОШИБКОЙ"
+	return 1
 }
 
 cmd_bridge_vpn_access_del() {
@@ -1185,11 +1258,11 @@ cmd_bridge_vpn_access_del() {
 	if [ -n "${guest_bridge_id}" ]; then
 #			проверяем, есть ли в списке ikev2
 		if echo "${guest_bridge_id}" | grep -iq ikev2 ; then
-			del_ikev2_net_from_config
-			ikev2_net_access_del
+			del_ikev2_net_from_config || return 1
+			ikev2_net_access_del || return 1
 		else
-			bridge_vpn_access_del "${guest_bridge_id}"
-			sed -i '/INFACE_GUEST_ENT=/,/^$/ s/'"${guest_bridge_id}"'[,]\{0,1\}//; s/[ ,]//g' "${MORS_CONF_FILE}"
+			bridge_vpn_access_del "${guest_bridge_id}" || return 1
+			sed -i '/INFACE_GUEST_ENT=/,/^$/ s/'"${guest_bridge_id}"'[,]\{0,1\}//; s/[ ,]//g' "${MORS_CONF_FILE}" || return 1
 		fi
 		ready "Перезапускаем DNS сервер"
 		if cmd_adguardhome_status | grep -q "ВКЛЮЧЕН" ; then
@@ -1197,7 +1270,12 @@ cmd_bridge_vpn_access_del() {
 		else
 			/opt/etc/init.d/S56dnsmasq restart &> /dev/null
 		fi
-		[ $? = 0 ] && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+		if [ $? = 0 ]; then
+			when_alert "УСПЕШНО"
+			return 0
+		fi
+		when_bad "С ОШИБКОЙ"
+		return 1
 
 	fi
 
@@ -1213,33 +1291,35 @@ cmd_bridge_vpn_access_del() {
 #
 # ------------------------------------------------------------------------------------------
 bridge_access_add() {
-
-        guest_bridge_id=${1};
+		local guest_bridge_id _id cli_inface has_guest_nets point guest_net_ip
+		guest_bridge_id=${1}
 # set -xe
-		_id=$(echo "${guest_bridge_id}" | sed 's/[a-z]//g')
-		cli_inface=$(curl -s "${INFACE_REQUEST}" | jq -r '.[] | select(.address != null and .id == "'"Bridge${_id}"'") | .description')
+		_id=$(echo "${guest_bridge_id}" | sed 's/[a-z]//g') || return 1
+		cli_inface=$(curl -fsS "${INFACE_REQUEST}" | jq -er '.[] | select(.address != null and .id == "'"Bridge${_id}"'") | .description') || return 1
 		ready "Добавление гостевого интерфейса '${cli_inface}' завершено"
 # set +xe
 #		если сеть уже есть в списке, то пропускаем добавление
 		grep INFACE_GUEST_ENT "${MORS_CONF_FILE}" | grep -q "${guest_bridge_id}" || {
 			has_guest_nets=$(cat <  "${MORS_CONF_FILE}" | sed -n 's/INFACE_GUEST_ENT=\(.*\)/\1/p')
 			[ -n "${has_guest_nets}" ] && point=',' || point=''
-			sed -i "s/\(INFACE_GUEST_ENT=.*\)/\1${point}${guest_bridge_id}/g; s/[ ]//g" "${MORS_CONF_FILE}"
+			sed -i "s/\(INFACE_GUEST_ENT=.*\)/\1${point}${guest_bridge_id}/g; s/[ ]//g" "${MORS_CONF_FILE}" || return 1
 		}
 
 #       Слушаем 53 порт гостевого интерфейса
-        guest_net_ip=$(/opt/sbin/ip a | grep global | grep -E ' '"${guest_bridge_id}" | sed 's/inet \(.*\)\/.*/\1/' | tr -d ' ')
+		guest_net_ip=$(ip4 a | grep global | grep -E ' '"${guest_bridge_id}" | sed 's/inet \(.*\)\/.*/\1/' | tr -d ' ') || return 1
+		[ -n "${guest_net_ip}" ] || return 1
         if cmd_adguardhome_status | grep -q "ВКЛЮЧЕН" ; then
 #           Если доступен ADGUARDHOME
 			grep -q "\- ${guest_net_ip}" "${ADGUARDHOME_CONFIG}" || \
-				sed -i '/bind_hosts/,/port/ s/.*\(port.*\)/    - '"${guest_net_ip}"'\n  \1/1' "${ADGUARDHOME_CONFIG}"
+				sed -i '/bind_hosts/,/port/ s/.*\(port.*\)/    - '"${guest_net_ip}"'\n  \1/1' "${ADGUARDHOME_CONFIG}" || return 1
         else
 #           Если сейчас работает только dnsmasq
 			grep -q "listen-address=${guest_net_ip}" "${DNSMASQ_CONFIG}" || \
-				sed -i '/listen-address/,/port/ s/.*\(port.*\)/listen-address='"${guest_net_ip}"'\n\1/' "${DNSMASQ_CONFIG}"
+				sed -i '/listen-address/,/port/ s/.*\(port.*\)/listen-address='"${guest_net_ip}"'\n\1/' "${DNSMASQ_CONFIG}" || return 1
 
         fi
-        [ $? = 0 ] && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+		when_alert "УСПЕШНО"
+		return 0
 }
 
 ikev2_setup() {
@@ -1258,8 +1338,8 @@ ikev2_setup() {
 		multi_login=$(echo "${ikev2_data}" | grep -F -- 'multi-login' | cut -d':' -f2 | sed 's/[\,\" ]//g;')
 		sa_compat=$(echo "${ikev2_data}"   | grep -F -- 'sa-compat'   | cut -d':' -f2 | sed 's/[\,\" ]//g;')
 
-		curl -s -d '{"enable": '"${enable}"', "nat": true, "dns-server": "'"${ikev2_dns}"'", "pool-size": "'"${pool_size}"'", "pool-start": "'"${pool_start}"'", "multi-login": "'"${multi_login}"'", "sa-compat": "'"${sa_compat}"'"}' \
-		 "${LOCALHOST_IP}:79/rci/crypto/virtual-ip-server-ikev2" &> /dev/null
+		curl -fsS -d '{"enable": '"${enable}"', "nat": true, "dns-server": "'"${ikev2_dns}"'", "pool-size": "'"${pool_size}"'", "pool-start": "'"${pool_start}"'", "multi-login": "'"${multi_login}"'", "sa-compat": "'"${sa_compat}"'"}' \
+		 "${LOCALHOST_IP}:79/rci/crypto/virtual-ip-server-ikev2" &> /dev/null || return 1
 		sleep 1
 	fi
 }
@@ -1267,23 +1347,25 @@ ikev2_setup() {
 add_ikev2_net_to_config(){
         has_guest_nets=$(cat <  "${MORS_CONF_FILE}" | sed -n 's/INFACE_GUEST_ENT=\(.*\)/\1/p;'| sed 's/[ ]//g')
         [ -n "${has_guest_nets}" ] && point=',' || point=''
-        del_ikev2_net_from_config
-        sed -i "s/\(INFACE_GUEST_ENT=.*\)/\1${point}ikev2/g; s/[ ]//g" "${MORS_CONF_FILE}"
+		del_ikev2_net_from_config || return 1
+		sed -i "s/\(INFACE_GUEST_ENT=.*\)/\1${point}ikev2/g; s/[ ]//g" "${MORS_CONF_FILE}" || return 1
 }
 
 ikev2_net_access_add() {
-	local ikev2_settings=$(curl -s "${LOCALHOST_IP}:79/rci/crypto/virtual-ip-server-ikev2")
+	local ikev2_settings net_pool
+	ikev2_settings=$(curl -fsS "${LOCALHOST_IP}:79/rci/crypto/virtual-ip-server-ikev2") || return 1
 
 	# вероятное изменение настроек роутера
-	ikev2_setup "${ikev2_settings}"
+	ikev2_setup "${ikev2_settings}" || return 1
 
-	local net_pool=$(echo "${ikev2_settings}" | grep -F -- 'pool-start' | cut -d':' -f2 | sed 's/[\,\" ]//g;')
-	ready "Добавление гостевого интерфейса \"VPN-сервер IKEv2\" [${net_pool}] завершено" && {
-		ip4__add_routing_by_list_for_net 'ikev2'
-
-		# сохранение в конфигурацию МОРС
-		add_ikev2_net_to_config
-	} && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+	net_pool=$(echo "${ikev2_settings}" | grep -F -- 'pool-start' | cut -d':' -f2 | sed 's/[\,\" ]//g;') || return 1
+	ready "Добавление гостевого интерфейса \"VPN-сервер IKEv2\" [${net_pool}] завершено"
+	if ip4__add_routing_by_list_for_net 'ikev2' && add_ikev2_net_to_config; then
+		when_alert "УСПЕШНО"
+		return 0
+	fi
+	when_bad "С ОШИБКОЙ"
+	return 1
 }
 
 bridge_vpn_access_add() {
@@ -1291,15 +1373,16 @@ bridge_vpn_access_add() {
 
 	if [ -n "${guest_bridge_id}" ]; then
 		if echo "${guest_bridge_id}" | grep -iq ikev2 ; then
-			ikev2_net_access_add
+			ikev2_net_access_add || return 1
 		else
-			bridge_access_add "${guest_bridge_id}"
+			bridge_access_add "${guest_bridge_id}" || return 1
 
 			if has_ssr_enable; then
-				ip4__add_routing_by_list_for_net "${guest_bridge_id}"
+				ip4__add_routing_by_list_for_net "${guest_bridge_id}" || return 1
 			fi
 		fi
 	fi
+	return 0
 }
 
 # ------------------------------------------------------------------------------------------
@@ -1313,7 +1396,7 @@ cmd_bridge_vpn_access_add() {
 	guest_bridge_id=''; bridge_inface_select guest_bridge_id add
 
 	if [ -n "${guest_bridge_id}" ]; then
-		bridge_vpn_access_add "${guest_bridge_id}"
+		bridge_vpn_access_add "${guest_bridge_id}" || return 1
 
 	#       перезапускаем DNS сервер новыми IP для прослушки на 53 порту
 		ready "Перезапускаем DNS сервер"
@@ -1322,8 +1405,14 @@ cmd_bridge_vpn_access_add() {
 		else
 			/opt/etc/init.d/S56dnsmasq restart &> /dev/null
 		fi
-		[ $? = 0 ] && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+		if [ $? = 0 ]; then
+			when_alert "УСПЕШНО"
+			return 0
+		fi
+		when_bad "С ОШИБКОЙ"
+		return 1
 	fi
+	return 0
 }
 
 
@@ -1419,6 +1508,7 @@ dnsmasq_install_wildcard_support(){
 #
 # ------------------------------------------------------------------------------------------
 dnsmasq_install(){
+	local dnsmasq_state
 	is_install_stage="${1}"
 
 	if [ -f /opt/etc/init.d/K56dnsmasq ]; then
@@ -1435,10 +1525,15 @@ dnsmasq_install(){
 			fi
 		fi
 	fi
-	if /opt/etc/init.d/S56dnsmasq status | grep -q alive ; then
+	dnsmasq_state=$(vpn__service_state /opt/etc/init.d/S56dnsmasq) || return 1
+	if [ "${dnsmasq_state}" = running ]; then
 		ready "Останавливаем сервис dnsmasq..."
-		/opt/etc/init.d/S56dnsmasq stop 1> /dev/null 2> "${ERROR_LOG_FILE}"
-		ready_status "${?}" "Невозможно остановить сервис dnsmasq"
+		if vpn__service_action /opt/etc/init.d/S56dnsmasq stop 1> /dev/null 2> "${ERROR_LOG_FILE}"; then
+			ready_status 0 "Невозможно остановить сервис dnsmasq"
+		else
+			ready_status 1 "Невозможно остановить сервис dnsmasq"
+			return 1
+		fi
 	fi
 
 	ready 'Заменяем файл конфигурации dnsmasq...   '
@@ -1562,8 +1657,11 @@ cmd_dnsmasq_port_change() {
 			ready "Замена порта на ${port} в dnsmasq завершена"
 			sed -i "s/\(port=\).*/\1${port}/"  "${DNSMASQ_CONFIG}"
 			set_config_value DNSMASQ_PORT "${port}"
-			[ "${cmd}" = restart ] && cmd_mors_init "no" &> /dev/null
-			[ $? = 0 ] && when_alert "УСПЕШНО" || when_bad "С ОШИБКОЙ"
+			if [ "${cmd}" = restart ] && ! cmd_mors_init "no" &> /dev/null; then
+				when_bad "С ОШИБКОЙ"
+				return 1
+			fi
+			when_alert "УСПЕШНО"
 		fi
 	}
 }
@@ -1623,9 +1721,9 @@ dns_show() {
 # ------------------------------------------------------------------------------------------
 vpn_off() {
 #	ready "Интерфейс vpn отключен "
-	[ -f "/opt/etc/ndm/netfilter.d/100-vpn-mark" ] && rm -f "/opt/etc/ndm/netfilter.d/100-vpn-mark"
-	[ -f /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ] && rm -f /opt/etc/ndm/iflayerchanged.d/100-mors-vpn
-	ip4__flush 'chain table' &> /dev/null
+	[ ! -f "/opt/etc/ndm/netfilter.d/100-vpn-mark" ] || rm -f "/opt/etc/ndm/netfilter.d/100-vpn-mark" || return 1
+	[ ! -f /opt/etc/ndm/iflayerchanged.d/100-mors-vpn ] || rm -f /opt/etc/ndm/iflayerchanged.d/100-mors-vpn || return 1
+	ip4__flush 'chain table' &> /dev/null || return 1
 }
 # ------------------------------------------------------------------------------------------
 #
@@ -1652,15 +1750,15 @@ cmd_vpn_status() {
 ndm_interface_change() {
 	inface_entware="${1}"; inface_cli="${2}"
 
-	cp /opt/apps/${APP_NAME}/etc/ndm/ndm /opt/apps/mors/bin/libs/ndm
-	chmod +x /opt/apps/mors/bin/libs/ndm
+	cp /opt/apps/${APP_NAME}/etc/ndm/ndm /opt/apps/mors/bin/libs/ndm || return 1
+	chmod +x /opt/apps/mors/bin/libs/ndm || return 1
 
 	# Очистим сетевые правила (кроме IPSet),
 	# пока нам ещё доступно "старое" соединение
-	ip4__flush 'chain table' &>/dev/null
+	ip4__flush 'chain table' &>/dev/null || return 1
 
-	set_config_value "INFACE_ENT" "${inface_entware}"
-	set_config_value "INFACE_CLI" "${inface_cli}"
+	set_config_value "INFACE_ENT" "${inface_entware}" || return 1
+	set_config_value "INFACE_CLI" "${inface_cli}" || return 1
 }
 # ------------------------------------------------------------------------------------------
 #
@@ -1670,9 +1768,9 @@ ndm_interface_change() {
 # ------------------------------------------------------------------------------------------
 ndm_gateway_change() {
 	addr_man="${1}"
-	cp /opt/apps/${APP_NAME}/etc/ndm/ndm /opt/apps/mors/bin/libs/ndm
-	chmod +x /opt/apps/mors/bin/libs/ndm
-	set_config_value "ADDR_MAN" "${addr_man}"
+	cp /opt/apps/${APP_NAME}/etc/ndm/ndm /opt/apps/mors/bin/libs/ndm || return 1
+	chmod +x /opt/apps/mors/bin/libs/ndm || return 1
+	set_config_value "ADDR_MAN" "${addr_man}" || return 1
 
 }
 # ------------------------------------------------------------------------------------------
@@ -1692,24 +1790,24 @@ vpn_on() {
 	ready "Интерфейс ${inface_cli_desc} подключен "
 	{
 		# Производим замену в библиотеке ndm основных значения интерфейсов
-		ndm_interface_change "${inface_entware}" "${inface_cli}"
+		ndm_interface_change "${inface_entware}" "${inface_cli}" || return 1
 
 		if [ "${MORS_DEFER_SYSTEM_HOOKS:-false}" != true ]; then
-			cp "/opt/apps/${APP_NAME}/etc/ndm/netfilter.d/100-vpn-mark" "/opt/etc/ndm/netfilter.d/100-vpn-mark"
-			chmod +x "/opt/etc/ndm/netfilter.d/100-vpn-mark"
+			cp "/opt/apps/${APP_NAME}/etc/ndm/netfilter.d/100-vpn-mark" "/opt/etc/ndm/netfilter.d/100-vpn-mark" || return 1
+			chmod +x "/opt/etc/ndm/netfilter.d/100-vpn-mark" || return 1
 
-			cp "/opt/apps/${APP_NAME}/etc/ndm/iflayerchanged.d/100-mors-vpn" "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn"
-			chmod +x "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn"
+			cp "/opt/apps/${APP_NAME}/etc/ndm/iflayerchanged.d/100-mors-vpn" "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn" || return 1
+			chmod +x "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn" || return 1
 		fi
 
-		state=$(get_value_interface_field "${inface_cli}" state)
+		state=$(get_value_interface_field "${inface_cli}" state) || return 1
 
 		if [ "${state}" = 'down' ]; then
-			curl -s -d '{"up":"true"}' "${INFACE_PART_REQUEST}/${inface_cli}" &> /dev/null
+			curl -fsS -d '{"up":"true"}' "${INFACE_PART_REQUEST}/${inface_cli}" &> /dev/null || return 1
 		fi
 		sleep 2
 #		connected=$(get_value_interface_field "${inface_cli}" connected)
-		connected=$(get_value_interface_field "${inface_cli}" state)
+		connected=$(get_value_interface_field "${inface_cli}" state) || return 1
 
 #		if [ "${connected}" = 'no' ]; then
 		if [ "${connected}" = 'down' ]; then
@@ -1719,7 +1817,7 @@ vpn_on() {
 			error "Проверьте доступность сервера и настройки клиента!"
 			return 1
 		else
-			update_iptables
+			update_iptables || return 1
 		fi
 	} 1> /dev/null 2> "${ERROR_LOG_FILE}"
 	operation_result=$?
@@ -1738,16 +1836,20 @@ active_backup_config(){
 	if [ "${answer}" = q ] ; then exit_q; print_line; exit 1; fi
 	if echo "${answer}" | grep -qi y ; then
 		ready "Удаляем архивный файл конфигурации shadowsocks..."
-		rm -f "${SHADOWSOCKS_CONF}.mors"
-		[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+		if rm -f "${SHADOWSOCKS_CONF}.mors"; then
+			when_ok "УСПЕШНО"
+			return 0
+		fi
+		when_bad "ОШИБКА"
+		return 1
 	else
 		ready "Восстанавливаем файл конфигурации shadowsocks из архива   "
-		cp "${SHADOWSOCKS_CONF}.mors" "${SHADOWSOCKS_CONF}"  &>/dev/null
-		if [ ${?} = 0 ]; then
-			when_ok "УСПЕШНО";
-		else
-			when_bad "ОШИБКА" && exit 1
+		if cp "${SHADOWSOCKS_CONF}.mors" "${SHADOWSOCKS_CONF}" &>/dev/null; then
+			when_ok "УСПЕШНО"
+			return 0
 		fi
+		when_bad "ОШИБКА"
+		return 1
 	fi
 }
 # ------------------------------------------------------------------------------------------
@@ -1756,36 +1858,47 @@ active_backup_config(){
 #
 # ------------------------------------------------------------------------------------------
 shadowsocks_backup() {
+	local shadowsocks_state shadowsocks_init
+	shadowsocks_init=$(shadowsocks_init__path) || return 1
 	# Проверяем установлен ли сервис shadowsocks
-	if [ -f "${SSR_CMD}" ] && [ -f /opt/etc/init.d/S22shadowsocks ]; then
+	if [ -f "${SSR_CMD}" ] && [ -f "${shadowsocks_init}" ]; then
 		# меняем данные в файлах shadowsocks
-		sed -i 's/ss-local/ss-redir/g' /opt/etc/init.d/S22shadowsocks
+		sed -i 's/ss-local/ss-redir/g' "${shadowsocks_init}" || return 1
 
 	#	Проверяем на наличие запуска сервиса shadowsocks
-		if /opt/etc/init.d/S22shadowsocks status | grep -q alive ; then
+		shadowsocks_state=$(vpn__service_state "${shadowsocks_init}") || return 1
+		if [ "${shadowsocks_state}" = running ]; then
 			print_line
 			ready "Останавливаем сервис shadowsocks..."
-			if /opt/etc/init.d/S22shadowsocks stop &>/dev/null; then
+			if vpn__service_action "${shadowsocks_init}" stop &>/dev/null; then
 				when_ok "УСПЕШНО"
 			else
 				when_bad "ОШИБКА"
 				error "Невозможно остановить сервис shadowsocks"
-				exit 1
+				return 1
 			fi
 		fi
 		if [ -f "${SHADOWSOCKS_CONF}" ] ; then
-			grep -qE '""|@|127.0.0.1|barfoo!' "${SHADOWSOCKS_CONF}" && shadowsocks_read_data
+			if grep -qE '""|@|127.0.0.1|barfoo!' "${SHADOWSOCKS_CONF}"; then
+				shadowsocks_read_data || return 1
+			fi
 		else
-			if [ -f "${SHADOWSOCKS_CONF}.mors" ] && grep -qvE '""|@|127.0.0.1|barfoo!' "${SHADOWSOCKS_CONF}" ; then
-				active_backup_config
+			if [ -f "${SHADOWSOCKS_CONF}.mors" ] && \
+				! grep -qE '""|@|127.0.0.1|barfoo!' "${SHADOWSOCKS_CONF}.mors" ; then
+				active_backup_config || return 1
 			else
-				shadowsocks_read_data
+				shadowsocks_read_data || return 1
 			fi
 		fi
+		return 0
 	else
 		error "Shadowsocks сервис не установлен. Дальнейшая установка невозможна."
-		exit 1;
+		return 1
 	fi
+}
+
+shadowsocks_init__path() {
+	printf '%s\n' '/opt/etc/init.d/S22shadowsocks'
 }
 
 
@@ -1811,17 +1924,22 @@ shadowsocks_read_config(){
 	if [ -f "${SHADOWSOCKS_CONF}" ] ; then
 		print_line
 		ready "Изменяем конфигурацию ${SHADOWSOCKS_CONF}..."
-		sed -i "s/\(\"server\":\).*/\1 \"${SSR_SERVER_IP}\",/; 			\
+		if sed -i "s/\(\"server\":\).*/\1 \"${SSR_SERVER_IP}\",/; 			\
 				s/\(\"server_port\":\).*/\1 ${SSR_SERVER_PORT},/; 		\
 				s/\(\"local_port\":\).*/\1 $(get_config_value SSR_DNS_PORT),/; 		\
 				s/\(\"password\":\).*/\1 \"${ESCAPED_PASSWD}\",/; 	\
 				s/\(\"method\":\).*/\1 \"${SSR_SERVER_CRYPT}\",/;" 		\
-			"${SHADOWSOCKS_CONF}" &>/dev/null && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+			"${SHADOWSOCKS_CONF}" &>/dev/null; then
+			when_ok "УСПЕШНО"
+			return 0
+		fi
+		when_bad "ОШИБКА"
+		return 1
 	else
 		print_line
 		error "Не обнаружен файл ${SHADOWSOCKS_CONF}." nl
 		print_line
-		exit 0
+		return 1
 	fi
 }
 
@@ -1835,7 +1953,7 @@ shadowsocks_config_check(){
 		print_line
 		ssr_run
 		print_line
-		exit 0
+		return 1
 	fi
 }
 # ------------------------------------------------------------------------------------------
@@ -1851,10 +1969,10 @@ cmd_shadowsocks_read_new_data() {
 	echo -e "${BLUE}Пожалуйста, последовательно введите эти данные ниже.${NOCL}"
 	print_line
 
-	shadowsocks_read_data
-	ndm_interface_change "$(get_ssr_entware_interface)" "shadowsocks"
-	shadowsocks_config_check &>/dev/null
-	service_restart  shadowsocks S22shadowsocks
+	shadowsocks_read_data || return 1
+	ndm_interface_change "$(get_ssr_entware_interface)" "shadowsocks" || return 1
+	shadowsocks_config_check &>/dev/null || return 1
+	service_restart shadowsocks S22shadowsocks
 
 }
 
@@ -1867,13 +1985,13 @@ shadowsocks_read_data() {
 	if [ -f "${SHADOWSOCKS_CONF}" ]; then
 		config__backup_as_opkg_if_not_exist "${SHADOWSOCKS_CONF}"
 	fi
-	cp -f "/opt/apps/${APP_NAME}/etc/conf/shadowsocks.json" "${SHADOWSOCKS_CONF}"
+	cp -f "/opt/apps/${APP_NAME}/etc/conf/shadowsocks.json" "${SHADOWSOCKS_CONF}" || return 1
 
 	answer=''; read_ynq "У Вас имеется кодированная ss:// ссылка для ввода данных" answer
 	if [ "${answer}" = q ] ; then exit_q; print_line; exit 1; fi
 
 	if echo "${answer}" | grep -qi y ; then
-		shadowsocks_read_link
+		shadowsocks_read_link || return 1
 	else
 
 		echo "Чтобы продолжить работу необходимо ввести следующие данные:"
@@ -1882,7 +2000,7 @@ shadowsocks_read_data() {
 		echo -e "${BLUE}Пожалуйста, последовательно введите эти данные ниже.${NOCL}"
 		print_line
 
-		shadowsocks_read_config
+		shadowsocks_read_config || return 1
 	fi
 
 
@@ -1924,17 +2042,22 @@ shadowsocks_read_link(){
 			ESCAPED_PASSWD=$(escape_sed "$SSR_SERVER_PASSWD")
 			print_line
 			ready "Изменяем конфигурацию ${SHADOWSOCKS_CONF}..."
-			sed -i "s/\(\"server\":\).*/\1 \"${SSR_SERVER_IP}\",/; 			\
+			if sed -i "s/\(\"server\":\).*/\1 \"${SSR_SERVER_IP}\",/; 			\
 					s/\(\"server_port\":\).*/\1 ${SSR_SERVER_PORT},/; 		\
 					s/\(\"local_port\":\).*/\1 $(get_config_value SSR_DNS_PORT),/; 		\
 					s/\(\"password\":\).*/\1 \"${ESCAPED_PASSWD}\",/; 	\
 					s/\(\"method\":\).*/\1 \"${SSR_SERVER_CRYPT}\",/;" 		\
-				"${SHADOWSOCKS_CONF}" &>/dev/null && when_ok "УСПЕШНО" || when_bad "C ОШИБКАМИ"
+				"${SHADOWSOCKS_CONF}" &>/dev/null; then
+				when_ok "УСПЕШНО"
+				return 0
+			fi
+			when_bad "C ОШИБКАМИ"
+			return 1
 		else
 			print_line
 			error "Не обнаружен файл ${SHADOWSOCKS_CONF}." nl
 			print_line
-			exit 0
+			return 1
 		fi
 	fi
 }
@@ -1950,10 +2073,14 @@ cmd_shadowsocks_iptable_flush() {
 	if [ -f /opt/apps/mors/bin/libs/ndm ]; then
 		ready "Удаление правил iptables для shadowsocks завершено"
 		# возможно чистить цепочки и роутинг — лишнее
-		ip4__flush 'chain table' &>/dev/null
-		[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "C ОШИБКАМИ"
+		if ip4__flush 'chain table' &>/dev/null; then
+			when_ok "УСПЕШНО"
+			return 0
+		fi
+		when_bad "C ОШИБКАМИ"
+		return 1
 	fi
-
+	return 1
 }
 # ------------------------------------------------------------------------------------------
 #
@@ -1964,16 +2091,16 @@ cmd_shadowsocks_iptable_flush() {
 cmd_shadowsocks_iptable_reset() {
 
 	ready "Переустановка iptables для shadowsocks завершена"
-	if [ -f /opt/apps/mors/bin/libs/ndm ]; then
-		local_ip=$(get_router_ip)
-		inface=$(get_inface_by_ip "${local_ip}")
-		proxy_port=$(get_config_value SSR_DNS_PORT)
+	local_ip=$(get_router_ip)
+	inface=$(get_inface_by_ip "${local_ip}")
+	proxy_port=$(get_config_value SSR_DNS_PORT)
 
-		update_iptables
-	else
-		exit 1
+	if update_iptables; then
+		when_ok "УСПЕШНО"
+		return 0
 	fi
-	[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "C ОШИБКАМИ"
+	when_bad "C ОШИБКАМИ"
+	return 1
 }
 # ------------------------------------------------------------------------------------------
 #
@@ -1983,11 +2110,18 @@ cmd_shadowsocks_iptable_reset() {
 shadowsocks_off() {
 	ready "Интерфейс shadowsocks отключен "
 	#	сохраняем файл конфигурации shadowsocks
-	/opt/etc/init.d/S22shadowsocks stop &> /dev/null
-	[ -f "${SHADOWSOCKS_CONF}" ] || mv -f "${SHADOWSOCKS_CONF}" "${SHADOWSOCKS_CONF}.mors" &> /dev/null
-	rm -f "/opt/etc/ndm/netfilter.d/100-proxy-redirect"
-	cmd_shadowsocks_iptable_flush &> /dev/null
-	[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "C ОШИБКАМИ"
+	[ ! -x /opt/etc/init.d/S22shadowsocks ] || \
+		vpn__service_action /opt/etc/init.d/S22shadowsocks stop &> /dev/null || return 1
+	if [ -f "${SHADOWSOCKS_CONF}" ]; then
+		mv -f "${SHADOWSOCKS_CONF}" "${SHADOWSOCKS_CONF}.mors" &> /dev/null || return 1
+	fi
+	rm -f "/opt/etc/ndm/netfilter.d/100-proxy-redirect" || return 1
+	if cmd_shadowsocks_iptable_flush &> /dev/null; then
+		when_ok "УСПЕШНО"
+		return 0
+	fi
+	when_bad "C ОШИБКАМИ"
+	return 1
 }
 
 # ------------------------------------------------------------------------------------------
@@ -2009,13 +2143,22 @@ cmd_shadowsocks_local_port_change() {
 			ready "Замена порта на ${port_new} в shadowsocks завершена"
 
 #			sed -i "s/\(--to-port\).*/\1 ${port_new}/g" "/opt/etc/ndm/netfilter.d/100-proxy-redirect"
-			sed -i "s/\(local_port\":\).*/\1 ${port_new}/g" "${SHADOWSOCKS_CONF}"
+			sed -i "s/\(local_port\":\).*/\1 ${port_new}/g" "${SHADOWSOCKS_CONF}" || return 1
 
-			set_config_value SSR_DNS_PORT "${port_new}"
-			cmd_shadowsocks_iptable_reset &> /dev/null
+			set_config_value SSR_DNS_PORT "${port_new}" || return 1
+			cmd_shadowsocks_iptable_reset &> /dev/null || {
+				when_bad "C ОШИБКАМИ"
+				return 1
+			}
 
-			[ "${cmd}" = restart ] && /opt/etc/init.d/S22shadowsocks restart &> /dev/null
-			[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "C ОШИБКАМИ"
+			if [ "${cmd}" = restart ]; then
+				vpn__service_action /opt/etc/init.d/S22shadowsocks restart &> /dev/null || {
+					when_bad "C ОШИБКАМИ"
+					return 1
+				}
+			fi
+			when_ok "УСПЕШНО"
+			return 0
 		else
 			ready "Текущий номер порта shadowsocks соединения:"
 			when_ok "$(get_config_value SSR_DNS_PORT)"
@@ -2025,7 +2168,9 @@ cmd_shadowsocks_local_port_change() {
 		error "shadowsocks клиент не выбран в настройках"
 		read_ynq_timer "Включить его вместо текущего соединения" answer Y 6
 		if [ "${answer}" = q ] ; then exit_q; print_line; exit 1; fi
-		echo "${answer}" | grep -qi y && shadowsocks_on; cmd_shadowsocks_local_port_change "${port_new}"
+		echo "${answer}" | grep -qi y || return 1
+		shadowsocks_on || return 1
+		cmd_shadowsocks_local_port_change "${port_new}"
 	fi
 }
 
@@ -2037,52 +2182,53 @@ cmd_shadowsocks_local_port_change() {
 #
 # ------------------------------------------------------------------------------------------
 shadowsocks_on() {
+	local shadowsocks_state
 
 	local_ip=$(get_router_ip)
 	inface=$(get_inface_by_ip "${local_ip}")
 
 	#	настройка файла 100-proxy-redirect
 	if [ "${MORS_DEFER_SYSTEM_HOOKS:-false}" != true ]; then
-		cp "/opt/apps/${APP_NAME}/etc/ndm/netfilter.d/100-proxy-redirect" "/opt/etc/ndm/netfilter.d/100-proxy-redirect"
-		chmod +x "/opt/etc/ndm/netfilter.d/100-proxy-redirect"
+		cp "/opt/apps/${APP_NAME}/etc/ndm/netfilter.d/100-proxy-redirect" "/opt/etc/ndm/netfilter.d/100-proxy-redirect" || return 1
+		chmod +x "/opt/etc/ndm/netfilter.d/100-proxy-redirect" || return 1
 	fi
 
-	ndm_interface_change "$(get_ssr_entware_interface)" "shadowsocks"
+	ndm_interface_change "$(get_ssr_entware_interface)" "shadowsocks" || return 1
 
-	cmd_shadowsocks_iptable_reset  &> /dev/null
+	cmd_shadowsocks_iptable_reset &> /dev/null || return 1
 	#   настройка S22shadowsocks конфигурации
 	if [ -f "${SHADOWSOCKS_CONF}" ] ; then
 		if grep -qE '""|@' "${SHADOWSOCKS_CONF}" || grep -qE '127.0.0.1|barfoo!' "${SHADOWSOCKS_CONF}"; then
 			print_line
-			shadowsocks_read_data
+			shadowsocks_read_data || return 1
 		fi
 	else
 		if [ -f "${SHADOWSOCKS_CONF_BACKUP}" ] ; then
 			if grep -qE '""|@' "${SHADOWSOCKS_CONF_BACKUP}" || grep -qE '127.0.0.1|barfoo!' "${SHADOWSOCKS_CONF_BACKUP}"; then
 				error "Архивный файл содержит некорректные данные!"
 				print_line
-				shadowsocks_read_data
+				shadowsocks_read_data || return 1
 			else
 				ready "Используем данные"
-				cp "${SHADOWSOCKS_CONF_BACKUP}" "${SHADOWSOCKS_CONF}"
+				cp "${SHADOWSOCKS_CONF_BACKUP}" "${SHADOWSOCKS_CONF}" || return 1
 				when_alert "ИЗ АРХИВА"
 			fi
 
 		else
 			print_line
-			shadowsocks_read_data
+			shadowsocks_read_data || return 1
 		fi
 	fi
 
 	# меняем данные в файлах shadowsocks
-	sed -i 's/ss-local/ss-redir/g' "/opt/etc/init.d/S22shadowsocks"
+	sed -i 's/ss-local/ss-redir/g' "/opt/etc/init.d/S22shadowsocks" || return 1
 
 	#	включаем shadowsocks службу
 	print_line
 	ready "Запускаем сервис shadowsocks..."
-	/opt/etc/init.d/S22shadowsocks restart &> /dev/null
-	/opt/etc/init.d/S22shadowsocks status &> /dev/null
-	if [ $? = 0 ]; then
+	if vpn__service_action /opt/etc/init.d/S22shadowsocks restart &> /dev/null && \
+		shadowsocks_state=$(vpn__service_state /opt/etc/init.d/S22shadowsocks) && \
+		[ "${shadowsocks_state}" = running ]; then
 		when_ok "УСПЕШНО"
 	else
 		when_bad "ОШИБКА"
@@ -2337,9 +2483,9 @@ cmd_manual_gateway_set() {
 			echo -e "${RED}Процедура настройки прервана пользователем!${NOCL}"
 			print_line
 		else
-			ndm_gateway_change ${addr_gateway}
-			switch_vpn_on "${_inface_gateway}" "Gateway"
-			cmd_mors_init "update"
+			ndm_gateway_change "${addr_gateway}" || return 1
+			switch_vpn_on "${_inface_gateway}" "Gateway" || return 1
+			cmd_mors_init "update" || return 1
 		fi
 
 }
@@ -2389,16 +2535,18 @@ start_vless(){
 
 		# Запуск xray в случае, если конфигурация xray не содержит ошибок
 		ready "Запускаем xray сервис..."
-		if "${XRAY_INIT}" restart; then
+		if vpn__service_action "${XRAY_INIT}" restart; then
 			when_ok "УСПЕШНО"
 		else
 			when_bad "ОШИБКА"
 			return 1
 		fi
 		if [ "${empty_setup}" = false ]; then
-			[ -f "${VLESS_SUPERVISOR_INIT}" ] && vless_runtime__supervisor_service restart &> /dev/null
+			[ ! -f "${VLESS_SUPERVISOR_INIT}" ] || \
+				vless_runtime__supervisor_service restart &> /dev/null || return 1
 		else
-			[ -f "${VLESS_SUPERVISOR_INIT}" ] && vless_runtime__supervisor_service stop &> /dev/null
+			[ ! -f "${VLESS_SUPERVISOR_INIT}" ] || \
+				vless_runtime__supervisor_service stop &> /dev/null || return 1
 		fi
 		vpn_on "${_inface_entware}" &> /dev/null || return 1
 		if [ "${empty_setup}" = true ]; then
@@ -2419,61 +2567,72 @@ start_vless(){
 }
 
 switch_vpn_on(){
+	local xray_state
 #	entware интерфейс
 	inface_entware=${1}
 	cli_inface=${2}
 #	Меняем интерфейс в файле ndm
-	ndm_interface_change "${inface_entware}" "${cli_inface}"
+	ndm_interface_change "${inface_entware}" "${cli_inface}" || return 1
 
 	# Останавливаем xray, если запушен
-	${XRAY_INIT} stop &> /dev/null
-	[ -f "${VLESS_SUPERVISOR_INIT}" ] && vless_runtime__supervisor_service stop &> /dev/null
+	xray_state=$(vpn__service_state "${XRAY_INIT}") || return 1
+	if [ "${xray_state}" = running ]; then
+		vpn__service_action "${XRAY_INIT}" stop &> /dev/null || return 1
+	fi
+	[ ! -f "${VLESS_SUPERVISOR_INIT}" ] || \
+		vless_runtime__supervisor_service stop &> /dev/null || return 1
 
 	if [[ "${inface_entware}" =~ ${SSR_ENTWARE_TEMPL} ]]; then
-		vpn_off &> /dev/null
-		shadowsocks_backup
-		shadowsocks_on
+		vpn_off &> /dev/null || return 1
+		shadowsocks_backup || return 1
+		shadowsocks_on || return 1
 
 	else
-		shadowsocks_off &> /dev/null
+		shadowsocks_off &> /dev/null || return 1
 
 		# Если выбран proxy vless mors интерфейс
 		if [ "${cli_inface}" = "${PROXY_VLESS_NAME}" ] ; then
-			start_vless "${inface_entware}"
+			start_vless "${inface_entware}" || return 1
 		else
 			# Если выбран другой VPN интерфейс
-			vpn_on "${inface_entware}"
+			vpn_on "${inface_entware}" || return 1
 		fi
 	fi
-	[ "${is_install_stage}" = no ] && cmd_mors_init "no" &> /dev/null
+	if [ "${is_install_stage}" = no ]; then
+		cmd_mors_init "no" &> /dev/null || return 1
+	fi
 
 	#------------------------------------------------------
 	# Если есть подключенные гостевые сети
 	#------------------------------------------------------
-	interfaces_list=$(get_guest_inface_list_from_config)
-	[ -n "${interfaces_list}" ] && {
-
-		printf '%s\n' "${interfaces_list}" |
-        while IFS= read -r iface ; do
+	interfaces_list=$(get_guest_inface_list_from_config) || return 1
+	if [ -n "${interfaces_list}" ]; then
+		while IFS= read -r iface ; do
 #			ready "Подключаем гостевые сети к выбранному VPN подключению..."
-			bridge_vpn_access_add "${iface}" #&>/dev/null && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
-		done
-	}
+			[ -z "${iface}" ] || bridge_vpn_access_add "${iface}" || return 1
+		done <<EOF
+${interfaces_list}
+EOF
+	fi
 
 	if [ "${MORS_DEFER_SYSTEM_HOOKS:-false}" = true ]; then
 		:
 	elif [ "${cli_inface}" = "${PROXY_VLESS_NAME}" ]; then
-		rm -f /opt/etc/cron.5mins/check_vpn
+		rm -f /opt/etc/cron.5mins/check_vpn || return 1
 		[ -f /opt/etc/cron.5mins/vless-watchdog ] || \
-			ln -s /opt/apps/mors/bin/main/vless-watchdog /opt/etc/cron.5mins/vless-watchdog
+			ln -s /opt/apps/mors/bin/main/vless-watchdog /opt/etc/cron.5mins/vless-watchdog || return 1
 	else
 		[ -f /opt/etc/cron.5mins/check_vpn ] || {
 			ready "Устанавливаем проверку зависания VPN соединения в cron."
-			ln -s /opt/apps/mors/bin/main/check_vpn /opt/etc/cron.5mins/check_vpn && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+			if ln -s /opt/apps/mors/bin/main/check_vpn /opt/etc/cron.5mins/check_vpn; then
+				when_ok "УСПЕШНО"
+			else
+				when_bad "ОШИБКА"
+				return 1
+			fi
 		}
 	fi
-
-
+	return 0
 }
 
 # ------------------------------------------------------------------------------------------
@@ -2506,7 +2665,7 @@ select_vpn_interface() {
 		#		Меняем интерфейс в файле ndm
 				inface_entware=$(get_vpn_interface_by_num "${num_vpn_inface}")
 				cli_inface=$(grep "${inface_entware}" "${INFACE_NAMES_FILE}" | cut -d"|" -f1)
-				switch_vpn_on "${inface_entware}" "${cli_inface}"
+				switch_vpn_on "${inface_entware}" "${cli_inface}" || return 1
 
 			else
 				error "Число должно быть в пределах от 1 до ${total}"
@@ -2665,6 +2824,7 @@ get_dns_crypt_status() {
 #
 # ------------------------------------------------------------------------------------------
 dns_crypt_install() {
+	local dnscrypt_state
 	is_install_stage="${1}"
 	local activation_mode=runtime
 	[ -n "${is_install_stage}" ] && activation_mode=prepare
@@ -2700,10 +2860,15 @@ dns_crypt_install() {
 	fi
 #	Если dnscrypt_proxy2 запущен, то останавливаем его,
 #	так как необходимо его предварительно настроить
-	if /opt/etc/init.d/S09dnscrypt-proxy2 status | grep -q alive ; then
+	dnscrypt_state=$(vpn__service_state /opt/etc/init.d/S09dnscrypt-proxy2) || return 1
+	if [ "${dnscrypt_state}" = running ]; then
 		ready "Останавливаем службу dnscrypt-proxy2..."
-		/opt/etc/init.d/S09dnscrypt-proxy2 stop 1> /dev/null 2> "${ERROR_LOG_FILE}"
-		ready_status "${?}" "Проблема при остановке службы dnscrypt-proxy2"
+		if vpn__service_action /opt/etc/init.d/S09dnscrypt-proxy2 stop 1> /dev/null 2> "${ERROR_LOG_FILE}"; then
+			ready_status 0 "Проблема при остановке службы dnscrypt-proxy2"
+		else
+			ready_status 1 "Проблема при остановке службы dnscrypt-proxy2"
+			return 1
+		fi
 	fi
 
 	if [ -f "${DNSCRYPT_CONFIG}" ]; then
@@ -2806,7 +2971,9 @@ cmd_dns_crypt_off() {
 			# множество конфигов должно обновиться и службы перезапуститься
 			cmd_mors_init 'no'
 		} 1> /dev/null 2> "${ERROR_LOG_FILE}"
-		ready_status "${?}" "Произошла непредвиденная ошибка." "ОТКЛЮЧЕНО"
+		activation_result=$?
+		ready_status "${activation_result}" "Произошла непредвиденная ошибка." "ОТКЛЮЧЕНО"
+		return "${activation_result}"
 	}
 }
 # ------------------------------------------------------------------------------------------
@@ -2932,7 +3099,9 @@ host_add() {
 		ads_list_hosts_update &> /dev/null
 	fi
 
-	[ "${reset}" = 'yes' ] && cmd_mors_init  &> /dev/null
+	if [ "${reset}" = 'yes' ]; then
+		cmd_mors_init &> /dev/null || return 1
+	fi
 
 	[ -f /opt/etc/AdGuardHome/AdGuardHome.yaml ] && cmd_adguardhome_status | grep -q ВКЛЮЧЕН && add_host_to_adguard "${clear_host}" &> /dev/null
 
@@ -3085,8 +3254,12 @@ cmd_del_one_host() {
 		sed -i "/${host_////\\/}/d" "${MORS_LIST_FILE}"
 
 		cmd_adguardhome_status | grep -q ВКЛЮЧЕН && sed -i "/${host_////\\/}/d" "${ADGUARD_IPSET_FILE}"
-		cmd_mors_init  &> /dev/null
-		[ $? = 0 ] && when_ok "УДАЛЕН" || when_bad "НЕ УДАЛЕН"
+		if cmd_mors_init &> /dev/null; then
+			when_ok "УДАЛЕН"
+		else
+			when_bad "НЕ УДАЛЕН"
+			return 1
+		fi
 
 		# если включен блокировщик рекламы
 		if cmd_ads_status | grep -q ВКЛЮЧЕН ; then
@@ -3154,8 +3327,12 @@ del_multy_hosts() {
 		fi
 		print_line
 		ready "Перегружаем все правила конфигурации iptables и ipset"
-		cmd_mors_init  &> /dev/null
-		[ $? = 0 ] && when_ok "ГОТОВО" || when_bad "ОШИБКА"
+		if cmd_mors_init &> /dev/null; then
+			when_ok "ГОТОВО"
+		else
+			when_bad "ОШИБКА"
+			return 1
+		fi
 	fi
 
 }
@@ -3273,8 +3450,12 @@ cmd_clear_list() {
 		rm -f "${ADGUARD_IPSET_FILE}"
 		touch "${MORS_LIST_FILE}"
 
-		cmd_mors_init 'update' &> /dev/null
-		[ $? = 0 ] && when_ok 'ОЧИЩЕН' || when_bad 'ОШИБКА'
+		if cmd_mors_init 'update' &> /dev/null; then
+			when_ok 'ОЧИЩЕН'
+		else
+			when_bad 'ОШИБКА'
+			return 1
+		fi
 
 		print_line
 		warning "Предыдущий защищённый список был сохранён в файл ${MORS_LIST_FILE_BACKUP}"
@@ -3425,8 +3606,12 @@ cmd_import_hosts() {
 		ads_list_hosts_update &> /dev/null
 	fi
 
-	cmd_mors_init  "update" &> /dev/null
-	[ $? = 0 ] && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
+	if cmd_mors_init "update" &> /dev/null; then
+		when_ok "УСПЕШНО"
+	else
+		when_bad "ОШИБКА"
+		return 1
+	fi
 
 	num_not_added=$(rec_in_var "${hosts_not_added}")
 	num_repeated_ubl=$(rec_in_var "${hosts_repeated_ubl}")

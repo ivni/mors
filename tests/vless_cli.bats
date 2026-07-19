@@ -12,6 +12,10 @@ setup() {
 	export VLESS_ACTIVE_FILE="${VLESS_STATE_ROOT}/active"
 	export VLESS_EVENTS_FILE="${VLESS_STATE_ROOT}/events.jsonl"
 	export VLESS_SKIP_PLATFORM_CHECK=true
+	MORS_LIFECYCLE_TEST_STATE=ready
+	MORS_LIFECYCLE_TEST_ACTIVE=false
+	lifecycle_state__read() { printf '%s\n' "${MORS_LIFECYCLE_TEST_STATE}"; }
+	lifecycle_state__has_active_marker() { [ "${MORS_LIFECYCLE_TEST_ACTIVE}" = true ]; }
 	source "${REPO_ROOT}/opt/bin/libs/vless_store"
 	source "${REPO_ROOT}/opt/bin/libs/vless_config"
 	source "${REPO_ROOT}/opt/bin/libs/vless_runtime"
@@ -40,11 +44,93 @@ setup() {
 
 	run cmd_vless_status --json
 	[ "${status}" -eq 0 ]
-	[ "$(printf '%s\n' "${output}" | jq -r '.schema_version')" -eq 1 ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.schema_version')" -eq 2 ]
 	[ "$(printf '%s\n' "${output}" | jq -r '.connections[0].name')" = "Финляндия" ]
 	[ "$(printf '%s\n' "${output}" | jq -r '.connections[0].latency_ms')" -eq 42 ]
 	[[ "${output}" != *"user_id"* ]]
 	[[ "${output}" != *"public_key"* ]]
+}
+
+@test "unconfigured lifecycle hides stale active and standby roles" {
+	vless_store__add_metadata vless-a Finland true 11971
+	vless_store__add_metadata vless-b Germany true 11972
+	vless_runtime__ensure
+	vless_runtime__set_active_id vless-a
+	vless_runtime__set_connection vless-a active 42 0 0 '' true
+	vless_runtime__set_connection vless-b standby 50 0 0 '' true
+	vless_runtime__set_overall healthy up vless-a
+	MORS_LIFECYCLE_TEST_STATE=unconfigured
+
+	run cmd_vless_list --json
+
+	[ "${status}" -eq 0 ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.schema_version')" -eq 2 ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.lifecycle_state')" = unconfigured ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.runtime_current')" = false ]
+	[ "$(printf '%s\n' "${output}" | jq -r '[.connections[].status] | unique | .[]')" = not_configured ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.connections[0].last_runtime.status')" = active ]
+	[ "$(printf '%s\n' "${output}" | jq -r '[.connections[].enabled] | all')" = true ]
+}
+
+@test "ready lifecycle exposes current active and standby roles" {
+	vless_store__add_metadata vless-a Finland true 11971
+	vless_store__add_metadata vless-b Germany true 11972
+	vless_runtime__ensure
+	vless_runtime__set_active_id vless-a
+	vless_runtime__set_connection vless-a active 42 0 0 '' true
+	vless_runtime__set_connection vless-b standby 50 0 0 '' true
+	vless_runtime__set_overall healthy up vless-a
+
+	run cmd_vless_status --json
+
+	[ "${status}" -eq 0 ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.runtime_current')" = true ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.active_id')" = vless-a ]
+	[ "$(printf '%s\n' "${output}" | jq -r '[.connections[].status] | sort | join(",")')" = active,standby ]
+}
+
+@test "recovery lifecycle reports unknown roles and preserves last runtime separately" {
+	vless_store__add_metadata vless-a Finland true 11971
+	vless_runtime__ensure
+	vless_runtime__set_active_id vless-a
+	vless_runtime__set_connection vless-a active 42 0 0 '' true
+	vless_runtime__set_overall degraded up vless-a
+	MORS_LIFECYCLE_TEST_STATE=recovery_required
+
+	run cmd_vless_status --json
+
+	[ "${status}" -eq 0 ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.status')" = recovery_required ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.active_id')" = null ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.connections[0].status')" = unknown ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.connections[0].last_runtime.status')" = active ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.connections[0].latency_ms')" = null ]
+}
+
+@test "active lifecycle marker hides stale ready roles in JSON and human status" {
+	vless_store__add_metadata vless-a Finland true 11971
+	vless_store__add_metadata vless-b Germany true 11972
+	vless_runtime__ensure
+	vless_runtime__set_active_id vless-a
+	vless_runtime__set_connection vless-a active 42 0 0 '' true
+	vless_runtime__set_connection vless-b standby 50 0 0 '' true
+	vless_runtime__set_overall healthy up vless-a
+	MORS_LIFECYCLE_TEST_ACTIVE=true
+
+	run cmd_vless_status --json
+	[ "${status}" -eq 0 ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.lifecycle_state')" = ready ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.lifecycle_transaction_active')" = true ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.runtime_current')" = false ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.active_id')" = null ]
+	[ "$(printf '%s\n' "${output}" | jq -r '[.connections[].status] | unique | .[]')" = unknown ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.connections[0].last_runtime.status')" = active ]
+
+	run cmd_vless_status
+	[ "${status}" -eq 0 ]
+	[[ "${output}" == *"VLESS: ВЫПОЛНЯЕТСЯ ИЗМЕНЕНИЕ"* ]]
+	[[ "${output}" == *"Активное соединение: нет"* ]]
+	[[ "${output}" == *"Последнее сохранённое состояние: АКТИВНО"* ]]
 }
 
 @test "status distinguishes current direct fallback from the saved VLESS recovery choice" {
