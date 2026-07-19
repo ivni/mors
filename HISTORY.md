@@ -1,6 +1,6 @@
-## 1.3.0 beta 7 - 2026-07-19
-- Пакетный выпуск 3: `mors update apply`, `mors rollback` и recovery ограниченно ожидают кратковременный runtime-lock VLESS supervisor, сохраняя немедленный отказ при незавершённом cold test и понятную диагностику после исчерпания бюджета.
-- Пакетный выпуск 2: исправлены обнаруженные router-smoke дефекты uninstall, recovery, setup dataplane, lifecycle-статусов VLESS и диагностики IPv6.
+## 1.3.0 beta 8 - 2026-07-19
+- `mors update apply`, `mors rollback` и recovery ограниченно ожидают кратковременный runtime-lock VLESS supervisor, сохраняя немедленный отказ при незавершённом cold test и понятную диагностику после исчерпания бюджета.
+- Исправлены обнаруженные router-smoke дефекты uninstall, recovery, setup dataplane, lifecycle-статусов VLESS и диагностики IPv6.
 - Uninstall теперь отличает отсутствие необязательных файлов от реальной ошибки резервного копирования и останавливается при любой ошибке копирования существующей конфигурации.
 - Все lifecycle status/stop/restart проходят через единый wall-clock hard timeout с TERM→KILL границей и transaction-local журналом; ненулевой результат действия и неопознанный status больше не маскируются совпавшим poststate, а cold activation, snapshot/rollback и recovery не могут бессрочно удерживать lifecycle lock.
 - Setup, uninstall и вызываемые ими AdGuard Home, DNSMasq, DNSCrypt, Shadowsocks, Xray и VLESS-supervisor пути не обходят hard timeout прямыми init-вызовами; timeout и ошибка запуска поднимаются до rollback, который проверяет фактическое состояние каждого восстановленного сервиса.
@@ -13,6 +13,8 @@
 - Develop-uninstall прекращается при неопознанном состоянии AdGuard Home и при любой ошибке stop, удаления hook-файла или `opkg remove`, не выдавая частично выполненное удаление за успешное.
 - Firewall builder теперь fail-fast распространяет ошибки создания и очистки цепочек, ipset, policy routes, а также каждого guest/per-IP правила; системные probes отличают отсутствие объекта от ошибки чтения, штатный `FIB table does not exist` считается отсутствующей policy table, а повторная попытка сверяет полный упорядоченный semantic fingerprint цепочек, удаляет near-miss/затенённые правила, синхронизирует source exclusions, UDP/TCP и MARK rule/table и достраивает ipset вместо принятия частичного dataplane за готовый.
 - Переключение VPN и Shadowsocks, guest DNS/routes, watchdog hooks, boot init и изменяющие список CLI-команды возвращают ошибку верхнему caller и не продолжают зависимый запуск после неуспешного runtime rebuild; корректный существующий Shadowsocks config и его `.mors`-архив остаются идемпотентным успешным входом.
+
+## 1.3.0 beta 7 - 2026-07-19
 - Исправлен первый `mors setup` на чистом Entware: конфигурация DNSCrypt сначала проверяется отдельно, затем DNSCrypt и dnsmasq запускаются ровно по одному разу в порядке зависимостей и проходят ограниченные по времени DNS-проверки на `127.0.0.1:9153` и `127.0.0.1:9753`.
 - Lifecycle-verifier теперь подтверждает не только статус init-скриптов, но и реальные DNS-ответы обоих уровней; подробности cold-start сохраняются в защищённом журнале транзакции.
 - `/opt/etc/hosts` создаётся как обычный файл с правами `0644`, проверяется на подмену симлинком и включён в lifecycle snapshot, поэтому dnsmasq с пользователем `nobody` может прочитать файл, а rollback восстанавливает исходное состояние.
