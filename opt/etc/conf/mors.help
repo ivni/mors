@@ -218,10 +218,14 @@ init|reset              - обновляем/переустанавливаем 
 ver|version             - отображаем версию утилиты.
 update check [--json]   - read-only проверка последнего релиза.
 update apply IPK --rollback-ipk PREVIOUS_IPK --yes
-                        - проверенное in-place обновление с подготовленным откатом.
+                        - shell-preflight и in-place обновление с автономным откатом.
+update recover --yes    - завершить восстановление незаконченного обновления.
 rollback IPK --rollback-ipk CURRENT_IPK --yes
                         - транзакционный возврат к указанному IPK.
                           Для каждого IPK требуется соседний файл .sha256.
+                          Если новый mors не запускается:
+                          /bin/sh /opt/etc/.mors/lifecycle/rollback-active.sh
+                          затем mors update recover --yes.
 
 pause|freeze            - временная приостановка/заморозка работы пакета 
 unpause|unfreeze        - запуск в работу после приостаноки работы пакета 

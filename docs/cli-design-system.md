@@ -351,6 +351,7 @@ mors setup resume [--yes]
 mors setup recover [--yes]
 mors update check [--json]
 mors update apply IPK --rollback-ipk PREVIOUS_IPK --yes
+mors update recover --yes
 mors rollback IPK --rollback-ipk CURRENT_IPK --yes
 mors uninstall [--purge] [--yes]
 mors uninstall recover [--yes]
@@ -376,8 +377,38 @@ mors uninstall recover [--yes]
 Пока локальный cache предыдущего release artifact ещё не гарантирован для всех
 legacy-установок, `update apply` и `rollback` требуют явный проверенный rollback
 IPK. Каждый artifact сопровождается файлом `.sha256`; отсутствие или
-несовпадение digest завершает команду до создания транзакции. После первой
-успешной управляемой транзакции rollback artifact хранится вместе со snapshot.
+несовпадение digest завершает команду до создания транзакции. После захвата
+общего lifecycle lock, но до runtime lock, active transaction и service
+mutation оба IPK распаковываются только в закрытый временный каталог:
+`/bin/sh -n` проверяет packaged runtime, init/NDM hooks и maintainer scripts без
+их исполнения. Data archive обязан содержать только canonical
+`/opt/apps/mors`; коллизии с `/opt/bin/opkg`, lifecycle root или staged snapshot
+отклоняются. Ошибка preflight возвращает `64`, не создаёт active transaction и
+не вызывает `opkg`.
+
+Перед первой заменой файлов updater создаёт root-only
+`/opt/etc/.mors/lifecycle/rollback-active.sh`. Stub привязан к fingerprint
+staged rollback IPK, читает только active transaction и использует заранее
+разрешённый абсолютный путь `opkg`; он не загружает код из `/opt/apps/mors`.
+Candidate runtime загружается и проверяется в отдельном дочернем shell, поэтому
+его синтаксическая или ранняя runtime-ошибка не завершает доверенный updater,
+который запускает stub. Даже успешный ранний `exit` не считается verification:
+child должен атомарно опубликовать закрытую attestation, которую проверяет
+родитель. Lifecycle commit выполняет только родитель. Stub после `opkg`
+сравнивает точные `Package` и `Version` с metadata staged rollback IPK. После
+commit или подтверждённого rollback stub удаляется. Maintainer scripts остаются
+доверенным root-code пакета: preflight подтверждает их shell-синтаксис, но не
+пытается sandbox-ить семантику. Если процесс обновления оборван и новый `mors`
+не запускается, оператор выполняет:
+
+```sh
+/bin/sh /opt/etc/.mors/lifecycle/rollback-active.sh
+mors update recover --yes
+```
+
+Первая команда возвращает предыдущий пакет, вторая восстанавливает snapshot и
+завершает journal. После первой успешной управляемой транзакции rollback
+artifact хранится вместе со snapshot.
 
 ### 15.3 Доступность команд
 

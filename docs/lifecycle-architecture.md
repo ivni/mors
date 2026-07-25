@@ -232,6 +232,19 @@ Upgrade использует in-place установку IPK. До вызова 
 - затрагиваемое runtime-состояние.
 
 Candidate и rollback проверяются по опубликованным digest до lifecycle mutation.
+Внутри общего lifecycle lock, но до runtime lock и active transaction их
+`data.tar.gz` и `control.tar.gz` проходят read-only preflight. Все packaged
+shell entrypoints под `bin`, `etc/init.d` и `etc/ndm`, а также `preinst`,
+`postinst`, `prerm` и `postrm` проверяются целевым `/bin/sh -n` без исполнения.
+Data archive принимает только canonical дерево `/opt/apps/mors` и его
+родительские directory entries; payload не может заменить `opkg`, lifecycle
+metadata, rollback-stub или staged artifacts. Control maintainer scripts
+остаются доверенным root-code пакета: проверяется их синтаксис, но не
+sandbox-ится семантика. Проверка привязана к первоначальному fingerprint:
+последующая staging-проверка отвергает подмену исходного файла между preflight и
+prepare. Ошибка preflight происходит до active marker, service quiesce и
+`opkg`.
+
 Затем оба IPK вместе с sidecar копируются в защищённый transaction snapshot,
 повторно проверяются против первоначальных fingerprint и классифицируются уже
 из snapshot. `opkg` получает только эти immutable staged paths, поэтому подмена
@@ -239,9 +252,27 @@ Candidate и rollback проверяются по опубликованным d
 upgrade выполняются migration и health verification. Ошибка запускает rollback
 только на staged artifact и snapshot.
 
-После `opkg install` updater повторно загружает библиотеки установленного IPK,
-выполняет migrations, обновляет активные копии hooks, перезапускает runtime и
-только после полной lifecycle verification записывает успешный commit.
+До `prepared` updater атомарно создаёт root-only
+`/opt/etc/.mors/lifecycle/rollback-active.sh`. Это самодостаточный аварийный
+исполнитель: он валидирует active transaction и закреплённый fingerprint,
+вызывает абсолютный `opkg --force-reinstall --force-downgrade` для staged
+rollback IPK и подтверждает точные `Package`/`Version` по закреплённой control
+metadata, не source-ит и не исполняет `/opt/apps/mors`. Фиксированный путь
+позволяет запустить его по SSH даже при полностью неработоспособном candidate
+CLI.
+
+После `opkg install` библиотеки установленного IPK загружаются только в дочернем
+shell. Там выполняются migrations, обновление активных копий hooks, restart и
+lifecycle verification. Синтаксическая ошибка source или любой ранний `exit`
+candidate завершает только child; даже `exit 0` не является успехом без
+атомарной transaction-local attestation. Её проверяет доверенный родитель и
+только он выполняет lifecycle commit. При отсутствии attestation родитель
+запускает автономный stub. После возврата прежнего пакета snapshot
+восстанавливается уже его runtime-кодом. Только полная verification записывает
+успешный commit; после commit либо подтверждённого rollback active stub
+удаляется. При crash/power-loss он сохраняется вместе с active journal: ручной
+запуск stub возвращает пакет, а `mors update recover --yes` идемпотентно
+завершает восстановление snapshot.
 
 Для стабильного состояния `unconfigured` update использует тот же проверенный
 artifact и rollback, но сохраняет target `unconfigured`: hooks и сервисы не

@@ -15,12 +15,15 @@ telemetry_runtime__pin_production
 MORS_RELEASE_API=${MORS_RELEASE_API:-https://api.github.com/repos/ivni/mors/releases/latest}
 MORS_UPDATE_CACHE=${MORS_UPDATE_CACHE:-/opt/packages/mors-lifecycle}
 MORS_UPDATE_RUNTIME_LOCK_WAIT=${MORS_UPDATE_RUNTIME_LOCK_WAIT:-60}
+MORS_UPDATE_PREFLIGHT_ROOT=${MORS_UPDATE_PREFLIGHT_ROOT:-/tmp}
+MORS_UPDATE_ROLLBACK_STUB=${MORS_UPDATE_ROLLBACK_STUB:-${MORS_LIFECYCLE_ROOT}/rollback-active.sh}
 
 upgrade__usage() {
 	cat <<'EOF'
 Использование:
   mors update check [--json]
   mors update apply IPK --rollback-ipk PREVIOUS_IPK --yes
+  mors update recover --yes
   mors rollback IPK --rollback-ipk CURRENT_IPK --yes
 
 IPK и PREVIOUS_IPK должны иметь соседний файл с суффиксом .sha256.
@@ -58,6 +61,31 @@ upgrade__verify_artifact() {
 		error "SHA-256 не совпадает для ${artifact}."
 		return 1
 	}
+}
+
+upgrade__preflight_artifacts() {
+	local work_directory result=0
+	[ -d "${MORS_UPDATE_PREFLIGHT_ROOT}" ] && [ ! -L "${MORS_UPDATE_PREFLIGHT_ROOT}" ] || {
+		error 'Недоступен безопасный каталог для preflight IPK.'
+		return 1
+	}
+	work_directory=$(mktemp -d "${MORS_UPDATE_PREFLIGHT_ROOT%/}/mors-upgrade-preflight.XXXXXX") || {
+		error 'Не удалось создать каталог для preflight IPK.'
+		return 1
+	}
+	chmod 700 "${work_directory}" || result=1
+	if [ "${result}" -eq 0 ] && \
+		! upgrade_artifact__preflight "${MORS_UPDATE_ARTIFACT}" "${work_directory}" candidate; then
+		error 'Candidate IPK отклонён: shell preflight не пройден.'
+		result=1
+	fi
+	if [ "${result}" -eq 0 ] && \
+		! upgrade_artifact__preflight "${MORS_UPDATE_ROLLBACK}" "${work_directory}" rollback; then
+		error 'Rollback IPK отклонён: shell preflight не пройден.'
+		result=1
+	fi
+	rmdir "${work_directory}" 2>/dev/null || [ "${result}" -ne 0 ] || result=1
+	return "${result}"
 }
 
 upgrade__reload_installed_runtime() {
@@ -142,6 +170,55 @@ upgrade__verify_unconfigured() {
 	upgrade__verify_passive_runtime
 }
 
+upgrade__verify_installed_candidate() (
+	local state=${1} attestation=${2} temporary result=0
+	[ ! -e "${attestation}" ] && [ ! -L "${attestation}" ] || return 1
+	temporary="${attestation}.tmp.$$"
+	[ ! -e "${temporary}" ] && [ ! -L "${temporary}" ] || return 1
+	# Candidate code is loaded only in this child shell. A syntax error while
+	# sourcing it cannot terminate the trusted parent updater that owns rollback.
+	upgrade__reload_installed_runtime || return 1
+	if [ "${state}" = ready ]; then
+		upgrade__run_migrations || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		if [ "${state}" = ready ]; then
+			upgrade__restart_and_verify || result=1
+		else
+			lifecycle_transaction__phase verifying || result=1
+			[ "${result}" -ne 0 ] || \
+				telemetry_upgrade__restore_target "${MORS_UPDATE_TARGET_TELEMETRY}" || result=1
+			[ "${result}" -ne 0 ] || upgrade__verify_unconfigured || result=1
+		fi
+	fi
+	if [ "${result}" -eq 0 ]; then
+		(
+			umask 077
+			printf '%s\n' mors-candidate-verified-v1 >"${temporary}" &&
+				chmod 600 "${temporary}" &&
+				mv "${temporary}" "${attestation}"
+		) || result=1
+	fi
+	[ "${result}" -eq 0 ] || rm -f "${temporary}"
+	return "${result}"
+)
+
+upgrade__commit_installed_candidate() {
+	local state=${1} snapshot attestation result=0
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	attestation=${snapshot}/candidate-verified
+	[ ! -e "${attestation}" ] && [ ! -L "${attestation}" ] || return 1
+	if upgrade__verify_installed_candidate "${state}" "${attestation}" && \
+		upgrade_artifact__candidate_attestation_valid "${attestation}"; then
+		rm -f "${attestation}" || result=1
+		[ "${result}" -ne 0 ] || lifecycle_transaction__finish || result=1
+	else
+		rm -f "${attestation}" 2>/dev/null || true
+		result=1
+	fi
+	return "${result}"
+}
+
 upgrade__parse_apply() {
 	local argument
 	MORS_UPDATE_ARTIFACT=''
@@ -167,12 +244,21 @@ upgrade__parse_apply() {
 }
 
 upgrade__rollback_failed_apply() {
-	local result previous_state
+	local result previous_state snapshot rollback_log
 	previous_state=$(jq -er '.previous_state' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
 	lifecycle_transaction__phase rolling_back || return 1
-	opkg install --force-downgrade "${MORS_UPDATE_ROLLBACK}" >/dev/null 2>&1 || return 1
-	upgrade__reload_installed_runtime || return 1
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	rollback_log=${snapshot}/rollback-stub.log
+	if [ -f "${MORS_UPDATE_ROLLBACK_STUB}" ] && [ ! -L "${MORS_UPDATE_ROLLBACK_STUB}" ]; then
+		/bin/sh "${MORS_UPDATE_ROLLBACK_STUB}" >"${rollback_log}" 2>&1 || return 1
+	else
+		# Backward-compatible recovery for a transaction created before the
+		# autonomous rollback contract existed.
+		opkg install --force-reinstall --force-downgrade \
+			"${MORS_UPDATE_ROLLBACK}" >"${rollback_log}" 2>&1 || return 1
+	fi
 	(
+		upgrade__reload_installed_runtime || exit 1
 		MORS_LIFECYCLE_APPLY=true
 		export MORS_LIFECYCLE_APPLY
 		lifecycle_snapshot__restore || exit 1
@@ -186,6 +272,8 @@ upgrade__rollback_failed_apply() {
 	) >/dev/null 2>&1 || return 1
 	lifecycle_transaction__rollback_finish
 	result=$?
+	[ "${result}" -ne 0 ] || \
+		upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
 	return "${result}"
 }
 
@@ -206,7 +294,8 @@ upgrade__restore_pre_apply() {
 			upgrade__verify_passive_runtime
 		fi
 	) >/dev/null 2>&1 || return 1
-	lifecycle_transaction__rollback_finish
+	lifecycle_transaction__rollback_finish || return 1
+	upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
 }
 
 upgrade__apply_locked() {
@@ -218,6 +307,13 @@ upgrade__apply_locked() {
 	! lifecycle_state__has_active_marker || return 3
 	candidate_fingerprint=$(upgrade_artifact__verified_digest "${MORS_UPDATE_ARTIFACT}") || return 64
 	rollback_fingerprint=$(upgrade_artifact__verified_digest "${MORS_UPDATE_ROLLBACK}") || return 64
+	if [ -e "${MORS_UPDATE_ROLLBACK_STUB}" ] || [ -L "${MORS_UPDATE_ROLLBACK_STUB}" ]; then
+		upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" || {
+			error "Обновление остановлено: найден небезопасный ${MORS_UPDATE_ROLLBACK_STUB}."
+			return 3
+		}
+	fi
+	upgrade__preflight_artifacts || return 64
 
 	runtime_mutation_lock__acquire_wait_or_explain "mors ${operation}" \
 		"${MORS_UPDATE_RUNTIME_LOCK_WAIT}" || return $?
@@ -256,7 +352,22 @@ upgrade__apply_locked() {
 	MORS_UPDATE_ROLLBACK=${staged_rollback}
 	MORS_UPDATE_TARGET_TELEMETRY=${target_capability}
 	export MORS_UPDATE_ARTIFACT MORS_UPDATE_ROLLBACK MORS_UPDATE_TARGET_TELEMETRY
+	if ! upgrade_artifact__prepare_rollback_stub "${snapshot}" "${rollback_fingerprint}" \
+		"${MORS_UPDATE_ROLLBACK_STUB}" "$(command -v opkg)"; then
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || \
+			lifecycle_transaction__mark_recovery_required update_prepare_failed 2>/dev/null || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	fi
+	lifecycle_transaction__step rollback_stub_prepared || {
+		upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || \
+			lifecycle_transaction__mark_recovery_required update_prepare_failed 2>/dev/null || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	}
 	if ! lifecycle_transaction__phase prepared; then
+		upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
 		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || \
 			lifecycle_transaction__mark_recovery_required update_prepare_failed 2>/dev/null || true
 		runtime_mutation_lock__release >/dev/null 2>&1 || true
@@ -271,22 +382,7 @@ upgrade__apply_locked() {
 	fi
 
 	if [ "${result:-0}" -eq 0 ] && upgrade__install_artifact "${operation}" "${MORS_UPDATE_ARTIFACT}"; then
-		upgrade__reload_installed_runtime || result=1
-		if [ "${result:-0}" -eq 0 ] && [ "${state}" = ready ]; then
-			upgrade__run_migrations || result=1
-		fi
-		if [ "${result:-0}" -eq 0 ]; then
-			if [ "${state}" = ready ]; then
-				upgrade__restart_and_verify || result=1
-			else
-				lifecycle_transaction__phase verifying || result=1
-				[ "${result:-0}" -ne 0 ] || telemetry_upgrade__restore_target "${MORS_UPDATE_TARGET_TELEMETRY}" || result=1
-				[ "${result:-0}" -ne 0 ] || upgrade__verify_unconfigured || result=1
-			fi
-		fi
-		if [ "${result:-0}" -eq 0 ]; then
-			lifecycle_transaction__finish || result=1
-		fi
+		upgrade__commit_installed_candidate "${state}" || result=1
 	elif [ "${result:-0}" -eq 0 ]; then
 		result=1
 	fi
@@ -302,9 +398,11 @@ upgrade__apply_locked() {
 			result=2
 		else
 			lifecycle_transaction__mark_recovery_required update_rollback_failed 2>/dev/null || true
-			error 'Не удалось восстановить предыдущую версию. Journal сохранён.'
+			error "Не удалось восстановить предыдущую версию. Journal сохранён.\nАвтономный откат: /bin/sh ${MORS_UPDATE_ROLLBACK_STUB}"
 			result=2
 		fi
+	else
+		upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
 	fi
 	runtime_mutation_lock__release || [ "${result:-0}" -ne 0 ] || result=1
 	return "${result:-0}"
@@ -338,6 +436,8 @@ upgrade__recover_locked() {
 		planning)
 			lifecycle_transaction__rollback_finish
 			result=$?
+			[ "${result}" -ne 0 ] || \
+				upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
 			;;
 		prepared)
 			upgrade__restore_pre_apply
@@ -346,6 +446,8 @@ upgrade__recover_locked() {
 		completed)
 			lifecycle_transaction__reconcile_completed
 			result=$?
+			[ "${result}" -ne 0 ] || \
+				upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
 			;;
 		*)
 			MORS_UPDATE_ROLLBACK=${snapshot}/rollback.ipk

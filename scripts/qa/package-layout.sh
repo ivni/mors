@@ -69,6 +69,7 @@ required_paths=(
 	tests/dnsmasq_worker.bats
 	tests/telemetry_upgrade.bats
 	tests/upgrade_artifact.bats
+	tests/upgrade_safety.bats
 	scripts/qa/opkg-version-order.sh
 )
 

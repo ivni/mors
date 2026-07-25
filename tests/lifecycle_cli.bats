@@ -86,6 +86,9 @@ setup() {
 	grep -q 'upgrade__recover_locked' "${updater}"
 	grep -q 'upgrade__run_migrations' "${updater}"
 	grep -q 'upgrade__reload_installed_runtime' "${updater}"
+	grep -q 'upgrade__preflight_artifacts' "${updater}"
+	grep -q 'upgrade_artifact__prepare_rollback_stub' "${updater}"
+	grep -q 'upgrade__verify_installed_candidate() (' "${updater}"
 	grep -q 'upgrade__restart_and_verify' "${updater}"
 	grep -q 'setup__verify_committed' "${updater}"
 	[ "$(grep -c 'runtime_mutation_lock__acquire_wait_or_explain' "${updater}")" -eq 2 ]
@@ -96,7 +99,8 @@ setup() {
 	local upgrade=${REPO_ROOT}/opt/bin/main/upgrade
 	grep -q 'case "${state}" in ready|unconfigured)' "${upgrade}"
 	grep -q 'lifecycle_transaction__begin "${operation}" "${state}" "${state}"' "${upgrade}"
-	grep -q '\[ "${result:-0}" -eq 0 \] && \[ "${state}" = ready \]' "${upgrade}"
+	grep -q 'upgrade__verify_installed_candidate "${state}"' "${upgrade}"
+	grep -q 'if \[ "${state}" = ready \]; then' "${upgrade}"
 	grep -q 'upgrade__verify_unconfigured' "${upgrade}"
 	grep -q 'upgrade__verify_passive_runtime' "${upgrade}"
 	grep -q 'setup__verify_runtime_removed' "${upgrade}"
@@ -112,7 +116,7 @@ setup() {
 @test "rollback explicitly allows opkg to install an older package" {
 	local upgrade=${REPO_ROOT}/opt/bin/main/upgrade
 	grep -q 'rollback) opkg install --force-downgrade "${artifact}"' "${upgrade}"
-	grep -q 'opkg install --force-downgrade "${MORS_UPDATE_ROLLBACK}"' "${upgrade}"
+	grep -q 'opkg install --force-reinstall --force-downgrade' "${upgrade}"
 }
 
 @test "maintainer scripts read a missing active marker without shell redirection errors" {

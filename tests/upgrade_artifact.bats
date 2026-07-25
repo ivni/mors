@@ -54,5 +54,5 @@ write_digest() {
 	grep -q 'MORS_UPDATE_ARTIFACT=${staged_candidate}' "${upgrade}"
 	grep -q 'MORS_UPDATE_ROLLBACK=${staged_rollback}' "${upgrade}"
 	grep -q 'upgrade__install_artifact "${operation}" "${MORS_UPDATE_ARTIFACT}"' "${upgrade}"
-	grep -q 'opkg install --force-downgrade "${MORS_UPDATE_ROLLBACK}"' "${upgrade}"
+	grep -q 'opkg install --force-reinstall --force-downgrade' "${upgrade}"
 }

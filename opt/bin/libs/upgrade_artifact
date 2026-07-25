@@ -53,3 +53,448 @@ upgrade_artifact__stage_pair() {
 		return 1
 	fi
 }
+
+upgrade_artifact__control_field() {
+	local metadata=${1} field=${2} value
+	case "${field}" in
+		Package|Version|Architecture) ;;
+		*) return 1 ;;
+	esac
+	[ -f "${metadata}" ] && [ ! -L "${metadata}" ] || return 1
+	value=$(awk -v field="${field}" '
+		$0 ~ ("^" field ":") {
+			count++
+			if ($0 !~ ("^" field ": [^[:space:]]+$")) {
+				invalid = 1
+			}
+			value = $0
+			sub("^" field ": ", "", value)
+		}
+		END {
+			if (count != 1 || invalid || value == "") {
+				exit 1
+			}
+			print value
+		}
+	' "${metadata}") || {
+		printf 'Control metadata IPK содержит неуникальное поле: %s\n' "${field}" >&2
+		return 1
+	}
+	printf '%s\n' "${value}"
+}
+
+upgrade_artifact__preflight_archive() {
+	local archive=${1} kind=${2} work_directory=${3} label=${4}
+	local listing verbose structure seen script path parent
+	local record member member_type first_line checked=0 main_checked=false selected=false
+	local member_count verbose_count outer_debian=false outer_data=false outer_control=false
+	local control_metadata=false
+	listing="${work_directory}/preflight-${label}-${kind}.list"
+	verbose="${work_directory}/preflight-${label}-${kind}.verbose"
+	structure="${work_directory}/preflight-${label}-${kind}.structure"
+	seen="${work_directory}/preflight-${label}-${kind}.seen"
+	script="${work_directory}/preflight-${label}-${kind}.script"
+	for path in "${listing}" "${verbose}" "${structure}" "${seen}" "${script}"; do
+		[ ! -e "${path}" ] && [ ! -L "${path}" ] || return 1
+	done
+	tar -tzf "${archive}" >"${listing}" 2>/dev/null || return 1
+	tar -tvzf "${archive}" >"${verbose}" 2>/dev/null || return 1
+	chmod 600 "${listing}" "${verbose}" || return 1
+	member_count=$(wc -l <"${listing}" | awk '{print $1}')
+	verbose_count=$(wc -l <"${verbose}" | awk '{print $1}')
+	[ "${member_count}" -gt 0 ] && [ "${member_count}" = "${verbose_count}" ] || {
+		printf 'Структура архива IPK неоднозначна: %s\n' "${kind}" >&2
+		return 1
+	}
+	awk '
+		FNR == NR {
+			member[FNR] = $0
+			member_count = FNR
+			next
+		}
+		{
+			type[FNR] = substr($0, 1, 1)
+		}
+		END {
+			for (position = 1; position <= member_count; position++) {
+				printf "%s%s\n", type[position], member[position]
+			}
+		}
+	' "${listing}" "${verbose}" >"${structure}" || return 1
+	chmod 600 "${structure}" || return 1
+	: >"${seen}" || return 1
+	chmod 600 "${seen}" || return 1
+	while IFS= read -r record; do
+		member_type=${record%"${record#?}"}
+		member=${record#?}
+		case "${member_type}" in
+			-|d) ;;
+			*)
+				printf 'IPK содержит небезопасный тип объекта: %s\n' "${member}" >&2
+				return 1
+				;;
+		esac
+		[ "${member}" = ./ ] || \
+			printf '%s\n' "${member}" | grep -Eq '^\./[A-Za-z0-9._+~/-]+$' || {
+			printf 'Недопустимый путь в IPK: %s\n' "${member}" >&2
+			return 1
+		}
+		case "${member}" in
+			./*) ;;
+			*)
+				printf 'Недопустимый путь в IPK: %s\n' "${member}" >&2
+				return 1
+				;;
+		esac
+		case "${member}" in
+			*//*|*/./*|*/../*|*/..)
+				printf 'Недопустимый путь в IPK: %s\n' "${member}" >&2
+				return 1
+				;;
+		esac
+		if grep -Fqx "${member}" "${seen}"; then
+			printf 'IPK содержит дублирующийся объект: %s\n' "${member}" >&2
+			return 1
+		fi
+		printf '%s\n' "${member}" >>"${seen}" || return 1
+		case "${member_type}:${member}" in
+			d:*/) ;;
+			-:*/)
+				printf 'Обычный файл IPK имеет путь каталога: %s\n' "${member}" >&2
+				return 1
+				;;
+			d:*)
+				printf 'Каталог IPK не имеет canonical пути: %s\n' "${member}" >&2
+				return 1
+				;;
+		esac
+		if [ "${kind}" != outer ] && [ "${member}" != ./ ]; then
+			parent=${member%/}
+			parent=${parent%/*}/
+			while [ "${parent}" != ./ ]; do
+				grep -Fqx "d${parent}" "${structure}" || {
+					printf 'IPK не содержит canonical каталога для %s: %s\n' \
+						"${member}" "${parent}" >&2
+					return 1
+				}
+				parent=${parent%/}
+				parent=${parent%/*}/
+			done
+			grep -Fqx 'd./' "${structure}" || {
+				printf 'IPK не содержит корневой каталог для %s\n' "${member}" >&2
+				return 1
+			}
+		fi
+		case "${kind}:${member_type}:${member}" in
+			outer:-:./debian-binary)
+				outer_debian=true
+				continue
+				;;
+			outer:-:./data.tar.gz)
+				outer_data=true
+				continue
+				;;
+			outer:-:./control.tar.gz)
+				outer_control=true
+				continue
+				;;
+			outer:*)
+				printf 'Внешний IPK содержит неканонический объект: %s\n' "${member}" >&2
+				return 1
+				;;
+			data:d:./|data:d:./opt/|data:d:./opt/apps/|data:d:./opt/apps/mors/|data:d:./opt/apps/mors/*) ;;
+			data:-:./opt/apps/mors/*) ;;
+			data:*)
+				printf 'Data payload IPK выходит за /opt/apps/mors: %s\n' "${member}" >&2
+				return 1
+				;;
+			control:d:./)
+				continue
+				;;
+			control:-:./control)
+				control_metadata=true
+				continue
+				;;
+			control:-:./conffiles)
+				continue
+				;;
+			control:-:./preinst|control:-:./postinst|control:-:./prerm|control:-:./postrm) ;;
+			control:*)
+				printf 'Control payload IPK содержит неканонический объект: %s\n' "${member}" >&2
+				return 1
+				;;
+			*)
+				return 1
+				;;
+		esac
+		[ "${member_type}" != d ] || continue
+		selected=false
+		case "${kind}:${member}" in
+			data:./opt/apps/mors/bin/*|\
+			data:./opt/apps/mors/etc/init.d/*|\
+			data:./opt/apps/mors/etc/ndm/*)
+				selected=true
+				;;
+			control:./preinst|control:./postinst|control:./prerm|control:./postrm)
+				selected=true
+				;;
+		esac
+		[ "${selected}" = true ] || continue
+		rm -f "${script}"
+		tar -xOzf "${archive}" "${member}" >"${script}" 2>/dev/null || {
+			printf 'Не удалось прочитать shell-файл из IPK: %s\n' "${member}" >&2
+			return 1
+		}
+		chmod 600 "${script}" || return 1
+		first_line=''
+		IFS= read -r first_line <"${script}" || true
+		if [ "${kind}" = data ]; then
+			case "${first_line}" in
+				'#!/bin/sh'|'#!/bin/sh '*|'#!/bin/sh	'*) ;;
+				*)
+					printf 'Shell-файл IPK не использует /bin/sh: %s\n' "${member}" >&2
+					return 1
+					;;
+			esac
+		fi
+		/bin/sh -n "${script}" || {
+			printf 'Синтаксическая ошибка shell в IPK: %s\n' "${member}" >&2
+			return 1
+		}
+		checked=$((checked + 1))
+		[ "${member}" != ./opt/apps/mors/bin/mors ] || main_checked=true
+	done <"${structure}"
+	case "${kind}" in
+		outer)
+			[ "${member_count}" -eq 3 ] && \
+				[ "${outer_debian}" = true ] && \
+				[ "${outer_data}" = true ] && \
+				[ "${outer_control}" = true ]
+			;;
+		data)
+			[ "${checked}" -gt 0 ] && [ "${main_checked}" = true ]
+			;;
+		control)
+			[ "${control_metadata}" = true ]
+			;;
+		*) return 1 ;;
+	esac
+}
+
+# Validate exactly the packaged shell surfaces that opkg will execute or Mors
+# will source after installation. Extraction is read-only and uses controlled
+# temporary filenames; archive member paths are never written to disk.
+upgrade_artifact__preflight() (
+	local artifact=${1} work_directory=${2} label=${3}
+	local data_archive control_archive metadata path result=0 debian_binary
+	local package version architecture kind suffix
+	case "${label}" in
+		candidate|rollback) ;;
+		*) return 1 ;;
+	esac
+	[ -f "${artifact}" ] && [ ! -L "${artifact}" ] || return 1
+	[ -d "${work_directory}" ] && [ ! -L "${work_directory}" ] || return 1
+	data_archive="${work_directory}/preflight-${label}-data.tar.gz"
+	control_archive="${work_directory}/preflight-${label}-control.tar.gz"
+	metadata="${work_directory}/preflight-${label}-control"
+	for path in "${data_archive}" "${control_archive}" "${metadata}"; do
+		[ ! -e "${path}" ] && [ ! -L "${path}" ] || return 1
+	done
+	for kind in outer data control; do
+		for suffix in list verbose structure seen script; do
+			path="${work_directory}/preflight-${label}-${kind}.${suffix}"
+			[ ! -e "${path}" ] && [ ! -L "${path}" ] || return 1
+		done
+	done
+	umask 077
+	upgrade_artifact__preflight_archive "${artifact}" outer \
+		"${work_directory}" "${label}" || result=1
+	if [ "${result}" -eq 0 ]; then
+		debian_binary=$(tar -xOzf "${artifact}" ./debian-binary 2>/dev/null) || result=1
+		[ "${result}" -ne 0 ] || [ "${debian_binary}" = 2.0 ] || {
+			printf 'IPK имеет неподдерживаемую версию контейнера.\n' >&2
+			result=1
+		}
+	fi
+	[ "${result}" -ne 0 ] || \
+		tar -xOzf "${artifact}" ./data.tar.gz >"${data_archive}" 2>/dev/null || result=1
+	[ "${result}" -ne 0 ] || \
+		tar -xOzf "${artifact}" ./control.tar.gz >"${control_archive}" 2>/dev/null || result=1
+	if [ "${result}" -eq 0 ]; then
+		chmod 600 "${data_archive}" "${control_archive}" || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		upgrade_artifact__preflight_archive "${data_archive}" data \
+			"${work_directory}" "${label}" || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		upgrade_artifact__preflight_archive "${control_archive}" control \
+			"${work_directory}" "${label}" || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		tar -xOzf "${control_archive}" ./control >"${metadata}" 2>/dev/null || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		chmod 600 "${metadata}" || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		package=$(upgrade_artifact__control_field "${metadata}" Package) || result=1
+		[ "${result}" -ne 0 ] || \
+			version=$(upgrade_artifact__control_field "${metadata}" Version) || result=1
+		[ "${result}" -ne 0 ] || \
+			architecture=$(upgrade_artifact__control_field "${metadata}" Architecture) || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		[ "${package}" = mors ] && [ "${architecture}" = all ] && \
+			printf '%s\n' "${version}" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z.+~:_-]*$' || {
+			printf 'IPK не является canonical mors/all package.\n' >&2
+			result=1
+		}
+	fi
+	rm -f \
+		"${data_archive}" "${control_archive}" "${metadata}"
+	for kind in outer data control; do
+		rm -f \
+			"${work_directory}/preflight-${label}-${kind}.list" \
+			"${work_directory}/preflight-${label}-${kind}.verbose" \
+			"${work_directory}/preflight-${label}-${kind}.structure" \
+			"${work_directory}/preflight-${label}-${kind}.seen" \
+			"${work_directory}/preflight-${label}-${kind}.script"
+	done
+	return "${result}"
+)
+
+# Materialize a fixed-path emergency rollback command before opkg replaces the
+# installed runtime. The generated script deliberately does not source Mors.
+upgrade_artifact__prepare_rollback_stub() (
+	local snapshot=${1} rollback_fingerprint=${2} destination=${3} opkg_command=${4}
+	local rollback temporary parent control_archive metadata
+	local rollback_package rollback_version rollback_architecture
+	printf '%s\n' "${rollback_fingerprint}" | grep -Eq '^[0-9a-f]{64}$' || return 1
+	case "${opkg_command}" in
+		/*) ;;
+		*) return 1 ;;
+	esac
+	printf '%s\n' "${opkg_command}" | grep -Eq '^/[a-zA-Z0-9_./-]+$' || return 1
+	[ -x "${opkg_command}" ] || return 1
+	[ -d "${snapshot}" ] && [ ! -L "${snapshot}" ] || return 1
+	rollback=${snapshot}/rollback.ipk
+	[ -f "${rollback}" ] && [ ! -L "${rollback}" ] || return 1
+	[ "$(upgrade_artifact__verified_digest "${rollback}")" = "${rollback_fingerprint}" ] || return 1
+	control_archive=${snapshot}/rollback-stub-control.tar.gz
+	metadata=${snapshot}/rollback-stub-control
+	[ ! -e "${control_archive}" ] && [ ! -L "${control_archive}" ] || return 1
+	[ ! -e "${metadata}" ] && [ ! -L "${metadata}" ] || return 1
+	trap 'rm -f "${control_archive}" "${metadata}"' 0
+	umask 077
+	tar -xOzf "${rollback}" ./control.tar.gz >"${control_archive}" 2>/dev/null || return 1
+	tar -xOzf "${control_archive}" ./control >"${metadata}" 2>/dev/null || return 1
+	chmod 600 "${control_archive}" "${metadata}" || return 1
+	rollback_package=$(upgrade_artifact__control_field "${metadata}" Package) || return 1
+	rollback_version=$(upgrade_artifact__control_field "${metadata}" Version) || return 1
+	rollback_architecture=$(upgrade_artifact__control_field "${metadata}" Architecture) || return 1
+	[ "${rollback_package}" = mors ] && [ "${rollback_architecture}" = all ] && \
+		printf '%s\n' "${rollback_version}" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z.+~:_-]*$' || return 1
+	parent=${destination%/*}
+	[ "${parent}" != "${destination}" ] || return 1
+	[ -d "${parent}" ] && [ ! -L "${parent}" ] || return 1
+	[ ! -e "${destination}" ] && [ ! -L "${destination}" ] || return 1
+	temporary="${destination}.tmp.$$"
+	[ ! -e "${temporary}" ] && [ ! -L "${temporary}" ] || return 1
+	{
+		printf '%s\n' '#!/bin/sh'
+		printf "expected='%s'\n" "${rollback_fingerprint}"
+		printf "expected_package='%s'\n" "${rollback_package}"
+		printf "expected_version='%s'\n" "${rollback_version}"
+		printf "opkg_command='%s'\n" "${opkg_command}"
+		cat <<'EOF'
+PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 077
+
+stub_root=${0%/*}
+[ "${stub_root}" != "${0}" ] || stub_root=.
+stub_root=$(CDPATH= cd "${stub_root}" 2>/dev/null && pwd -P) || exit 70
+active_file=${stub_root}/active
+[ -f "${active_file}" ] && [ ! -L "${active_file}" ] || {
+	echo 'Rollback Mors остановлен: активная транзакция не найдена.' >&2
+	exit 71
+}
+active_id=''
+IFS= read -r active_id <"${active_file}" || true
+case "${active_id}" in
+	upgrade-*|rollback-*) ;;
+	*)
+		echo 'Rollback Mors остановлен: некорректный идентификатор транзакции.' >&2
+		exit 71
+		;;
+esac
+case "${active_id}" in
+	*[!a-zA-Z0-9._-]*)
+		echo 'Rollback Mors остановлен: небезопасный идентификатор транзакции.' >&2
+		exit 71
+		;;
+esac
+rollback=${stub_root}/transactions/${active_id}/snapshot/rollback.ipk
+[ -f "${rollback}" ] && [ ! -L "${rollback}" ] || {
+	echo 'Rollback Mors остановлен: rollback IPK не найден.' >&2
+	exit 72
+}
+actual=$(sha256sum "${rollback}" 2>/dev/null | awk 'NR == 1 {print $1}')
+[ "${actual}" = "${expected}" ] || {
+	echo 'Rollback Mors остановлен: SHA-256 rollback IPK не совпадает.' >&2
+	exit 72
+}
+"${opkg_command}" install --force-reinstall --force-downgrade "${rollback}" || {
+	echo 'Rollback Mors остановлен: opkg не восстановил предыдущий пакет.' >&2
+	exit 73
+}
+status_output=$("${opkg_command}" status "${expected_package}" 2>/dev/null) || {
+	echo 'Rollback Mors остановлен: восстановленный пакет не подтверждён opkg.' >&2
+	exit 74
+}
+installed_package=$(printf '%s\n' "${status_output}" | awk -F': ' '/^Package: / {print $2; exit}')
+installed_version=$(printf '%s\n' "${status_output}" | awk -F': ' '/^Version: / {print $2; exit}')
+printf '%s\n' "${status_output}" | grep -q '^Status: install .* installed$' || {
+	echo 'Rollback Mors остановлен: восстановленный пакет не подтверждён opkg.' >&2
+	exit 74
+}
+[ "${installed_package}" = "${expected_package}" ] && \
+	[ "${installed_version}" = "${expected_version}" ] || {
+	echo 'Rollback Mors остановлен: opkg не подтвердил точную rollback-версию.' >&2
+	exit 74
+}
+sync
+echo 'Предыдущий пакет Mors восстановлен автономным rollback-stub.'
+EOF
+	} >"${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	chmod 700 "${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	/bin/sh -n "${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	mv "${temporary}" "${destination}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	sync
+)
+
+upgrade_artifact__candidate_attestation_valid() {
+	local attestation=${1}
+	[ -f "${attestation}" ] && [ ! -L "${attestation}" ] || return 1
+	[ "$(cat "${attestation}")" = mors-candidate-verified-v1 ]
+}
+
+upgrade_artifact__remove_rollback_stub() {
+	local stub=${1}
+	[ ! -e "${stub}" ] && [ ! -L "${stub}" ] && return 0
+	[ -f "${stub}" ] && [ ! -L "${stub}" ] || return 1
+	rm -f "${stub}"
+}
