@@ -34,12 +34,25 @@ setup() {
 	source <(sed -n '/^setup__develop_remove_service()/,/^}$/p' "${REPO_ROOT}/opt/bin/main/setup" | tr -d '\r')
 	source <(sed -n '/^all_services_rm_develop_mode()/,/^}$/p' "${REPO_ROOT}/opt/bin/main/setup" | tr -d '\r')
 	source <(sed -n '/^legacy_cleanup__run()/,/^}$/p' "${REPO_ROOT}/opt/bin/main/setup" | tr -d '\r')
+	source <(sed -n '/^setup__run_transaction_step()/,/^}$/p' "${REPO_ROOT}/opt/bin/main/setup" | tr -d '\r')
 	source <(sed -n '/^clear_previous_version_net_rules()/,/^}$/p' "${REPO_ROOT}/opt/bin/main/setup" | tr -d '\r')
 	source <(sed -n '/^setup__verify_legacy_dataplane_absent()/,/^}$/p' "${REPO_ROOT}/opt/bin/main/setup" | tr -d '\r')
 	source <(sed -n '/^setup__rollback_transaction()/,/^}$/p' "${REPO_ROOT}/opt/bin/main/setup" | tr -d '\r')
 	ready() { :; }
 	when_ok() { :; }
 	when_bad() { :; }
+}
+
+@test "setup step wrapper records a failing command without changing its exit code" {
+	local events=${BATS_TEST_TMPDIR}/step-events
+	lifecycle_transaction__step() { printf 'step:%s\n' "$1" >>"${events}"; }
+	lifecycle_transaction__failure() { printf 'failure:%s:%s\n' "$1" "$2" >>"${events}"; }
+	failing_step() { return 7; }
+
+	run setup__run_transaction_step setup.switch_vpn failing_step
+
+	[ "${status}" -eq 7 ]
+	[ "$(cat "${events}")" = $'step:setup.switch_vpn\nfailure:setup.switch_vpn:7' ]
 }
 
 @test "missing optional backup inputs are a successful no-op" {
@@ -166,4 +179,35 @@ setup() {
 	grep -q '^snapshot$' "${events}"
 	grep -q '^verify-legacy$' "${events}"
 	! grep -q '^unexpected-finish$' "${events}"
+}
+
+@test "rollback publishes restored unconfigured state despite superseded cleanup errors" {
+	local events=${BATS_TEST_TMPDIR}/rollback-events
+	: >"${events}"
+	MORS_SETUP_DNS_LOG=${BATS_TEST_TMPDIR}/rollback-services.log
+	lifecycle_transaction__journal_file() { printf '%s\n' unused; }
+	jq() {
+		case "$2" in
+			.previous_state) printf '%s\n' unconfigured ;;
+			.phase) printf '%s\n' applying ;;
+			*) return 1 ;;
+		esac
+	}
+	lifecycle_transaction__phase() { printf 'phase:%s\n' "$1" >>"${events}"; }
+	setup_dns__log_path() { printf '%s\n' "${MORS_SETUP_DNS_LOG}"; }
+	setup__quiesce_managed_vless_runtime() { return 7; }
+	clear_previous_version_net_rules() { return 8; }
+	setup__deactivate_core_hooks() { return 9; }
+	setup__rollback_provisioned_interface() { printf 'interface\n' >>"${events}"; }
+	lifecycle_snapshot__restore() { printf 'snapshot\n' >>"${events}"; }
+	setup__verify_runtime_removed() { printf 'verify\n' >>"${events}"; }
+	lifecycle_transaction__rollback_finish() { printf 'finish\n' >>"${events}"; }
+
+	run setup__rollback_transaction
+
+	[ "${status}" -eq 0 ]
+	[ "$(cat "${events}")" = $'phase:rolling_back\ninterface\nsnapshot\nverify\nfinish' ]
+	grep -q 'step=quiesce-vless exit=7' "${MORS_SETUP_DNS_LOG}"
+	grep -q 'step=cleanup-dataplane exit=8' "${MORS_SETUP_DNS_LOG}"
+	grep -q 'step=deactivate-hooks exit=9' "${MORS_SETUP_DNS_LOG}"
 }

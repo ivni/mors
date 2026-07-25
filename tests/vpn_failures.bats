@@ -34,6 +34,7 @@ prepare_runtime_script() {
 }
 
 @test "switch_vpn_on stops when interface mutation fails" {
+	load_vpn_function vpn__lifecycle_failure
 	load_vpn_function switch_vpn_on
 	ndm_interface_change() { return 7; }
 	vpn__service_state() { printf 'called\n' >>"${EVENTS}"; }
@@ -44,7 +45,21 @@ prepare_runtime_script() {
 	[ ! -s "${EVENTS}" ]
 }
 
+@test "switch_vpn_on records the first lifecycle substep failure" {
+	load_vpn_function vpn__lifecycle_failure
+	load_vpn_function switch_vpn_on
+	MORS_LIFECYCLE_APPLY=true
+	ndm_interface_change() { return 7; }
+	lifecycle_transaction__failure() { printf 'failure:%s:%s\n' "$1" "$2" >>"${EVENTS}"; }
+
+	run switch_vpn_on tun0 Normal
+
+	[ "${status}" -eq 7 ]
+	[ "$(cat "${EVENTS}")" = 'failure:setup.switch.interface:7' ]
+}
+
 @test "switch_vpn_on propagates guest loop failure" {
+	load_vpn_function vpn__lifecycle_failure
 	load_vpn_function switch_vpn_on
 	ndm_interface_change() { :; }
 	vpn__service_state() { printf '%s\n' stopped; }
@@ -172,6 +187,60 @@ prepare_runtime_script() {
 	SHADOWSOCKS_CONF=${BATS_TEST_TMPDIR}/missing.json
 
 	run shadowsocks_off
+	[ "${status}" -ne 0 ]
+}
+
+@test "service stop skips an already stopped init script" {
+	load_vpn_function vpn__service_stop_if_running
+	vpn__service_state() { printf '%s\n' stopped; }
+	vpn__service_action() { printf 'unexpected-stop\n' >>"${EVENTS}"; return 6; }
+
+	run vpn__service_stop_if_running /tmp/service
+
+	[ "${status}" -eq 0 ]
+	[ ! -s "${EVENTS}" ]
+}
+
+@test "service stop accepts nonzero action after stopped postcondition" {
+	load_vpn_function vpn__service_stop_if_running
+	local calls=${BATS_TEST_TMPDIR}/service-state.calls
+	printf '%s\n' 0 >"${calls}"
+	MORS_SETUP_DNS_LOG=${BATS_TEST_TMPDIR}/service.log
+	vpn__service_state() {
+		local count
+		count=$(cat "${calls}")
+		count=$((count + 1))
+		printf '%s\n' "${count}" >"${calls}"
+		[ "${count}" -eq 1 ] && printf '%s\n' running || printf '%s\n' stopped
+	}
+	vpn__service_action() { return 6; }
+
+	run vpn__service_stop_if_running /tmp/service
+
+	[ "${status}" -eq 0 ]
+	grep -q 'service-stop-postcondition-satisfied .*action-exit=6' "${MORS_SETUP_DNS_LOG}"
+}
+
+@test "service running wait rejects a transient process" {
+	load_vpn_function vpn__service_wait_running
+	local calls=${BATS_TEST_TMPDIR}/service-state.calls
+	printf '%s\n' 0 >"${calls}"
+	vpn__service_state() {
+		local count
+		count=$(cat "${calls}")
+		count=$((count + 1))
+		printf '%s\n' "${count}" >"${calls}"
+		[ "${count}" -lt 3 ] && printf '%s\n' running || printf '%s\n' stopped
+	}
+	date() { printf '%s\n' 100; }
+	sleep() { :; }
+	MORS_VPN_SERVICE_STATE_TIMEOUT=4
+	MORS_VPN_SERVICE_RETRY_INTERVAL=1
+	MORS_VPN_SERVICE_RUNNING_STABLE_SECONDS=2
+	MORS_SETUP_DNS_SERVICE_KILL_AFTER=0
+
+	run vpn__service_wait_running /tmp/service
+
 	[ "${status}" -ne 0 ]
 }
 

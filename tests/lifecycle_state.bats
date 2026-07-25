@@ -13,12 +13,17 @@ setup() {
 	MORS_LIFECYCLE_TIMEOUT_CMD=$(PATH=/usr/bin:/bin command -v timeout)
 	MORS_LIFECYCLE_SERVICE_ACTION_TIMEOUT=2
 	MORS_LIFECYCLE_SERVICE_KILL_AFTER=1
+	MORS_LIFECYCLE_SERVICE_RUNNING_STABLE_SECONDS=0
+	MORS_LIFECYCLE_SERVICE_CAPTURE_RUNNING_CHECKS=1
+	MORS_LIFECYCLE_SERVICE_CAPTURE_INTERVAL=0
 	export MORS_LIFECYCLE_ROOT MORS_LIFECYCLE_STATE_FILE
 	export MORS_LIFECYCLE_TRANSACTION_ROOT MORS_LIFECYCLE_ACTIVE_FILE
 	export MORS_LIFECYCLE_SERVICE_BASELINE_FILE
 	export MORS_LIFECYCLE_CONF_FILE MORS_LIFECYCLE_LEGACY_START_FILE
 	export MORS_LIB_DIR MORS_LIFECYCLE_TIMEOUT_CMD
 	export MORS_LIFECYCLE_SERVICE_ACTION_TIMEOUT MORS_LIFECYCLE_SERVICE_KILL_AFTER
+	export MORS_LIFECYCLE_SERVICE_RUNNING_STABLE_SECONDS
+	export MORS_LIFECYCLE_SERVICE_CAPTURE_RUNNING_CHECKS MORS_LIFECYCLE_SERVICE_CAPTURE_INTERVAL
 	. "${REPO_ROOT}/opt/bin/libs/lifecycle_state"
 	. "${REPO_ROOT}/opt/bin/libs/lifecycle_snapshot"
 }
@@ -66,6 +71,8 @@ setup() {
 	[ -n "${id}" ]
 	[ "$(cat "${MORS_LIFECYCLE_ACTIVE_FILE}")" = "${id}" ]
 	[ "$(jq -r '.phase' "$(lifecycle_transaction__journal_file "${id}")")" = planning ]
+	[ "$(jq -r '.step' "$(lifecycle_transaction__journal_file "${id}")")" = null ]
+	[ "$(jq -r '.failure_reason' "$(lifecycle_transaction__journal_file "${id}")")" = null ]
 	[ "$(lifecycle_state__read)" = unconfigured ]
 
 	lifecycle_transaction__phase prepared
@@ -75,6 +82,22 @@ setup() {
 	[ "$(lifecycle_state__read)" = ready ]
 	[ ! -e "${MORS_LIFECYCLE_ACTIVE_FILE}" ]
 	[ "$(jq -r '.phase' "$(lifecycle_transaction__journal_file "${id}")")" = completed ]
+}
+
+@test "transaction journal preserves the first failing substep and exit code" {
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	journal=$(lifecycle_transaction__journal_file)
+
+	lifecycle_transaction__step setup.switch_vpn
+	lifecycle_transaction__failure setup.switch.shadowsocks_stop 6
+	lifecycle_transaction__failure setup.rollback.snapshot 9
+
+	[ "$(jq -r '.step' "${journal}")" = setup.rollback.snapshot ]
+	[ "$(jq -r '.failure_reason' "${journal}")" = setup.switch.shadowsocks_stop ]
+	[ "$(jq -r '.failure_exit' "${journal}")" -eq 6 ]
+	[ "$(jq -r '.last_error' "${journal}")" = setup.rollback.snapshot ]
 }
 
 @test "second transaction is rejected while one is active" {
@@ -242,6 +265,42 @@ setup() {
 	[ "$(lifecycle_snapshot__captured_service_state "${service}")" = unknown ]
 }
 
+@test "snapshot does not preserve a transient running service as running" {
+	local service=${BATS_TEST_TMPDIR}/transient-service
+	local calls=${BATS_TEST_TMPDIR}/status.calls
+	printf '%s\n' 0 >"${calls}"
+	cat >"${service}" <<'EOF'
+#!/bin/sh
+case "$1" in
+	status)
+		count=$(cat "${STATUS_CALLS}")
+		count=$((count + 1))
+		printf '%s\n' "${count}" >"${STATUS_CALLS}"
+		if [ "${count}" -lt 3 ]; then
+			printf '%s\n' alive
+		else
+			printf '%s\n' dead
+			exit 1
+		fi
+		;;
+esac
+EOF
+	chmod +x "${service}"
+	export STATUS_CALLS=${calls}
+	lifecycle_snapshot__files() { :; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { printf '%s\n' "${service}"; }
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	MORS_LIFECYCLE_SERVICE_CAPTURE_RUNNING_CHECKS=3
+	MORS_LIFECYCLE_SERVICE_CAPTURE_INTERVAL=0
+
+	lifecycle_snapshot__capture
+
+	[ "$(lifecycle_snapshot__captured_service_state "${service}")" = stopped ]
+}
+
 @test "snapshot hard-kills a TERM-ignoring service status" {
 	local service=${BATS_TEST_TMPDIR}/hanging-service log
 	cat >"${service}" <<'EOF'
@@ -289,6 +348,35 @@ EOF
 	lifecycle_snapshot__restore
 
 	[ ! -e "${stop_called}" ]
+}
+
+@test "snapshot restore accepts nonzero stop after confirmed stopped poststate" {
+	local service=${BATS_TEST_TMPDIR}/service
+	local service_state=${BATS_TEST_TMPDIR}/service.state
+	printf '%s\n' stopped >"${service_state}"
+	cat >"${service}" <<'EOF'
+#!/bin/sh
+case "$1" in
+	status) [ "$(cat "${SERVICE_STATE}")" = running ] && echo alive || echo dead ;;
+	stop) printf '%s\n' stopped >"${SERVICE_STATE}"; exit 6 ;;
+esac
+EOF
+	chmod +x "${service}"
+	export SERVICE_STATE=${service_state}
+	lifecycle_snapshot__files() { :; }
+	lifecycle_snapshot__directories() { :; }
+	lifecycle_snapshot__services() { printf '%s\n' "${service}"; }
+	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_LIFECYCLE_CONF_FILE}"
+	lifecycle_state__read >/dev/null
+	lifecycle_transaction__begin setup unconfigured ready >/dev/null
+	lifecycle_snapshot__capture
+	printf '%s\n' running >"${service_state}"
+
+	lifecycle_snapshot__restore
+
+	[ "$(cat "${service_state}")" = stopped ]
+	grep -q 'restore-stop-postcondition-satisfied .*action-exit=6' \
+		"$(lifecycle_snapshot__service_log_path)"
 }
 
 @test "snapshot restore rejects restart exit zero without running poststate" {
@@ -364,6 +452,36 @@ EOF
 
 	[ "${status}" -ne 0 ]
 	[ ! -e "${calls}" ]
+}
+
+@test "running poststate must survive the configured stability window" {
+	local service=${BATS_TEST_TMPDIR}/transient-running calls=${BATS_TEST_TMPDIR}/status.calls
+	printf '%s\n' 0 >"${calls}"
+	cat >"${service}" <<'EOF'
+#!/bin/sh
+case "$1" in
+	status)
+		count=$(cat "${STATUS_CALLS}")
+		count=$((count + 1))
+		printf '%s\n' "${count}" >"${STATUS_CALLS}"
+		[ "${count}" -lt 3 ] && printf '%s\n' alive || printf '%s\n' dead
+		;;
+esac
+EOF
+	chmod +x "${service}"
+	export STATUS_CALLS=${calls}
+	MORS_SETUP_DNS_LOG=${BATS_TEST_TMPDIR}/lifecycle-services.log
+	export MORS_SETUP_DNS_LOG
+	lifecycle_snapshot__prepare_service_log
+	MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT=4
+	MORS_LIFECYCLE_SERVICE_RETRY_INTERVAL=1
+	MORS_LIFECYCLE_SERVICE_RUNNING_STABLE_SECONDS=2
+	sleep() { :; }
+
+	run lifecycle_snapshot__wait_service_state "${service}" running
+
+	[ "${status}" -ne 0 ]
+	grep -q 'restore-state-timeout' "${MORS_SETUP_DNS_LOG}"
 }
 
 @test "service log path rejects a missing transaction instead of using filesystem root" {

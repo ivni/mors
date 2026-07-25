@@ -61,11 +61,12 @@ EOF
 	MORS_SETUP_DNS_RETRY_INTERVAL=1
 	MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT=2
 	MORS_SETUP_DNS_SERVICE_KILL_AFTER=1
+	MORS_SETUP_DNS_SERVICE_RUNNING_STABLE_SECONDS=0
 	export MORS_SETUP_DNSCRYPT_BIN MORS_SETUP_DNSCRYPT_CONFIG
 	export MORS_SETUP_DNSCRYPT_INIT MORS_SETUP_DNSMASQ_INIT MORS_SETUP_DNS_TIMEOUT_CMD
 	export MORS_SETUP_DNS_LOG MORS_SETUP_DNS_READY_TIMEOUT MORS_SETUP_DNS_RETRY_INTERVAL
 	export MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT
-	export MORS_SETUP_DNS_SERVICE_KILL_AFTER MORS_LIB_DIR
+	export MORS_SETUP_DNS_SERVICE_KILL_AFTER MORS_SETUP_DNS_SERVICE_RUNNING_STABLE_SECONDS MORS_LIB_DIR
 	printf 'listen_addresses = ["127.0.0.1:9153"]\n' >"${MORS_SETUP_DNSCRYPT_CONFIG}"
 	get_config_value() {
 		case "$1" in DNS_CRYPT_PORT) printf '%s\n' 9153 ;; DNSMASQ_PORT) printf '%s\n' 9753 ;; esac
@@ -120,7 +121,7 @@ EOF
 
 	setup_dns__stop_service "${service}" dnsmasq
 
-	grep -q "stopped service=${service} elapsed=2" "${MORS_SETUP_DNS_LOG}"
+	grep -q "stopped service=${service} elapsed=1" "${MORS_SETUP_DNS_LOG}"
 }
 
 @test "service restart propagates nonzero even when old process remains running" {
@@ -147,21 +148,43 @@ EOF
 	grep -q 'restart-failed .*exit=7' "${MORS_SETUP_DNS_LOG}"
 }
 
-@test "service stop propagates nonzero even when status reports stopped" {
-	local service=${BATS_TEST_TMPDIR}/failed-stop
+@test "service stop is an idempotent no-op when status already reports stopped" {
+	local service=${BATS_TEST_TMPDIR}/already-stopped stop_called=${BATS_TEST_TMPDIR}/stop.called
 	cat >"${service}" <<'EOF'
 #!/bin/sh
 case "$1" in
-	stop) exit 6 ;;
+	stop) : >"${STOP_CALLED}"; exit 6 ;;
 	status) printf '%s\n' stopped ;;
 esac
 EOF
 	chmod +x "${service}"
+	export STOP_CALLED=${stop_called}
 
 	run setup_dns__stop_service "${service}" dnsmasq
 
-	[ "${status}" -eq 6 ]
+	[ "${status}" -eq 0 ]
+	[ ! -e "${stop_called}" ]
+	grep -q 'already-stopped' "${MORS_SETUP_DNS_LOG}"
+}
+
+@test "service stop accepts a nonzero action only after stopped postcondition" {
+	local service=${BATS_TEST_TMPDIR}/failed-stop state=${BATS_TEST_TMPDIR}/service.state
+	printf '%s\n' running >"${state}"
+	cat >"${service}" <<'EOF'
+#!/bin/sh
+case "$1" in
+	stop) printf '%s\n' stopped >"${SERVICE_STATE}"; exit 6 ;;
+	status) cat "${SERVICE_STATE}" ;;
+esac
+EOF
+	chmod +x "${service}"
+	export SERVICE_STATE=${state}
+
+	run setup_dns__stop_service "${service}" dnsmasq
+
+	[ "${status}" -eq 0 ]
 	grep -q 'stop-failed .*exit=6' "${MORS_SETUP_DNS_LOG}"
+	grep -q 'stop-postcondition-satisfied .*action-exit=6' "${MORS_SETUP_DNS_LOG}"
 }
 
 @test "hanging service stop is terminated before polling" {
@@ -228,7 +251,7 @@ EOF
 
 	[ "${status}" -ne 0 ]
 	grep -q 'service-action-timeout .*action=status timeout=1' "${MORS_SETUP_DNS_LOG}"
-	grep -q 'stop-failed' "${MORS_SETUP_DNS_LOG}"
+	grep -q 'stop-status-error' "${MORS_SETUP_DNS_LOG}"
 }
 
 @test "exhausted stop budget does not invoke another status action" {
@@ -275,6 +298,29 @@ EOF
 	[ "${status}" -ne 0 ]
 	[ "$(cat "${calls}")" -eq 1 ]
 	grep -q 'stop-status-error' "${MORS_SETUP_DNS_LOG}"
+}
+
+@test "service running postcondition rejects a transient process" {
+	local service=${BATS_TEST_TMPDIR}/transient-running calls=${BATS_TEST_TMPDIR}/status.calls
+	printf '%s\n' 0 >"${calls}"
+	printf '%s\n' '#!/bin/sh' 'exit 0' >"${service}"
+	chmod +x "${service}"
+	setup_dns__service_state() {
+		local count
+		count=$(cat "${calls}")
+		count=$((count + 1))
+		printf '%s\n' "${count}" >"${calls}"
+		[ "${count}" -lt 3 ] && printf '%s\n' running || printf '%s\n' stopped
+	}
+	setup_dns__now() { printf '%s\n' 100; }
+	sleep() { :; }
+	MORS_SETUP_DNS_SERVICE_READY_TIMEOUT=4
+	MORS_SETUP_DNS_SERVICE_RUNNING_STABLE_SECONDS=2
+
+	run setup_dns__wait_running "${service}"
+
+	[ "${status}" -ne 0 ]
+	grep -q 'start-timeout' "${MORS_SETUP_DNS_LOG}"
 }
 
 @test "committed DNS verification tolerates a bounded slow start" {

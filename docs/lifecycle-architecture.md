@@ -29,7 +29,8 @@
 ```
 
 `state.json` хранит только подтверждённое стабильное состояние. `journal.json`
-хранит одну активную операцию и её фазу. Новая операция запрещена, пока
+хранит одну активную операцию, её фазу, текущий безопасный `step` и первый
+неуспешный `failure_reason`/`failure_exit`. Новая операция запрещена, пока
 предыдущая не завершена или не восстановлена.
 
 Минимальная схема state:
@@ -51,12 +52,16 @@
   "id": "setup-1720785600-1234",
   "operation": "setup",
   "phase": "prepared",
+  "step": "setup.switch_vpn",
   "previous_state": "unconfigured",
   "target_state": "ready",
   "started_at": "2026-07-12T12:00:00Z",
   "updated_at": "2026-07-12T12:00:00Z",
   "reboot_marker": null,
-  "last_error": null
+  "failure_reason": null,
+  "failure_exit": null,
+  "last_error": null,
+  "outcome": null
 }
 ```
 
@@ -155,9 +160,12 @@ home-interface PREROUTING jump не содержит дополнительны�
 самих `status`, `stop`, `start` и readiness probes, а ограниченный KILL grace
 резервируется внутри оставшегося бюджета. После исчерпания бюджета следующий
 status/probe не запускается; timeout записывается в журнал транзакции.
-Ненулевой результат действия всегда является ошибкой, даже если последующий
-status совпал с целью. Неопознанный `status` немедленно сохраняется как `unknown`
-и блокирует apply, потому что такой snapshot нельзя гарантированно восстановить.
+Для `start`/`restart` требуются успешное действие и устойчивый подтверждённый
+poststate. `stop` оценивается идемпотентно: уже `dead`/`stopped` сервис не
+получает повторную команду, а ненулевой exit code выполненного `stop` остаётся
+диагностикой, если ограниченная проверка подтвердила `stopped`. Неопознанный
+`status` немедленно сохраняется как `unknown` и блокирует apply, потому что такой
+snapshot нельзя гарантированно восстановить.
 
 При boot Entware может запустить первый health-cycle VLESS supervisor раньше
 основного init Mors. `S96mors` ограниченно ждёт общий runtime-mutation lock,
@@ -263,8 +271,10 @@ ownership Mors; внешний одноимённый hook определяет�
 rollback миграции. Xray и supervisor
 дополнительно проверяются по процессам, поэтому удаление managed hook не может
 оставить сиротский data-plane.
-После каждого restore start/stop проверяется фактический poststate; ошибка
-действия или несовпадение состояния оставляет lifecycle в recovery-required.
+После каждого restore `start`/`restart` проверяется устойчивый фактический
+poststate. Для `stop` подтверждённый `stopped` является результатом, даже если
+init-скрипт вернул ненулевой код; неопознанное или несовпавшее состояние
+оставляет lifecycle в `recovery_required`.
 
 Первое обновление с legacy-версии не имеет старого journal. Новый `preinst`
 создаёт bootstrap snapshot до замены файлов. Если старый IPK недоступен,

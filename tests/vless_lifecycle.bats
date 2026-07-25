@@ -194,12 +194,16 @@ assert_no_direct_init_action() {
 		<<<"$(function_body "${setup}" setup_adguard)"
 	grep -q 'vpn__service_action.*XRAY_INIT.*restart' \
 		<<<"$(function_body "${vpn}" start_vless)"
+	grep -q 'vpn__service_wait_running.*XRAY_INIT' \
+		<<<"$(function_body "${vpn}" start_vless)"
 	grep -q 'vpn__service_state.*S09dnscrypt-proxy2' \
 		<<<"$(function_body "${vpn}" dns_crypt_install)"
 	grep -q 'vless__service_action.*VLESS_SUPERVISOR_INIT' \
 		<<<"$(function_body "${vless}" vless_runtime__supervisor_service)"
-	grep -q 'start_vless.*|| return 1' <<<"$(function_body "${vpn}" switch_vpn_on)"
+	grep -q 'start_vless.*|| {' <<<"$(function_body "${vpn}" switch_vpn_on)"
 	grep -q 'vpn_on.*|| return 1' <<<"$(function_body "${vpn}" switch_vpn_on)"
+	grep -q 'vpn__lifecycle_failure setup.switch.shadowsocks_off' \
+		<<<"$(function_body "${vpn}" switch_vpn_on)"
 	grep -q 'telemetry_lifecycle__stop_sender' \
 		<<<"$(function_body "${telemetry}" telemetry_lifecycle__deactivate)"
 }

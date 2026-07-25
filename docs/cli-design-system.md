@@ -435,6 +435,20 @@ deadline. KILL grace резервируется внутри оставшего�
 бюджета новый status или probe не запускается, поэтому lifecycle lock не
 удерживается дополнительным пограничным вызовом.
 
+Service action оценивается по подтверждённому postcondition, а не только по
+exit code init-скрипта. Для `stop` состояния `missing`, `stopped` и `dead`
+означают уже достигнутый desired state; ненулевой exit code сохраняется в
+transaction-local журнале, но не превращает подтверждённую остановку в ошибку.
+Для `start` и `restart` одного мгновенного `running` недостаточно: процесс
+должен оставаться запущенным в течение ограниченного stability window.
+
+Journal lifecycle-транзакции хранит первый неуспешный `failure_reason`,
+`failure_exit` и текущий безопасный `step`. Значения являются закрытыми
+идентификаторами этапов и не содержат argv, stderr, конфигурацию, endpoint или
+другие пользовательские данные. Ошибки best-effort rollback сохраняются в
+transaction-local service log; итог rollback определяется проверенными
+инвариантами восстановленного состояния.
+
 Setup с пустым реестром VLESS разрешён: Xray запускается с локальным SOCKS
 inbound и `blackhole` outbound, а VLESS остаётся в состоянии `unconfigured`.
 Это fail-closed состояние не считается рабочим тоннелем, но позволяет завершить

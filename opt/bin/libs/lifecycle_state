@@ -179,7 +179,7 @@ lifecycle_transaction__begin() (
 		--arg previous_state "${previous_state}" \
 		--arg target_state "${target_state}" \
 		--arg now "${now}" \
-		'{schema_version: 1, id: $id, operation: $operation, phase: "planning", previous_state: $previous_state, target_state: $target_state, started_at: $now, updated_at: $now, reboot_marker: null, last_error: null, outcome: null}' | \
+		'{schema_version: 1, id: $id, operation: $operation, phase: "planning", step: null, previous_state: $previous_state, target_state: $target_state, started_at: $now, updated_at: $now, reboot_marker: null, failure_reason: null, failure_exit: null, last_error: null, outcome: null}' | \
 		lifecycle_state__atomic_write "${temporary}/journal.json" || {
 		rm -f "${temporary}/journal.json"
 		rmdir "${temporary}/snapshot" "${temporary}" 2>/dev/null || true
@@ -205,6 +205,44 @@ lifecycle_transaction__phase() {
 	jq --arg phase "${phase}" --arg now "${now}" \
 		'.phase = $phase | .updated_at = $now' "${journal}" | \
 		lifecycle_state__atomic_write "${journal}"
+}
+
+lifecycle_transaction__step() {
+	local step id journal now
+	step=${1}
+	case "${step}" in
+		''|*[!a-zA-Z0-9._-]*) return 1 ;;
+	esac
+	id=$(lifecycle_state__active_id) || return 1
+	journal=$(lifecycle_transaction__journal_file "${id}") || return 1
+	[ -r "${journal}" ] || return 1
+	now=$(lifecycle_state__now) || return 1
+	jq --arg step "${step}" --arg now "${now}" \
+		'.step = $step | .updated_at = $now' "${journal}" | \
+		lifecycle_state__atomic_write "${journal}"
+}
+
+lifecycle_transaction__failure() {
+	local reason exit_code id journal now
+	reason=${1}
+	exit_code=${2}
+	case "${reason}" in
+		''|*[!a-zA-Z0-9._-]*) return 1 ;;
+	esac
+	case "${exit_code}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	id=$(lifecycle_state__active_id) || return 1
+	journal=$(lifecycle_transaction__journal_file "${id}") || return 1
+	[ -r "${journal}" ] || return 1
+	now=$(lifecycle_state__now) || return 1
+	jq --arg reason "${reason}" --argjson exit_code "${exit_code}" --arg now "${now}" '
+		.step = $reason |
+		.failure_reason = (.failure_reason // $reason) |
+		.failure_exit = (.failure_exit // $exit_code) |
+		.last_error = $reason |
+		.updated_at = $now
+	' "${journal}" | lifecycle_state__atomic_write "${journal}"
 }
 
 lifecycle_transaction__error() {

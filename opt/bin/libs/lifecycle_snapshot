@@ -15,6 +15,9 @@ MORS_LIFECYCLE_SERVICE_KILL_AFTER=${MORS_LIFECYCLE_SERVICE_KILL_AFTER:-2}
 MORS_LIFECYCLE_TIMEOUT_CMD=${MORS_LIFECYCLE_TIMEOUT_CMD:-/opt/bin/timeout}
 MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT=${MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT:-15}
 MORS_LIFECYCLE_SERVICE_RETRY_INTERVAL=${MORS_LIFECYCLE_SERVICE_RETRY_INTERVAL:-1}
+MORS_LIFECYCLE_SERVICE_RUNNING_STABLE_SECONDS=${MORS_LIFECYCLE_SERVICE_RUNNING_STABLE_SECONDS:-3}
+MORS_LIFECYCLE_SERVICE_CAPTURE_RUNNING_CHECKS=${MORS_LIFECYCLE_SERVICE_CAPTURE_RUNNING_CHECKS:-3}
+MORS_LIFECYCLE_SERVICE_CAPTURE_INTERVAL=${MORS_LIFECYCLE_SERVICE_CAPTURE_INTERVAL:-2}
 
 lifecycle_snapshot__service_log_path() {
 	local transaction_directory
@@ -59,10 +62,43 @@ lifecycle_snapshot__service_state() {
 		"${MORS_LIFECYCLE_TIMEOUT_CMD}"
 }
 
+lifecycle_snapshot__capture_service_state() {
+	local service state checks interval observed=1
+	service=${1}
+	checks=${MORS_LIFECYCLE_SERVICE_CAPTURE_RUNNING_CHECKS}
+	interval=${MORS_LIFECYCLE_SERVICE_CAPTURE_INTERVAL}
+	case "${checks}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	case "${interval}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	state=$(lifecycle_snapshot__service_state "${service}") || return 1
+	if [ "${state}" != running ] || [ "${checks}" -le 1 ]; then
+		printf '%s\n' "${state}"
+		return 0
+	fi
+	while [ "${observed}" -lt "${checks}" ]; do
+		[ "${interval}" -eq 0 ] || sleep "${interval}"
+		state=$(lifecycle_snapshot__service_state "${service}") || return 1
+		if [ "${state}" != running ]; then
+			printf '%s\n' "${state}"
+			return 0
+		fi
+		observed=$((observed + 1))
+	done
+	printf '%s\n' running
+}
+
 lifecycle_snapshot__wait_service_state() {
 	local service expected log started now wall logical=0 elapsed remaining action_timeout step state
+	local stable_started=-1 stable_seconds
 	service=${1}
 	expected=${2}
+	stable_seconds=${MORS_LIFECYCLE_SERVICE_RUNNING_STABLE_SECONDS}
+	case "${stable_seconds}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
 	log=$(lifecycle_snapshot__service_log_path) || return 1
 	started=$(date +%s) || return 1
 	while :; do
@@ -81,11 +117,21 @@ lifecycle_snapshot__wait_service_state() {
 		now=$(date +%s) || return 1
 		wall=$((now - started))
 		[ "${wall}" -ge "${logical}" ] && elapsed=${wall} || elapsed=${logical}
-		if [ "${state}" = "${expected}" ] && \
-			[ "${elapsed}" -le "${MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT}" ]; then
-			printf 'restore-state service=%s expected=%s elapsed=%s\n' \
-				"${service}" "${expected}" "${elapsed}" >>"${log}"
-			return 0
+		if [ "${state}" = "${expected}" ]; then
+			if [ "${expected}" != running ]; then
+				stable_started=${elapsed}
+			else
+				[ "${stable_started}" -ge 0 ] || stable_started=${elapsed}
+			fi
+			if { [ "${expected}" != running ] || \
+				[ $((elapsed - stable_started)) -ge "${stable_seconds}" ]; } && \
+				[ "${elapsed}" -le "${MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT}" ]; then
+				printf 'restore-state service=%s expected=%s elapsed=%s\n' \
+					"${service}" "${expected}" "${elapsed}" >>"${log}"
+				return 0
+			fi
+		else
+			stable_started=-1
 		fi
 		[ "${elapsed}" -ge "${MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT}" ] && break
 		remaining=$((MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT - elapsed))
@@ -257,7 +303,7 @@ lifecycle_snapshot__capture() (
 		if [ ! -x "${path}" ]; then
 			state=missing
 		else
-			state=$(lifecycle_snapshot__service_state "${path}") || state=unknown
+			state=$(lifecycle_snapshot__capture_service_state "${path}") || state=unknown
 		fi
 		printf '%s\t%s\n' "${state}" "${path}"
 	done >"${services}.tmp" || {
@@ -324,10 +370,24 @@ lifecycle_snapshot__restore_files() {
 	done <"${manifest}"
 }
 
-lifecycle_snapshot__service_is_stopped() {
-	local state
-	state=$(lifecycle_snapshot__service_state "${1}") || return 1
-	[ "${state}" = stopped ]
+lifecycle_snapshot__stop_service() {
+	local service state action_status=0 log
+	service=${1}
+	[ -x "${service}" ] || return 0
+	state=$(lifecycle_snapshot__service_state "${service}") || return 1
+	[ "${state}" = stopped ] && return 0
+	[ "${state}" = running ] || return 1
+	lifecycle_snapshot__service_action "${service}" stop >/dev/null 2>&1 || action_status=$?
+	if lifecycle_snapshot__wait_service_state "${service}" stopped; then
+		if [ "${action_status}" -ne 0 ]; then
+			log=$(lifecycle_snapshot__service_log_path) || return 1
+			printf 'restore-stop-postcondition-satisfied service=%s action-exit=%s\n' \
+				"${service}" "${action_status}" >>"${log}"
+		fi
+		return 0
+	fi
+	[ "${action_status}" -eq 0 ] || return "${action_status}"
+	return 1
 }
 
 lifecycle_snapshot__captured_service_state() {
@@ -413,11 +473,7 @@ lifecycle_snapshot__restore_telemetry_service_state() {
 		external:*) return 0 ;;
 		missing:missing) return 0 ;;
 		missing:managed)
-			if [ -x "${MORS_TELEMETRY_INIT}" ] && \
-				! lifecycle_snapshot__service_is_stopped "${MORS_TELEMETRY_INIT}"; then
-				lifecycle_snapshot__service_action "${MORS_TELEMETRY_INIT}" stop >/dev/null 2>&1 || return 1
-				lifecycle_snapshot__wait_service_state "${MORS_TELEMETRY_INIT}" stopped || return 1
-			fi
+			lifecycle_snapshot__stop_service "${MORS_TELEMETRY_INIT}" || return 1
 			rm -f "${MORS_TELEMETRY_INIT}"
 			;;
 		running:managed)
@@ -426,12 +482,7 @@ lifecycle_snapshot__restore_telemetry_service_state() {
 			lifecycle_snapshot__wait_service_state "${MORS_TELEMETRY_INIT}" running
 			;;
 		stopped:managed)
-			if [ -x "${MORS_TELEMETRY_INIT}" ] && \
-				! lifecycle_snapshot__service_is_stopped "${MORS_TELEMETRY_INIT}"; then
-				lifecycle_snapshot__service_action "${MORS_TELEMETRY_INIT}" stop >/dev/null 2>&1 || return 1
-			fi
-			[ ! -x "${MORS_TELEMETRY_INIT}" ] || \
-				lifecycle_snapshot__wait_service_state "${MORS_TELEMETRY_INIT}" stopped || return 1
+			lifecycle_snapshot__stop_service "${MORS_TELEMETRY_INIT}"
 			;;
 		*) return 1 ;;
 	esac
@@ -439,7 +490,7 @@ lifecycle_snapshot__restore_telemetry_service_state() {
 }
 
 lifecycle_snapshot__quiesce_new_services() {
-	local snapshot services state path current hook_state
+	local snapshot services state path hook_state
 	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
 	services="${snapshot}/services.tsv"
 	[ -r "${services}" ] || return 1
@@ -450,11 +501,7 @@ lifecycle_snapshot__quiesce_new_services() {
 			[ "${hook_state}" != external ] || continue
 		fi
 		[ -x "${path}" ] || continue
-		current=$(lifecycle_snapshot__service_state "${path}") || return 1
-		if [ "${current}" != stopped ]; then
-			lifecycle_snapshot__service_action "${path}" stop >/dev/null 2>&1 || return 1
-		fi
-		lifecycle_snapshot__wait_service_state "${path}" stopped || return 1
+		lifecycle_snapshot__stop_service "${path}" || return 1
 	done <"${services}"
 }
 
@@ -481,10 +528,7 @@ lifecycle_snapshot__restore_services() {
 				lifecycle_snapshot__wait_service_state "${path}" running || return 1
 				;;
 			stopped)
-				if [ -x "${path}" ] && ! lifecycle_snapshot__service_is_stopped "${path}"; then
-					lifecycle_snapshot__service_action "${path}" stop >/dev/null 2>&1 || return 1
-				fi
-				[ ! -x "${path}" ] || lifecycle_snapshot__wait_service_state "${path}" stopped || return 1
+				lifecycle_snapshot__stop_service "${path}" || return 1
 				;;
 			missing|external) ;;
 			*) return 1 ;;

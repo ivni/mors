@@ -558,6 +558,18 @@ legacy_cleanup__run() {
 	[ "${legacy_cleanup_mode}" = best_effort ]
 }
 
+setup__run_transaction_step() {
+	local step status
+	step=${1}
+	shift
+	lifecycle_transaction__step "${step}" || return 1
+	"$@"
+	status=$?
+	[ "${status}" -eq 0 ] && return 0
+	lifecycle_transaction__failure "${step}" "${status}" >/dev/null 2>&1 || true
+	return "${status}"
+}
+
 clear_previous_version_net_rules() {
 	local legacy_cleanup_mode=${1:-fail_fast} legacy_cleanup_result=0
 	case ${legacy_cleanup_mode} in
@@ -653,13 +665,13 @@ setup__cmd_install_unlocked(){
 	rm_previous_version_files && when_ok || when_bad
 
 	echo 'Очищаем сетевые правила предыдущих версий'
-	clear_previous_version_net_rules || {
+	setup__run_transaction_step setup.cleanup_legacy_dataplane clear_previous_version_net_rules || {
 		error 'Не удалось очистить сетевые правила предыдущих версий.'
 		return 1
 	}
 
 	# Стартуем ipset'ы, используемые DNS-серверами, до старта DNS.
-	ip4__ipset__create_list || {
+	setup__run_transaction_step setup.create_ipset ip4__ipset__create_list || {
 		error 'Не удалось создать рабочий набор IP Mors.'
 		return 1
 	}
@@ -704,7 +716,8 @@ setup__cmd_install_unlocked(){
 	is_install_stage=install
 	MORS_DEFER_SYSTEM_HOOKS=true
 	export MORS_DEFER_SYSTEM_HOOKS
-	switch_vpn_on "${MORS_SETUP_INTERFACE_ENTWARE}" "${MORS_SETUP_INTERFACE_CLI}" || return 1
+	setup__run_transaction_step setup.switch_vpn \
+		switch_vpn_on "${MORS_SETUP_INTERFACE_ENTWARE}" "${MORS_SETUP_INTERFACE_CLI}" || return 1
 	unset MORS_DEFER_SYSTEM_HOOKS
 	log_in_file "$(cmd_vpn_status)"
 	print_line
@@ -1459,11 +1472,10 @@ setup__rollback_provisioned_interface() {
 }
 
 setup__service_running() {
-	local service state
+	local service
 	service=${1}
 	[ -x "${service}" ] || return 1
-	state=$(setup_dns__service_state "${service}") || return 1
-	[ "${state}" = running ]
+	setup_dns__wait_running "${service}"
 }
 
 setup__verify_failed() {
@@ -1880,7 +1892,7 @@ setup__verify_committed() {
 }
 
 setup__rollback_transaction() {
-	local previous_state phase result=0 snapshot_restored=0
+	local previous_state phase result=0 snapshot_restored=0 rollback_status log
 	previous_state=$(jq -er '.previous_state' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
 	phase=$(jq -er '.phase' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
 	if [ "${phase}" = completed ]; then
@@ -1894,9 +1906,22 @@ setup__rollback_transaction() {
 	lifecycle_transaction__phase rolling_back || return 1
 	MORS_LIFECYCLE_APPLY=true
 	export MORS_LIFECYCLE_APPLY
-	setup__quiesce_managed_vless_runtime || result=1
-	clear_previous_version_net_rules best_effort >/dev/null 2>&1 || result=1
-	setup__deactivate_core_hooks || result=1
+	log=$(setup_dns__log_path 2>/dev/null || true)
+	setup__quiesce_managed_vless_runtime || {
+		rollback_status=$?
+		[ -z "${log}" ] || printf 'rollback-step-failed step=quiesce-vless exit=%s\n' \
+			"${rollback_status}" >>"${log}"
+	}
+	clear_previous_version_net_rules best_effort >/dev/null 2>&1 || {
+		rollback_status=$?
+		[ -z "${log}" ] || printf 'rollback-step-failed step=cleanup-dataplane exit=%s\n' \
+			"${rollback_status}" >>"${log}"
+	}
+	setup__deactivate_core_hooks || {
+		rollback_status=$?
+		[ -z "${log}" ] || printf 'rollback-step-failed step=deactivate-hooks exit=%s\n' \
+			"${rollback_status}" >>"${log}"
+	}
 	setup__rollback_provisioned_interface || result=1
 	if lifecycle_snapshot__restore; then
 		snapshot_restored=1

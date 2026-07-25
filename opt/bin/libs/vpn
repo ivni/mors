@@ -9,6 +9,9 @@
 . /opt/apps/mors/bin/libs/service_action
 
 MINUS=10
+MORS_VPN_SERVICE_STATE_TIMEOUT=${MORS_VPN_SERVICE_STATE_TIMEOUT:-15}
+MORS_VPN_SERVICE_RETRY_INTERVAL=${MORS_VPN_SERVICE_RETRY_INTERVAL:-1}
+MORS_VPN_SERVICE_RUNNING_STABLE_SECONDS=${MORS_VPN_SERVICE_RUNNING_STABLE_SECONDS:-3}
 
 # /opt/etc/hosts создаётся только явным setup/init workflow. Подключение
 # библиотеки должно оставаться read-only, в частности для `mors test`.
@@ -238,13 +241,107 @@ vpn__service_action() {
 }
 
 vpn__service_state() {
-	local service log
+	local service log action_timeout
 	service=${1}
+	action_timeout=${2:-${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT:-15}}
 	log=${MORS_SETUP_DNS_LOG:-}
 	service_action__state "${service}" status "${log}" \
-		"${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT:-15}" \
+		"${action_timeout}" \
 		"${MORS_SETUP_DNS_SERVICE_KILL_AFTER:-2}" \
 		"${MORS_SETUP_DNS_TIMEOUT_CMD:-/opt/bin/timeout}"
+}
+
+vpn__lifecycle_failure() {
+	local reason status
+	reason=${1}
+	status=${2}
+	[ "${MORS_LIFECYCLE_APPLY:-false}" = true ] || return 0
+	command -v lifecycle_transaction__failure >/dev/null 2>&1 || return 0
+	lifecycle_transaction__failure "${reason}" "${status}" >/dev/null 2>&1 || true
+}
+
+vpn__service_stop_if_running() {
+	local service state action_status=0 log
+	service=${1}
+	log=${MORS_SETUP_DNS_LOG:-}
+	state=$(vpn__service_state "${service}") || return 1
+	case "${state}" in
+		stopped) return 0 ;;
+		running) ;;
+		*) return 1 ;;
+	esac
+	vpn__service_action "${service}" stop || action_status=$?
+	state=$(vpn__service_state "${service}") || {
+		[ "${action_status}" -ne 0 ] && return "${action_status}"
+		return 1
+	}
+	if [ "${state}" = stopped ]; then
+		if [ "${action_status}" -ne 0 ] && [ -n "${log}" ]; then
+			printf 'service-stop-postcondition-satisfied service=%s action-exit=%s\n' \
+				"${service}" "${action_status}" >>"${log}"
+		fi
+		return 0
+	fi
+	[ "${action_status}" -eq 0 ] || return "${action_status}"
+	return 1
+}
+
+vpn__service_wait_running() {
+	local service log started now wall logical=0 elapsed=0 remaining action_timeout step state
+	local stable_started=-1 stable_seconds timeout_seconds retry_interval kill_after
+	service=${1}
+	log=${MORS_SETUP_DNS_LOG:-}
+	timeout_seconds=${MORS_VPN_SERVICE_STATE_TIMEOUT}
+	retry_interval=${MORS_VPN_SERVICE_RETRY_INTERVAL}
+	stable_seconds=${MORS_VPN_SERVICE_RUNNING_STABLE_SECONDS}
+	kill_after=${MORS_SETUP_DNS_SERVICE_KILL_AFTER:-2}
+	case "${timeout_seconds}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	case "${retry_interval}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	case "${stable_seconds}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	case "${kill_after}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	started=$(date +%s) || return 1
+	while :; do
+		now=$(date +%s) || return 1
+		wall=$((now - started))
+		[ "${wall}" -ge "${logical}" ] && elapsed=${wall} || elapsed=${logical}
+		remaining=$((timeout_seconds - elapsed - kill_after))
+		[ "${remaining}" -gt 0 ] || break
+		action_timeout=${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT:-15}
+		[ "${action_timeout}" -le "${remaining}" ] || action_timeout=${remaining}
+		state=$(vpn__service_state "${service}" "${action_timeout}") || return 1
+		now=$(date +%s) || return 1
+		wall=$((now - started))
+		[ "${wall}" -ge "${logical}" ] && elapsed=${wall} || elapsed=${logical}
+		if [ "${state}" = running ]; then
+			[ "${stable_started}" -ge 0 ] || stable_started=${elapsed}
+			if [ $((elapsed - stable_started)) -ge "${stable_seconds}" ] && \
+				[ "${elapsed}" -le "${timeout_seconds}" ]; then
+				[ -z "${log}" ] || printf 'service-running-stable service=%s elapsed=%s\n' \
+					"${service}" "${elapsed}" >>"${log}"
+				return 0
+			fi
+		else
+			stable_started=-1
+		fi
+		[ "${elapsed}" -ge "${timeout_seconds}" ] && break
+		remaining=$((timeout_seconds - elapsed))
+		step=${retry_interval}
+		[ "${step}" -le "${remaining}" ] || step=${remaining}
+		[ "${step}" -gt 0 ] || break
+		sleep "${step}"
+		logical=$((logical + step))
+	done
+	[ -z "${log}" ] || printf 'service-running-stability-timeout service=%s elapsed=%s\n' \
+		"${service}" "${elapsed}" >>"${log}"
+	return 1
 }
 
 service_restart(){
@@ -2108,10 +2205,16 @@ cmd_shadowsocks_iptable_reset() {
 #
 # ------------------------------------------------------------------------------------------
 shadowsocks_off() {
+	local stop_status
 	ready "Интерфейс shadowsocks отключен "
 	#	сохраняем файл конфигурации shadowsocks
-	[ ! -x /opt/etc/init.d/S22shadowsocks ] || \
-		vpn__service_action /opt/etc/init.d/S22shadowsocks stop &> /dev/null || return 1
+	if [ -x /opt/etc/init.d/S22shadowsocks ]; then
+		vpn__service_stop_if_running /opt/etc/init.d/S22shadowsocks &> /dev/null || {
+			stop_status=$?
+			vpn__lifecycle_failure setup.switch.shadowsocks_stop "${stop_status}"
+			return "${stop_status}"
+		}
+	fi
 	if [ -f "${SHADOWSOCKS_CONF}" ]; then
 		mv -f "${SHADOWSOCKS_CONF}" "${SHADOWSOCKS_CONF}.mors" &> /dev/null || return 1
 	fi
@@ -2536,7 +2639,12 @@ start_vless(){
 		# Запуск xray в случае, если конфигурация xray не содержит ошибок
 		ready "Запускаем xray сервис..."
 		if vpn__service_action "${XRAY_INIT}" restart; then
-			when_ok "УСПЕШНО"
+			if vpn__service_wait_running "${XRAY_INIT}"; then
+				when_ok "УСПЕШНО"
+			else
+				when_bad "ОШИБКА"
+				return 1
+			fi
 		else
 			when_bad "ОШИБКА"
 			return 1
@@ -2567,20 +2675,36 @@ start_vless(){
 }
 
 switch_vpn_on(){
-	local xray_state
+	local xray_state status
 #	entware интерфейс
 	inface_entware=${1}
 	cli_inface=${2}
 #	Меняем интерфейс в файле ndm
-	ndm_interface_change "${inface_entware}" "${cli_inface}" || return 1
+	ndm_interface_change "${inface_entware}" "${cli_inface}" || {
+		status=$?
+		vpn__lifecycle_failure setup.switch.interface "${status}"
+		return "${status}"
+	}
 
 	# Останавливаем xray, если запушен
-	xray_state=$(vpn__service_state "${XRAY_INIT}") || return 1
+	xray_state=$(vpn__service_state "${XRAY_INIT}") || {
+		status=$?
+		vpn__lifecycle_failure setup.switch.xray_status "${status}"
+		return "${status}"
+	}
 	if [ "${xray_state}" = running ]; then
-		vpn__service_action "${XRAY_INIT}" stop &> /dev/null || return 1
+		vpn__service_stop_if_running "${XRAY_INIT}" &> /dev/null || {
+			status=$?
+			vpn__lifecycle_failure setup.switch.xray_stop "${status}"
+			return "${status}"
+		}
 	fi
 	[ ! -f "${VLESS_SUPERVISOR_INIT}" ] || \
-		vless_runtime__supervisor_service stop &> /dev/null || return 1
+		vless_runtime__supervisor_service stop &> /dev/null || {
+		status=$?
+		vpn__lifecycle_failure setup.switch.supervisor_stop "${status}"
+		return "${status}"
+	}
 
 	if [[ "${inface_entware}" =~ ${SSR_ENTWARE_TEMPL} ]]; then
 		vpn_off &> /dev/null || return 1
@@ -2588,11 +2712,19 @@ switch_vpn_on(){
 		shadowsocks_on || return 1
 
 	else
-		shadowsocks_off &> /dev/null || return 1
+		shadowsocks_off &> /dev/null || {
+			status=$?
+			vpn__lifecycle_failure setup.switch.shadowsocks_off "${status}"
+			return "${status}"
+		}
 
 		# Если выбран proxy vless mors интерфейс
 		if [ "${cli_inface}" = "${PROXY_VLESS_NAME}" ] ; then
-			start_vless "${inface_entware}" || return 1
+			start_vless "${inface_entware}" || {
+				status=$?
+				vpn__lifecycle_failure setup.switch.vless_start "${status}"
+				return "${status}"
+			}
 		else
 			# Если выбран другой VPN интерфейс
 			vpn_on "${inface_entware}" || return 1
