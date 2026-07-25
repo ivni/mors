@@ -83,10 +83,22 @@ upgrade_artifact__control_field() {
 	printf '%s\n' "${value}"
 }
 
+upgrade_artifact__syntax_shell() {
+	local shell
+	for shell in /opt/bin/sh /opt/usr/bin/ash /bin/sh; do
+		[ -x "${shell}" ] || continue
+		"${shell}" -n /dev/null >/dev/null 2>&1 || continue
+		printf '%s\n' "${shell}"
+		return 0
+	done
+	printf 'Не найден shell с поддержкой безопасной проверки синтаксиса.\n' >&2
+	return 1
+}
+
 upgrade_artifact__preflight_archive() {
 	local archive=${1} kind=${2} work_directory=${3} label=${4}
 	local listing verbose structure seen script path parent
-	local record member member_type first_line checked=0 main_checked=false selected=false
+	local record member member_type first_line syntax_shell checked=0 main_checked=false selected=false
 	local member_count verbose_count outer_debian=false outer_data=false outer_control=false
 	local control_metadata=false
 	listing="${work_directory}/preflight-${label}-${kind}.list"
@@ -94,6 +106,7 @@ upgrade_artifact__preflight_archive() {
 	structure="${work_directory}/preflight-${label}-${kind}.structure"
 	seen="${work_directory}/preflight-${label}-${kind}.seen"
 	script="${work_directory}/preflight-${label}-${kind}.script"
+	syntax_shell=$(upgrade_artifact__syntax_shell) || return 1
 	for path in "${listing}" "${verbose}" "${structure}" "${seen}" "${script}"; do
 		[ ! -e "${path}" ] && [ ! -L "${path}" ] || return 1
 	done
@@ -257,7 +270,7 @@ upgrade_artifact__preflight_archive() {
 					;;
 			esac
 		fi
-		/bin/sh -n "${script}" || {
+		"${syntax_shell}" -n "${script}" || {
 			printf 'Синтаксическая ошибка shell в IPK: %s\n' "${member}" >&2
 			return 1
 		}
@@ -368,7 +381,7 @@ upgrade_artifact__preflight() (
 # installed runtime. The generated script deliberately does not source Mors.
 upgrade_artifact__prepare_rollback_stub() (
 	local snapshot=${1} rollback_fingerprint=${2} destination=${3} opkg_command=${4}
-	local rollback temporary parent control_archive metadata
+	local rollback temporary parent control_archive metadata syntax_shell
 	local rollback_package rollback_version rollback_architecture
 	printf '%s\n' "${rollback_fingerprint}" | grep -Eq '^[0-9a-f]{64}$' || return 1
 	case "${opkg_command}" in
@@ -377,6 +390,7 @@ upgrade_artifact__prepare_rollback_stub() (
 	esac
 	printf '%s\n' "${opkg_command}" | grep -Eq '^/[a-zA-Z0-9_./-]+$' || return 1
 	[ -x "${opkg_command}" ] || return 1
+	syntax_shell=$(upgrade_artifact__syntax_shell) || return 1
 	[ -d "${snapshot}" ] && [ ! -L "${snapshot}" ] || return 1
 	rollback=${snapshot}/rollback.ipk
 	[ -f "${rollback}" ] && [ ! -L "${rollback}" ] || return 1
@@ -475,7 +489,7 @@ EOF
 		rm -f "${temporary}"
 		return 1
 	}
-	/bin/sh -n "${temporary}" || {
+	"${syntax_shell}" -n "${temporary}" || {
 		rm -f "${temporary}"
 		return 1
 	}

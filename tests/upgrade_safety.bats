@@ -167,6 +167,15 @@ load_candidate_verification_functions() {
 	[ -z "$(find "${WORK}" -mindepth 1 -maxdepth 1 -print -quit)" ]
 }
 
+@test "shell preflight selects an interpreter that supports noexec syntax checks" {
+	local syntax_shell
+	syntax_shell=$(upgrade_artifact__syntax_shell)
+
+	[ -x "${syntax_shell}" ]
+	run "${syntax_shell}" -n /dev/null
+	[ "${status}" -eq 0 ]
+}
+
 @test "shell preflight preserves the caller umask" {
 	artifact="${BATS_TEST_TMPDIR}/valid-umask.ipk"
 	export PREFLIGHT_EXECUTION_MARKER="${BATS_TEST_TMPDIR}/preflight-executed"
@@ -289,7 +298,8 @@ load_candidate_verification_functions() {
 	[ "$(stat -c '%a' "${stub}")" = 700 ]
 	run grep -q '/opt/apps/mors' "${stub}"
 	[ "${status}" -ne 0 ]
-	/bin/sh -n "${stub}"
+	syntax_shell=$(upgrade_artifact__syntax_shell)
+	"${syntax_shell}" -n "${stub}"
 	run /bin/sh "${stub}"
 	[ "${status}" -eq 0 ]
 	grep -Fq "install --force-reinstall --force-downgrade ${rollback}" "${ROLLBACK_TEST_LOG}"
