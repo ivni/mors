@@ -48,6 +48,10 @@ ARG BUILDER_ID
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 WORKDIR /src/mors
 
+# GNU host tools reject UID 0 by default. The build runs inside an isolated
+# image stage and never installs into the GitHub runner host.
+ENV FORCE_UNSAFE_CONFIGURE=1
+
 COPY Makefile ./Makefile
 COPY opt ./opt
 COPY builder/entware ./builder/entware
@@ -80,6 +84,7 @@ COPY --from=prepare /opt/entware /opt/entware
 COPY --from=prepare /opt/mors-builder /opt/mors-builder
 
 ENV ENTWARE_DIR=/opt/entware
+ENV FORCE_UNSAFE_CONFIGURE=1
 ENV MORS_ENTWARE_BUILDER_ID=${BUILDER_ID}
 ENV MORS_ENTWARE_BUILDER_MANIFEST=/opt/mors-builder/manifest.env
 

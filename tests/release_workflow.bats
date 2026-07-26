@@ -94,6 +94,7 @@ setup() {
 		"${dockerfile}"
 	grep -q '^\*\*$' "${dockerfile}.dockerignore"
 	! grep -q 'TEST_INFRASTRUCTURE' "${dockerfile}.dockerignore"
+	[ "$(grep -c '^ENV FORCE_UNSAFE_CONFIGURE=1$' "${dockerfile}")" -eq 2 ]
 	grep -q 'COPY --from=prepare /opt/entware /opt/entware' "${dockerfile}"
 	! grep -q 'COPY --from=prepare /src' "${dockerfile}"
 	grep -q 'runtime-dependencies.mk' "${REPO_ROOT}/Makefile"

@@ -33,6 +33,8 @@ Workflow готовит Entware buildroot, подключает этот реп�
 
 GitHub Actions использует builder image `ghcr.io/ivni/mors-entware-builder`. Его ID вычисляется из закреплённого `ubuntu:24.04`, Dockerfile и его allowlist-only build context, lock-файла, builder-скриптов и канонического списка runtime-зависимостей `builder/entware/runtime-dependencies.mk`. Локальные файлы, `.git`, готовые пакеты и test infrastructure не отправляются в Docker build context. Если image с таким ID отсутствует, доверенный package job собирает Entware tools, toolchain и зависимости, удаляет Mors source/artifacts и публикует image в GHCR. Последующий build job получает OCI digest этого image, проверяет manifest и только затем собирает пакет.
 
+Entware host tools собираются внутри изолированного container stage под UID 0, поэтому там явно установлен `FORCE_UNSAFE_CONFIGURE=1`. Переменная действует только в builder image: она не попадает в IPK и не меняет среду роутера.
+
 Тег image служит лишь для поиска подготовленного builder. Package job всегда запускается с точной ссылкой `ghcr.io/...@sha256:...`, а release notes сохраняют этот digest вместе с SHA-256 IPK. Builder image не содержит готовый Mors IPK или подключённый `package/mors`: перед каждым запуском текущий checkout подключается заново, `package/mors` очищается и пакет создаётся из текущего SHA.
 
 Обновление `scripts/qa/entware.lock`, Dockerfile, builder-скриптов или runtime-зависимостей автоматически создаёт новый builder ID. Обычное изменение версии или runtime-кода Mors не перестраивает toolchain. GHCR image доступен release-веткам независимо от branch scope GitHub Actions cache.
