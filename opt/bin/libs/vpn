@@ -260,6 +260,36 @@ vpn__lifecycle_failure() {
 	lifecycle_transaction__failure "${reason}" "${status}" >/dev/null 2>&1 || true
 }
 
+vpn__interface_state() {
+	local interface_id
+	interface_id=${1}
+	curl -fsS "${INFACE_REQUEST}" | jq -er --arg id "${interface_id}" '
+		[.[] | select(.id == $id)]
+		| if length == 1 then .[0].state // empty else empty end
+	'
+}
+
+vpn__wait_interface_up() {
+	local interface_id attempts delay state=''
+	interface_id=${1}
+	attempts=${MORS_VPN_INTERFACE_UP_ATTEMPTS:-10}
+	delay=${MORS_VPN_INTERFACE_UP_INTERVAL:-1}
+	case "${attempts}" in
+		''|*[!0-9]*) attempts=10 ;;
+	esac
+	[ "${attempts}" -gt 0 ] || attempts=1
+	while [ "${attempts}" -gt 0 ]; do
+		state=$(vpn__interface_state "${interface_id}" 2>/dev/null || true)
+		[ "${state}" = up ] && return 0
+		attempts=$((attempts - 1))
+		[ "${attempts}" -eq 0 ] || sleep "${delay}"
+	done
+	[ -z "${ERROR_LOG_FILE:-}" ] || \
+		printf 'interface-up-timeout interface=%s last-state=%s\n' \
+			"${interface_id}" "${state:-unknown}" >>"${ERROR_LOG_FILE}"
+	return 1
+}
+
 vpn__service_stop_if_running() {
 	local service state action_status=0 log
 	service=${1}
@@ -1878,16 +1908,24 @@ ndm_gateway_change() {
 # ------------------------------------------------------------------------------------------
 
 vpn_on() {
-	local operation_result
+	local operation_result state status
 
 	inface_entware="${1}"
 	inface_cli=$(grep "${inface_entware}" "${INFACE_NAMES_FILE}" | cut -d '|' -f1 )
 	inface_cli_desc=$(grep "${inface_entware}" "${INFACE_NAMES_FILE}" | cut -d '|' -f3 )
+	if [ -z "${inface_cli}" ] || [ -z "${inface_cli_desc}" ]; then
+		vpn__lifecycle_failure setup.switch.vpn.interface_mapping 1
+		return 1
+	fi
 
 	ready "Интерфейс ${inface_cli_desc} подключен "
 	{
 		# Производим замену в библиотеке ndm основных значения интерфейсов
-		ndm_interface_change "${inface_entware}" "${inface_cli}" || return 1
+		ndm_interface_change "${inface_entware}" "${inface_cli}" || {
+			status=$?
+			vpn__lifecycle_failure setup.switch.vpn.interface_config "${status}"
+			return "${status}"
+		}
 
 		if [ "${MORS_DEFER_SYSTEM_HOOKS:-false}" != true ]; then
 			cp "/opt/apps/${APP_NAME}/etc/ndm/netfilter.d/100-vpn-mark" "/opt/etc/ndm/netfilter.d/100-vpn-mark" || return 1
@@ -1897,28 +1935,34 @@ vpn_on() {
 			chmod +x "/opt/etc/ndm/iflayerchanged.d/100-mors-vpn" || return 1
 		fi
 
-		state=$(get_value_interface_field "${inface_cli}" state) || return 1
+		state=$(vpn__interface_state "${inface_cli}") || {
+			status=$?
+			vpn__lifecycle_failure setup.switch.vpn.interface_state "${status}"
+			return "${status}"
+		}
 
 		if [ "${state}" = 'down' ]; then
-			curl -fsS -d '{"up":"true"}' "${INFACE_PART_REQUEST}/${inface_cli}" &> /dev/null || return 1
+			curl -fsS -d '{"up":"true"}' "${INFACE_PART_REQUEST}/${inface_cli}" &> /dev/null || {
+				status=$?
+				vpn__lifecycle_failure setup.switch.vpn.interface_up_request "${status}"
+				return "${status}"
+			}
 		fi
-		sleep 2
-#		connected=$(get_value_interface_field "${inface_cli}" connected)
-		connected=$(get_value_interface_field "${inface_cli}" state) || return 1
-
-#		if [ "${connected}" = 'no' ]; then
-		if [ "${connected}" = 'down' ]; then
-
+		if ! vpn__wait_interface_up "${inface_cli}"; then
 			when_bad "ОШИБКА"
 			error "Возникла ошибка при подключении интерфейса ${inface_entware}!"
 			error "Проверьте доступность сервера и настройки клиента!"
+			vpn__lifecycle_failure setup.switch.vpn.interface_up_timeout 1
 			return 1
-		else
-			update_iptables || return 1
 		fi
+		update_iptables || {
+			status=$?
+			vpn__lifecycle_failure setup.switch.vpn.dataplane "${status}"
+			return "${status}"
+		}
 	} 1> /dev/null 2> "${ERROR_LOG_FILE}"
 	operation_result=$?
-	if [ "${operation_result}" -ne 0 ] || [ -s "${ERROR_LOG_FILE}" ]; then
+	if [ "${operation_result}" -ne 0 ]; then
 		ready_status 1 "Возникла ошибка при подключении VPN соединения [${inface_cli_desc}]" "УСПЕШНО"
 		return 1
 	fi
@@ -2615,21 +2659,39 @@ cmd_interface_change() {
 
 start_vless(){
 	local _inface_entware=${1}
-	local enabled_count empty_setup=false
-	xray_version_check || return 1
-	vless_store__ensure || return 1
-	enabled_count=$(vless_store__enabled_count) || return 1
+	local enabled_count empty_setup=false status
+	xray_version_check || {
+		status=$?
+		vpn__lifecycle_failure setup.switch.vless.xray_version "${status}"
+		return "${status}"
+	}
+	vless_store__ensure || {
+		status=$?
+		vpn__lifecycle_failure setup.switch.vless.store "${status}"
+		return "${status}"
+	}
+	enabled_count=$(vless_store__enabled_count) || {
+		status=$?
+		vpn__lifecycle_failure setup.switch.vless.enabled_count "${status}"
+		return "${status}"
+	}
 	if [ "${enabled_count}" -eq 0 ] && [ "${is_install_stage:-no}" = install ]; then
 		empty_setup=true
 	elif [ "${enabled_count}" -eq 0 ]; then
 		error "Нет включённых VLESS-соединений. Выполните 'mors vless add'."
+		vpn__lifecycle_failure setup.switch.vless.no_connections 1
 		return 1
 	fi
 	if [ "${empty_setup}" = false ] && [ "$(vless_store__is_paused)" = true ]; then
 		error "VLESS приостановлен. Выполните 'mors vless resume'."
+		vpn__lifecycle_failure setup.switch.vless.paused 1
 		return 1
 	fi
-	vless_domain__apply_generated "$(vless_runtime__active_id)" false || return 1
+	vless_domain__apply_generated "$(vless_runtime__active_id)" false || {
+		status=$?
+		vpn__lifecycle_failure setup.switch.vless.config_apply "${status}"
+		return "${status}"
+	}
 
 	# Проверка конфигурации xray
 	check_xray_config=$(${XRAY} run -test -c "${VLESS_CONFIG_FILE}" 2>&1)
@@ -2643,26 +2705,48 @@ start_vless(){
 				when_ok "УСПЕШНО"
 			else
 				when_bad "ОШИБКА"
+				vpn__lifecycle_failure setup.switch.vless.xray_ready 1
 				return 1
 			fi
 		else
+			status=$?
 			when_bad "ОШИБКА"
-			return 1
+			vpn__lifecycle_failure setup.switch.vless.xray_restart "${status}"
+			return "${status}"
 		fi
-		if [ "${empty_setup}" = false ]; then
+		# Setup активирует supervisor отдельно, после проверки dataplane. Для
+		# запуска supervisor его собственный runtime-lock должен кратковременно
+		# стать внешним по отношению к setup-транзакции.
+		if [ "${empty_setup}" = false ] && [ "${is_install_stage:-no}" != install ]; then
 			[ ! -f "${VLESS_SUPERVISOR_INIT}" ] || \
-				vless_runtime__supervisor_service restart &> /dev/null || return 1
+				vless_runtime__supervisor_service restart &> /dev/null || {
+				status=$?
+				vpn__lifecycle_failure setup.switch.vless.supervisor_restart "${status}"
+				return "${status}"
+			}
 		else
 			[ ! -f "${VLESS_SUPERVISOR_INIT}" ] || \
-				vless_runtime__supervisor_service stop &> /dev/null || return 1
+				vless_runtime__supervisor_service stop &> /dev/null || {
+				status=$?
+				vpn__lifecycle_failure setup.switch.vless.supervisor_stop "${status}"
+				return "${status}"
+			}
 		fi
-		vpn_on "${_inface_entware}" &> /dev/null || return 1
+		vpn_on "${_inface_entware}" &> /dev/null || {
+			status=$?
+			vpn__lifecycle_failure setup.switch.vless.proxy_activate "${status}"
+			return "${status}"
+		}
 		if [ "${empty_setup}" = true ]; then
 			warning "VLESS ещё не настроен: трафик закрыт до выполнения 'mors vless add'."
 			return 0
 		fi
 		# Тестируем работу proxy vless
-		test_vless_proxy
+		test_vless_proxy || {
+			status=$?
+			vpn__lifecycle_failure setup.switch.vless.proxy_test "${status}"
+			return "${status}"
+		}
 
 
 	else
@@ -2670,6 +2754,7 @@ start_vless(){
 		echo -e "${BLUE}В файле ${VLESS_CONFIG_FILE} обнаружены следующие ошибки:${NOCL}"
 		print_line
 		echo -e "${RED}${check_xray_config}${NOCL}"
+		vpn__lifecycle_failure setup.switch.vless.config_test 1
 		return 1
 	fi
 }

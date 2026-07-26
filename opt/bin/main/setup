@@ -1232,6 +1232,79 @@ setup__activate_core_hooks() {
 		/opt/etc/ndm/netfilter.d/100-dns-local || return 1
 }
 
+setup__vless_supervisor_required() {
+	local enabled_count paused
+	setup__selected_interface_is_vless || return 1
+	enabled_count=$(vless_store__enabled_count) || return 2
+	[ "${enabled_count}" -gt 0 ] || return 1
+	paused=$(vless_store__is_paused) || return 2
+	[ "${paused}" = false ]
+}
+
+setup__activate_vless_supervisor_for_commit() {
+	local status
+	setup__vless_supervisor_required
+	status=$?
+	case "${status}" in
+		1) return 0 ;;
+		0) ;;
+		*)
+			vpn__lifecycle_failure setup.commit.vless_store "${status}"
+			return "${status}"
+			;;
+	esac
+	vless_runtime__supervisor_service restart || {
+		status=$?
+		vpn__lifecycle_failure setup.commit.vless_supervisor_restart "${status}"
+		return "${status}"
+	}
+	vpn__service_wait_running "${VLESS_SUPERVISOR_INIT}" || {
+		status=$?
+		vpn__lifecycle_failure setup.commit.vless_supervisor_ready "${status}"
+		return "${status}"
+	}
+}
+
+setup__activate_vless_runtime_with_lock_handoff() {
+	local activation_status reacquire_status
+	setup__vless_supervisor_required
+	activation_status=$?
+	case "${activation_status}" in
+		1) return 0 ;;
+		0) ;;
+		*)
+			vpn__lifecycle_failure setup.commit.vless_store "${activation_status}"
+			return "${activation_status}"
+			;;
+	esac
+
+	# Once release starts, ownership is no longer proven: the lock helper may
+	# fail after removing metadata or otherwise leave an indeterminate state.
+	MORS_SETUP_RUNTIME_LOCK_HELD=false
+	runtime_mutation_lock__release || {
+		activation_status=$?
+		vpn__lifecycle_failure setup.commit.runtime_lock_release "${activation_status}"
+		return "${activation_status}"
+	}
+
+	(
+		MORS_LIFECYCLE_APPLY=true
+		export MORS_LIFECYCLE_APPLY
+		setup__activate_vless_supervisor_for_commit
+	)
+	activation_status=$?
+
+	if runtime_mutation_lock__acquire_wait_or_explain \
+		'mors setup finalize' "${MORS_SETUP_RUNTIME_REACQUIRE_WAIT:-60}"; then
+		MORS_SETUP_RUNTIME_LOCK_HELD=true
+	else
+		reacquire_status=$?
+		vpn__lifecycle_failure setup.commit.runtime_lock_reacquire "${reacquire_status}"
+		return "${reacquire_status}"
+	fi
+	return "${activation_status}"
+}
+
 setup__proxy_vless_lookup() {
 	curl -fsS "${INFACE_REQUEST}" | jq -ce \
 		--arg id "${PROXY_VLESS_NAME}" \
@@ -2118,6 +2191,7 @@ setup__recover_with_runtime() {
 	return "${result}"
 }
 
+
 cmd_uninstall() {
 	lifecycle__run_locked setup__cmd_uninstall_with_runtime "$@"
 }
@@ -2159,6 +2233,7 @@ setup__cmd_install_with_runtime() {
 	local result state operation phase new_transaction
 	state=$(lifecycle_state__read) || return 4
 	new_transaction=false
+	MORS_SETUP_RUNTIME_LOCK_HELD=false
 	if lifecycle_state__has_active_marker; then
 		[ "${MORS_SETUP_RESUME:-false}" = true ] || return 3
 		operation=$(jq -er '.operation' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 4
@@ -2174,6 +2249,7 @@ setup__cmd_install_with_runtime() {
 		new_transaction=true
 	fi
 	runtime_mutation_lock__acquire_or_explain 'mors setup' || return $?
+	MORS_SETUP_RUNTIME_LOCK_HELD=true
 	if [ "${new_transaction}" = true ]; then
 		lifecycle_transaction__begin setup "${state}" ready >/dev/null || {
 			result=$?
@@ -2237,10 +2313,16 @@ setup__cmd_install_with_runtime() {
 		lifecycle_snapshot__persist_service_baseline || result=1
 	fi
 	if [ "${result}" -eq 0 ]; then
+		setup__activate_vless_runtime_with_lock_handoff || result=$?
+	fi
+	if [ "${result}" -eq 0 ]; then
 		lifecycle_transaction__finish || result=1
 		[ "${result}" -ne 0 ] || setup__print_install_completed || true
 	else
-		if setup__rollback_transaction; then
+		if [ "${MORS_SETUP_RUNTIME_LOCK_HELD}" != true ]; then
+			lifecycle_transaction__mark_recovery_required setup_runtime_lock_lost 2>/dev/null || true
+			error 'Настройка не завершена: runtime-lock не удалось вернуть для безопасного отката.'
+		elif setup__rollback_transaction; then
 			error 'Настройка не завершена. Исходное состояние восстановлено.'
 			result=2
 		else
@@ -2248,7 +2330,10 @@ setup__cmd_install_with_runtime() {
 			error 'Настройка не завершена. Новые изменения заблокированы до восстановления.'
 		fi
 	fi
-	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
+	if [ "${MORS_SETUP_RUNTIME_LOCK_HELD}" = true ]; then
+		runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
+		MORS_SETUP_RUNTIME_LOCK_HELD=false
+	fi
 	return "${result}"
 }
 
@@ -2309,4 +2394,3 @@ setup__cmd_uninstall_with_runtime() {
 	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
 	return "${result}"
 }
-

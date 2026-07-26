@@ -10,8 +10,14 @@ setup() {
 	LIFECYCLE_ROOT="${TEST_ROOT}/lifecycle"
 	mkdir -p "${TEST_ROOT}" "${LIFECYCLE_ROOT}"
 	printf '%s\n' '{"schema_version":1,"state":"ready","updated_at":"2026-07-18T00:00:00Z","source":"test"}' >"${LIFECYCLE_ROOT}/state.json"
-	cat >"${PROGRAM}" <<'EOF'
+cat >"${PROGRAM}" <<'EOF'
 #!/bin/sh
+if [ -n "${VLESS_TEST_ENV_CAPTURE:-}" ]; then
+	printf 'apply=%s\ntoken=%s\ndepth=%s\n' \
+		"${MORS_LIFECYCLE_APPLY:-missing}" \
+		"${MORS_RUNTIME_LOCK_TOKEN:-missing}" \
+		"${MORS_RUNTIME_LOCK_DEPTH:-missing}" >"${VLESS_TEST_ENV_CAPTURE}"
+fi
 mkdir -p "${VLESS_SUPERVISOR_LOCK_DIR}"
 cleanup() {
 	rm -f "${VLESS_SUPERVISOR_PID_FILE}"
@@ -68,6 +74,22 @@ run_init() {
 	run run_init status
 	[ "${status}" -eq 1 ]
 	[[ "${output}" == *dead.* ]]
+}
+
+@test "long-lived worker does not inherit temporary setup capabilities" {
+	local capture=${TEST_ROOT}/worker.env
+	export VLESS_TEST_ENV_CAPTURE=${capture}
+	export MORS_LIFECYCLE_APPLY=true
+	export MORS_RUNTIME_LOCK_TOKEN=setup-token
+	export MORS_RUNTIME_LOCK_DEPTH=1
+
+	run run_init start
+	[ "${status}" -eq 0 ]
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		[ -s "${capture}" ] && break
+		sleep 0.1
+	done
+	[ "$(cat "${capture}")" = $'apply=missing\ntoken=missing\ndepth=missing' ]
 }
 
 @test "stale reused PID never signals an unrelated process" {

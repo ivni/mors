@@ -130,6 +130,15 @@ fail-closed конфигурацией без внешних outbound, lifecycle
 подменяется provisioning интерфейса и остаётся отдельной предварительной
 операцией.
 
+Созданный `Proxy21` считается активированным только после ограниченного
+наблюдения состояния `up`; фиксированная задержка не является доказательством.
+При непустом VLESS-реестре supervisor запускается после проверки основного
+dataplane в отдельной commit-фазе: setup освобождает runtime-mutation lock,
+подтверждает устойчивый процесс supervisor и ограниченно получает lock обратно
+до durable commit. Ошибка любого шага остаётся откатываемой и записывается в
+journal как точный substep. Долгоживущий worker не наследует временные
+`MORS_LIFECYCLE_APPLY` и lock-токены setup.
+
 До commit hooks находятся только под `/opt/apps/mors`. Boot/init в
 `unconfigured` выполняют no-op. Все NDM/init/cron entrypoints дополнительно
 проверяют lifecycle gate; временный apply-доступ действует только в дочернем

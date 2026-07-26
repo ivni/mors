@@ -138,12 +138,15 @@ prepare_runtime_script() {
 }
 
 @test "vpn_on returns the dataplane rebuild error" {
+	load_vpn_function vpn__lifecycle_failure
+	load_vpn_function vpn__interface_state
+	load_vpn_function vpn__wait_interface_up
 	load_vpn_function vpn_on
 	printf '%s\n' 'Proxy1|tun0|Test VPN' >"${BATS_TEST_TMPDIR}/interfaces"
 	ready() { :; }
 	ready_status() { printf 'ready-status:%s\n' "$1" >>"${EVENTS}"; }
 	ndm_interface_change() { printf 'interface\n' >>"${EVENTS}"; }
-	get_value_interface_field() { printf '%s\n' up; }
+	vpn__interface_state() { printf '%s\n' up; }
 	update_iptables() { printf 'dataplane\n' >>"${EVENTS}"; return 19; }
 	sleep() { :; }
 	INFACE_NAMES_FILE=${BATS_TEST_TMPDIR}/interfaces
@@ -154,6 +157,70 @@ prepare_runtime_script() {
 	[ "${status}" -ne 0 ]
 	grep -q '^interface$' "${EVENTS}"
 	grep -q '^dataplane$' "${EVENTS}"
+}
+
+@test "vpn_on waits for a newly created interface to become up" {
+	load_vpn_function vpn__lifecycle_failure
+	load_vpn_function vpn__interface_state
+	load_vpn_function vpn__wait_interface_up
+	load_vpn_function vpn_on
+	local calls=${BATS_TEST_TMPDIR}/interface-state.calls
+	printf '%s\n' 0 >"${calls}"
+	printf '%s\n' 'Proxy21|t2s21|Mors VLESS' >"${BATS_TEST_TMPDIR}/interfaces"
+	ready() { :; }
+	ready_status() { :; }
+	ndm_interface_change() { :; }
+	vpn__interface_state() {
+		local count
+		count=$(cat "${calls}")
+		count=$((count + 1))
+		printf '%s\n' "${count}" >"${calls}"
+		[ "${count}" -lt 4 ] && printf '%s\n' down || printf '%s\n' up
+	}
+	curl() { :; }
+	update_iptables() { printf 'dataplane\n' >>"${EVENTS}"; }
+	sleep() { :; }
+	INFACE_NAMES_FILE=${BATS_TEST_TMPDIR}/interfaces
+	INFACE_PART_REQUEST=http://router/interface
+	ERROR_LOG_FILE=${BATS_TEST_TMPDIR}/vpn.error
+	MORS_DEFER_SYSTEM_HOOKS=true
+	MORS_VPN_INTERFACE_UP_ATTEMPTS=5
+
+	run vpn_on t2s21
+
+	[ "${status}" -eq 0 ]
+	[ "$(cat "${EVENTS}")" = dataplane ]
+	[ "$(cat "${calls}")" -eq 4 ]
+}
+
+@test "vpn_on records an interface readiness timeout as the first setup failure" {
+	load_vpn_function vpn__lifecycle_failure
+	load_vpn_function vpn__interface_state
+	load_vpn_function vpn__wait_interface_up
+	load_vpn_function vpn_on
+	printf '%s\n' 'Proxy21|t2s21|Mors VLESS' >"${BATS_TEST_TMPDIR}/interfaces"
+	ready() { :; }
+	ready_status() { :; }
+	when_bad() { :; }
+	error() { :; }
+	ndm_interface_change() { :; }
+	vpn__interface_state() { printf '%s\n' down; }
+	curl() { :; }
+	update_iptables() { printf 'unexpected-dataplane\n' >>"${EVENTS}"; }
+	lifecycle_transaction__failure() { printf '%s:%s\n' "$1" "$2" >>"${EVENTS}"; }
+	sleep() { :; }
+	INFACE_NAMES_FILE=${BATS_TEST_TMPDIR}/interfaces
+	INFACE_PART_REQUEST=http://router/interface
+	ERROR_LOG_FILE=${BATS_TEST_TMPDIR}/vpn.error
+	MORS_DEFER_SYSTEM_HOOKS=true
+	MORS_LIFECYCLE_APPLY=true
+	MORS_VPN_INTERFACE_UP_ATTEMPTS=2
+
+	run vpn_on t2s21
+
+	[ "${status}" -ne 0 ]
+	[ "$(cat "${EVENTS}")" = 'setup.switch.vpn.interface_up_timeout:1' ]
+	grep -q 'interface-up-timeout interface=Proxy21 last-state=down' "${ERROR_LOG_FILE}"
 }
 
 @test "Shadowsocks reset and switch propagate dataplane and interface failures" {

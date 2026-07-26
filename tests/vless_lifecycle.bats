@@ -92,6 +92,7 @@ assert_no_direct_init_action() {
 	grep -q 'empty_setup=true' "${vpn}"
 	grep -q "VLESS ещё не настроен: трафик закрыт" "${vpn}"
 	grep -q 'vless_domain__apply_generated.*false' "${vpn}"
+	grep -q 'is_install_stage:-no.*!= install' "${vpn}"
 }
 
 @test "Xray candidate and rollback configs retain a JSON extension" {
@@ -139,6 +140,89 @@ assert_no_direct_init_action() {
 	finish_line=$(grep -n 'lifecycle_transaction__finish' <<<"${wrapper}" | cut -d: -f1)
 	completed_line=$(grep -n 'setup__print_install_completed' <<<"${wrapper}" | cut -d: -f1)
 	[ "${finish_line}" -lt "${completed_line}" ]
+}
+
+@test "setup activates a populated VLESS supervisor through a bounded lock handoff before commit" {
+	local setup=${REPO_ROOT}/opt/bin/main/setup
+	local wrapper verify_line activate_line finish_line
+	wrapper=$(sed -n '/^setup__cmd_install_with_runtime()/,/^}/p' "${setup}" | tr -d '\r')
+	verify_line=$(grep -n 'setup__verify_committed' <<<"${wrapper}" | cut -d: -f1)
+	activate_line=$(grep -n 'setup__activate_vless_runtime_with_lock_handoff' <<<"${wrapper}" | cut -d: -f1)
+	finish_line=$(grep -n 'lifecycle_transaction__finish' <<<"${wrapper}" | cut -d: -f1)
+	[ "${verify_line}" -lt "${activate_line}" ]
+	[ "${activate_line}" -lt "${finish_line}" ]
+
+	local handoff
+	handoff=$(function_body "${setup}" setup__activate_vless_runtime_with_lock_handoff)
+	grep -q 'runtime_mutation_lock__release' <<<"${handoff}"
+	grep -q 'runtime_mutation_lock__acquire_wait_or_explain' <<<"${handoff}"
+	grep -q 'MORS_SETUP_RUNTIME_REACQUIRE_WAIT:-60' <<<"${handoff}"
+	grep -q 'setup.commit.runtime_lock_reacquire' <<<"${handoff}"
+}
+
+@test "setup lock handoff reacquires ownership after a supervisor activation failure" {
+	local setup=${REPO_ROOT}/opt/bin/main/setup
+	local events=${BATS_TEST_TMPDIR}/handoff.events
+	eval "$(function_body "${setup}" setup__activate_vless_supervisor_for_commit)"
+	eval "$(function_body "${setup}" setup__activate_vless_runtime_with_lock_handoff)"
+	: >"${events}"
+	setup__vless_supervisor_required() { return 0; }
+	runtime_mutation_lock__release() {
+		printf 'release\n' >>"${events}"
+		unset MORS_RUNTIME_LOCK_TOKEN MORS_RUNTIME_LOCK_DEPTH
+	}
+	vless_runtime__supervisor_service() {
+		printf 'activate:apply=%s:token=%s\n' \
+			"${MORS_LIFECYCLE_APPLY:-false}" "${MORS_RUNTIME_LOCK_TOKEN:-missing}" >>"${events}"
+		return 7
+	}
+	vpn__service_wait_running() { printf 'unexpected-wait\n' >>"${events}"; }
+	runtime_mutation_lock__acquire_wait_or_explain() {
+		printf 'reacquire:%s:%s\n' "$1" "$2" >>"${events}"
+	}
+	vpn__lifecycle_failure() {
+		printf 'failure:%s:%s\n' "$1" "$2" >>"${events}"
+	}
+	MORS_RUNTIME_LOCK_TOKEN=setup-token
+	MORS_RUNTIME_LOCK_DEPTH=1
+	MORS_SETUP_RUNTIME_LOCK_HELD=true
+
+	run setup__activate_vless_runtime_with_lock_handoff
+
+	[ "${status}" -eq 7 ]
+	[ "$(cat "${events}")" = $'release\nactivate:apply=true:token=missing\nfailure:setup.commit.vless_supervisor_restart:7\nreacquire:mors setup finalize:60' ]
+}
+
+@test "setup treats runtime lock ownership as unknown before a failed release" {
+	local setup=${REPO_ROOT}/opt/bin/main/setup
+	local events=${BATS_TEST_TMPDIR}/handoff-release.events
+	eval "$(function_body "${setup}" setup__activate_vless_runtime_with_lock_handoff)"
+	: >"${events}"
+	setup__vless_supervisor_required() { return 0; }
+	runtime_mutation_lock__release() {
+		printf 'release:held=%s\n' "${MORS_SETUP_RUNTIME_LOCK_HELD}" >>"${events}"
+		return 9
+	}
+	setup__activate_vless_supervisor_for_commit() {
+		printf 'unexpected-activate\n' >>"${events}"
+	}
+	runtime_mutation_lock__acquire_wait_or_explain() {
+		printf 'unexpected-reacquire\n' >>"${events}"
+	}
+	vpn__lifecycle_failure() {
+		printf 'failure:%s:%s\n' "$1" "$2" >>"${events}"
+	}
+	MORS_SETUP_RUNTIME_LOCK_HELD=true
+
+	run setup__activate_vless_runtime_with_lock_handoff
+
+	[ "${status}" -eq 9 ]
+	[ "$(cat "${events}")" = $'release:held=false\nfailure:setup.commit.runtime_lock_release:9' ]
+}
+
+@test "supervisor worker drops temporary setup and runtime capabilities" {
+	local init=${REPO_ROOT}/opt/etc/init.d/S25mors-vless
+	grep -q 'unset MORS_LIFECYCLE_APPLY MORS_RUNTIME_LOCK_TOKEN MORS_RUNTIME_LOCK_DEPTH' "${init}"
 }
 
 @test "managed Proxy21 uses its Keenetic system interface for policy routing" {
