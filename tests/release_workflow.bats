@@ -89,6 +89,8 @@ setup() {
 	grep -q -- '--platform linux/amd64' "${workflow}"
 	grep -q 'image: ${{ needs.builder.outputs.image }}' "${workflow}"
 	grep -q 'bash scripts/qa/verify-entware-builder.sh' "${workflow}"
+	grep -q 'bash scripts/qa/entware-builder-package.sh' "${workflow}"
+	! grep -q 'run: bash scripts/qa/entware-build.sh' "${workflow}"
 	grep -q 'builder_image:' "${workflow}"
 	! grep -q 'actions/cache@' "${workflow}"
 	grep -Eq '^FROM ubuntu:24\.04@sha256:[0-9a-f]{64} AS runtime-base$' \
@@ -103,6 +105,10 @@ setup() {
 	grep -q 'runtime-dependencies.mk' "${REPO_ROOT}/Makefile"
 	grep -q 'make package/mors/clean' "${REPO_ROOT}/scripts/qa/entware-build.sh"
 	grep -q 'rm -f package/mors' "${REPO_ROOT}/scripts/qa/entware-build.sh"
+	grep -q -- '-C package/mors' \
+		"${REPO_ROOT}/scripts/qa/entware-builder-package.sh"
+	! grep -q 'package/mors/compile' \
+		"${REPO_ROOT}/scripts/qa/entware-builder-package.sh"
 }
 
 @test "release publication depends on QA package and artifact gates" {

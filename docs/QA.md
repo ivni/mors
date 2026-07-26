@@ -27,13 +27,15 @@ bats tests
 
 `.github/workflows/package.yml` запускается вручную или как обязательный reusable gate из release workflow. Push тега намеренно не запускает сборку: release tag создаётся только после успешного кандидата.
 
-Workflow готовит Entware buildroot, подключает этот репозиторий как `package/mors`, явно собирает host `opkg`, с изолированной пустой host-конфигурацией проверяет, что prerelease-версия сортируется ниже соответствующей стабильной версии, собирает `.ipk` и публикует `packages/mors_*_all.ipk` как artifact. Ожидаемое имя вычисляется из `PKG_VERSION` и `PKG_RELEASE`; отдельной жёстко заданной копии версии в build-скрипте нет.
+Workflow разрешает или один раз готовит immutable Entware builder, проверяет его contract, собирает Mors из текущего checkout и публикует `packages/mors_*_all.ipk` как artifact. При холодной подготовке image отдельно собирается host `opkg` и с изолированной пустой host-конфигурацией проверяется, что prerelease-версия сортируется ниже соответствующей стабильной версии. Ожидаемое имя IPK вычисляется из `PKG_VERSION` и `PKG_RELEASE`; отдельной жёстко заданной копии версии в build-скрипте нет.
 
 Ревизии Entware buildroot и всех feeds закреплены в `scripts/qa/entware.lock`. Перед индексацией существующие feeds проверяются на отсутствие локальных изменений и переключаются на точные lock-ревизии, после индексации все HEAD проверяются повторно.
 
 GitHub Actions использует builder image `ghcr.io/ivni/mors-entware-builder`. Его ID вычисляется из закреплённого `ubuntu:24.04`, Dockerfile и его allowlist-only build context, lock-файла, builder-скриптов и канонического списка runtime-зависимостей `builder/entware/runtime-dependencies.mk`. Локальные файлы, `.git`, готовые пакеты и test infrastructure не отправляются в Docker build context. Если image с таким ID отсутствует, доверенный package job собирает Entware tools, toolchain и зависимости, удаляет Mors source/artifacts и публикует image в GHCR. Последующий build job получает OCI digest этого image, проверяет manifest и только затем собирает пакет.
 
-Entware host tools собираются внутри изолированного container stage под UID 0, поэтому там явно установлен `FORCE_UNSAFE_CONFIGURE=1`. Переменная действует только в builder image: она не попадает в IPK и не меняет среду роутера. Buildroot создаётся непосредственно в финальном image stage: перенос через `COPY --from` запрещён, поскольку меняет значимые для OpenWrt make метаданные каталогов и вызывает повторную сборку tools/packages. Исходники Mors доступны только через read-only BuildKit bind mounts в одном `RUN` и не сохраняются в OCI layers.
+Entware host tools собираются внутри изолированного container stage под UID 0, поэтому там явно установлен `FORCE_UNSAFE_CONFIGURE=1`. Переменная действует только в builder image: она не попадает в IPK и не меняет среду роутера. Buildroot создаётся непосредственно в финальном image stage, а исходники Mors доступны только через read-only BuildKit bind mounts в одном `RUN` и не сохраняются в OCI layers.
+
+Обычный package job не запускает верхнеуровневый `make package/mors/compile`: OpenWrt при каждом таком вызове обновляет общие `.prepared` gates и повторно обходит уже собранные tools и runtime-зависимости. После fail-closed проверки image скрипт `scripts/qa/entware-builder-package.sh` создаёт отдельное allowlist-only дерево исходников (`Makefile`, `opt`, канонический dependency-файл) и вызывает точный package submake Mors. Verifier предварительно подтверждает host `bash`/`fakeroot`/`patchelf`, единственные aarch64 toolchain/target и installed stamp каждой канонической runtime-зависимости. Сам Mors очищается и собирается заново из текущего checkout; чужие dependency targets не переаттестовываются и не компилируются повторно.
 
 Тег image служит лишь для поиска подготовленного builder. Package job всегда запускается с точной ссылкой `ghcr.io/...@sha256:...`, а release notes сохраняют этот digest вместе с SHA-256 IPK. Builder image не содержит готовый Mors IPK или подключённый `package/mors`: перед каждым запуском текущий checkout подключается заново, `package/mors` очищается и пакет создаётся из текущего SHA.
 
@@ -61,7 +63,7 @@ bash scripts/qa/entware-builder-id.sh
 bash scripts/qa/entware-builder-id.sh --manifest
 ```
 
-`scripts/qa/verify-entware-builder.sh` предназначен для запуска внутри builder image. Проверка fail-closed сверяет ID, lock/dependency digests, Entware HEAD, host `opkg`, aarch64 toolchain и отсутствие старых Mors source/artifacts.
+`scripts/qa/verify-entware-builder.sh` предназначен для запуска внутри builder image. Проверка fail-closed сверяет ID, lock/dependency digests, Entware HEAD, обязательные host tools, единственные aarch64 toolchain/target, installed stamps полного runtime dependency set и отсутствие старых Mors source/artifacts.
 
 ## Release Gate
 

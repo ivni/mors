@@ -75,9 +75,54 @@ host_opkg="$(
 )"
 [ -n "${host_opkg}" ] && [ -x "${host_opkg}" ] ||
 	{ echo 'Entware builder has no executable host opkg.' >&2; exit 1; }
-find "${entware_dir}/staging_dir" -maxdepth 1 -type d \
-	-name 'toolchain-aarch64*' -print -quit | grep -q . ||
+for host_tool in bash fakeroot patchelf; do
+	[ -x "${entware_dir}/staging_dir/host/bin/${host_tool}" ] ||
+		{
+			echo "Entware builder has no executable host ${host_tool}." >&2
+			exit 1
+		}
+done
+
+mapfile -t toolchain_dirs < <(
+	find "${entware_dir}/staging_dir" -maxdepth 1 -type d \
+		-name 'toolchain-aarch64*' -print
+)
+[ "${#toolchain_dirs[@]}" -eq 1 ] ||
 	{ echo 'Entware builder has no aarch64 toolchain.' >&2; exit 1; }
+mapfile -t target_dirs < <(
+	find "${entware_dir}/staging_dir" -maxdepth 1 -type d \
+		-name 'target-aarch64*' -print
+)
+[ "${#target_dirs[@]}" -eq 1 ] ||
+	{ echo 'Entware builder has no unique aarch64 target staging tree.' >&2; exit 1; }
+mapfile -t root_stamp_dirs < <(
+	find "${target_dirs[0]}" -mindepth 2 -maxdepth 2 -type d \
+		-path '*/root-*/stamp' -print
+)
+[ "${#root_stamp_dirs[@]}" -eq 1 ] ||
+	{ echo 'Entware builder has no unique target root stamp directory.' >&2; exit 1; }
+
+runtime_dependencies="$(
+	sed -n 's/^MORS_RUNTIME_DEPENDS:=//p' \
+		"${repo_root}/builder/entware/runtime-dependencies.mk"
+)"
+[ -n "${runtime_dependencies}" ] ||
+	{ echo 'Mors runtime dependency set is empty.' >&2; exit 1; }
+for dependency_token in ${runtime_dependencies}; do
+	case "${dependency_token}" in
+		+[a-zA-Z0-9._+-]*) dependency="${dependency_token#+}" ;;
+		*)
+			echo "Unsupported Mors runtime dependency token: ${dependency_token}" >&2
+			exit 1
+			;;
+	esac
+	dependency_stamp="${root_stamp_dirs[0]}/.${dependency}_installed"
+	[ -f "${dependency_stamp}" ] && [ ! -L "${dependency_stamp}" ] ||
+		{
+			echo "Entware builder dependency is not installed: ${dependency}" >&2
+			exit 1
+		}
+done
 
 [ ! -e "${entware_dir}/package/mors" ] ||
 	{ echo 'Entware builder contains a stale package/mors source.' >&2; exit 1; }

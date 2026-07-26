@@ -73,6 +73,7 @@ required_paths=(
 	tests/entware_builder.bats
 	scripts/qa/opkg-version-order.sh
 	scripts/qa/entware-builder-id.sh
+	scripts/qa/entware-builder-package.sh
 	scripts/qa/verify-entware-builder.sh
 	builder/entware/Dockerfile
 	builder/entware/Dockerfile.dockerignore
