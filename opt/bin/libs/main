@@ -11,6 +11,7 @@
 #	Лицензия: Apache License 2.0
 # ------------------------------------------------------------------------------------------
 . /opt/apps/mors/bin/libs/service_action
+. /opt/apps/mors/bin/libs/interaction
 
 RED="\033[1;31m";
 GREEN="\033[1;32m";

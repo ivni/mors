@@ -64,6 +64,7 @@ setup() {
 		'Architecture: all' >"${control_dir}/control"
 	: >"${data_dir}/opt/apps/mors/bin/mors"
 	: >"${data_dir}/opt/apps/mors/bin/libs/main"
+	: >"${data_dir}/opt/apps/mors/bin/libs/interaction"
 	: >"${data_dir}/opt/apps/mors/bin/libs/test"
 	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry"
 	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_runtime"
@@ -90,6 +91,18 @@ setup() {
 	grep -q '^control_version=9.9.9~beta1-4$' "${output_file}"
 	grep -q '^asset_name=mors_9.9.9.beta1-4_all.ipk$' "${output_file}"
 	grep -Eq '^sha256=[0-9A-F]{64}$' "${output_file}"
+
+	rm -f "${data_dir}/opt/apps/mors/bin/libs/interaction"
+	tar -czf "${outer_dir}/data.tar.gz" -C "${data_dir}" ./opt
+	(
+		cd "${outer_dir}"
+		tar -czf "${artifact_dir}/mors_${version}_all.ipk" \
+			./debian-binary ./control.tar.gz ./data.tar.gz
+	)
+	run bash "${REPO_ROOT}/scripts/qa/verify-release-artifact.sh" \
+		"${artifact_dir}" "${version}" "${output_dir}" "${output_file}"
+	[ "${status}" -ne 0 ]
+	[[ "${output}" == *'Release package is missing ./opt/apps/mors/bin/libs/interaction.'* ]]
 }
 
 @test "tag pushes no longer build packages after the fact" {

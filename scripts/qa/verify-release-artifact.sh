@@ -63,6 +63,7 @@ data_members="$(tar -tzf "${tmp_dir}/data.tar.gz")"
 for required_member in \
 	./opt/apps/mors/bin/mors \
 	./opt/apps/mors/bin/libs/main \
+	./opt/apps/mors/bin/libs/interaction \
 	./opt/apps/mors/bin/libs/test \
 	./opt/apps/mors/bin/libs/telemetry \
 	./opt/apps/mors/bin/libs/telemetry_runtime \

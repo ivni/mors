@@ -2097,8 +2097,29 @@ setup_cli__parse_options() {
 	done
 }
 
+setup__interactive_apply() {
+	local plan_status confirm_status
+	setup_plan__interactive
+	plan_status=$?
+	[ "${plan_status}" -eq 0 ] || {
+		error 'Не удалось выбрать безопасный setup plan.'
+		return "${plan_status}"
+	}
+	setup_plan__print human
+	cli_confirm__ask 'Продолжить настройку?'
+	confirm_status=$?
+	case "${confirm_status}" in
+		0) cmd_install ;;
+		1)
+			echo 'Настройка отменена. Изменения не выполнены.'
+			return 0
+			;;
+		*) return "${confirm_status}" ;;
+	esac
+}
+
 cmd_setup_cli() {
-	local action answer phase operation format plan_status
+	local action phase operation format
 	action=${1:-interactive}
 	case "${action}" in
 		plan)
@@ -2158,19 +2179,7 @@ cmd_setup_cli() {
 				error 'В неинтерактивном режиме используйте mors setup apply --interface ID --dns BACKEND --yes.'
 				return 64
 			}
-			setup_plan__interactive
-			plan_status=$?
-			[ "${plan_status}" -eq 0 ] || {
-				error 'Не удалось выбрать безопасный setup plan.'
-				return "${plan_status}"
-			}
-			setup_plan__print human
-			printf 'Продолжить настройку? [y/N]: '
-			IFS= read -r answer || return 64
-			case "${answer}" in
-				y|Y|yes|YES|Yes|да|Да|ДА) cmd_install ;;
-				*) echo 'Настройка отменена. Изменения не выполнены.' ;;
-			esac
+			setup__interactive_apply
 			;;
 		*)
 			error "Неизвестное действие setup: ${action}."
@@ -2217,8 +2226,48 @@ cmd_uninstall() {
 	lifecycle__run_locked setup__cmd_uninstall_with_runtime "$@"
 }
 
+setup__confirm_uninstall() {
+	local purge suffix confirm_status
+	purge=${1:-false}
+	suffix=''
+	[ "${purge}" != true ] || suffix=' вместе с пользовательскими данными'
+
+	cli_confirm__ask "Удалить Mors${suffix}?"
+	confirm_status=$?
+	case "${confirm_status}" in
+		0) return 0 ;;
+		1)
+			echo 'Удаление отменено. Изменения не выполнены.'
+			return 1
+			;;
+		*) return "${confirm_status}" ;;
+	esac
+}
+
+setup__run_uninstall() {
+	local purge
+	purge=${1:-false}
+	if [ "${purge}" = true ]; then
+		cmd_uninstall full yes
+	else
+		cmd_uninstall '' yes
+	fi
+}
+
+setup__interactive_uninstall() {
+	local purge confirm_status
+	purge=${1:-false}
+	setup__confirm_uninstall "${purge}"
+	confirm_status=$?
+	case "${confirm_status}" in
+		0) setup__run_uninstall "${purge}" ;;
+		1) return 0 ;;
+		*) return "${confirm_status}" ;;
+	esac
+}
+
 cmd_uninstall_cli() {
-	local purge=false confirmed=false argument answer
+	local purge=false confirmed=false argument
 	# Deprecated compatibility for the previous package/MOLOT contract.
 	[ "${1:-}" = full ] && purge=true
 	[ "${2:-}" = yes ] && confirmed=true
@@ -2240,14 +2289,10 @@ cmd_uninstall_cli() {
 			error 'В неинтерактивном режиме для удаления требуется --yes.'
 			return 64
 		}
-		printf 'Удалить Mors%s? [y/N]: ' "$([ "${purge}" = true ] && printf ' вместе с пользовательскими данными')"
-		IFS= read -r answer || return 64
-		case "${answer}" in
-			y|Y|yes|YES|Yes|да|Да|ДА) confirmed=true ;;
-			*) echo 'Удаление отменено. Изменения не выполнены.'; return 0 ;;
-		esac
+		setup__interactive_uninstall "${purge}"
+		return $?
 	fi
-	[ "${purge}" = true ] && cmd_uninstall full yes || cmd_uninstall '' yes
+	setup__run_uninstall "${purge}"
 }
 
 setup__cmd_install_with_runtime() {

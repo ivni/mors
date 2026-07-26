@@ -29,6 +29,23 @@ ssh_opts=(-p "${router_port}" -o StrictHostKeyChecking=accept-new)
 staging_dir="$(mktemp -d)"
 trap 'rm -rf -- "${staging_dir}"' EXIT
 
+package_version() {
+	local package_path=$1 extract_dir=$2 version
+	mkdir -p "${extract_dir}"
+	tar -xzf "${package_path}" -C "${extract_dir}" ./control.tar.gz
+	tar -xzf "${extract_dir}/control.tar.gz" -C "${extract_dir}" ./control
+	version="$(sed -n 's/^Version: //p; /^Version: /q' "${extract_dir}/control" | tr -d '\r')"
+	case "${version}" in
+		''|*[!0-9A-Za-z.+~:_-]*)
+			echo "Invalid package version in ${package_path}" >&2
+			return 1
+			;;
+	esac
+	printf '%s\n' "${version}"
+}
+
+current_version="$(package_version "${IPK_PATH}" "${staging_dir}/current-control")"
+legacy_version="$(package_version "${LEGACY_IPK_PATH}" "${staging_dir}/legacy-control")"
 cp -f "${IPK_PATH}" "${staging_dir}/${current_name}"
 cp -f "${LEGACY_IPK_PATH}" "${staging_dir}/${legacy_name}"
 (
@@ -46,7 +63,7 @@ scp -O -P "${router_port}" \
 	"${ssh_target}:${remote_dir}/"
 
 ssh "${ssh_opts[@]}" "${ssh_target}" \
-	"CURRENT_PACKAGE='${remote_dir}/${current_name}' LEGACY_PACKAGE='${remote_dir}/${legacy_name}' sh -s" <<'REMOTE'
+	"CURRENT_PACKAGE='${remote_dir}/${current_name}' LEGACY_PACKAGE='${remote_dir}/${legacy_name}' CURRENT_VERSION='${current_version}' LEGACY_VERSION='${legacy_version}' sh -s" <<'REMOTE'
 set -eu
 
 fail() {
@@ -215,14 +232,14 @@ prepare_shared_fixture /opt/etc/adblock/sources.list adblock-sources
 prepare_shared_fixture /opt/etc/adblock/exception.list adblock-exception
 
 opkg install "${LEGACY_PACKAGE}"
-[ "$(opkg status mors | awk -F': ' '/^Version:/{print $2; exit}')" = '1.3.0~beta10-1' ]
+[ "$(opkg status mors | awk -F': ' '/^Version:/{print $2; exit}')" = "${LEGACY_VERSION}" ]
 [ -f /opt/apps/mors/bin/libs/ndm ]
 [ -f /opt/apps/mors/etc/ndm/ndm ]
 snapshot "${remote_dir}/legacy-installed"
 require_passive_snapshot "${remote_dir}/legacy-installed"
 
 mors update apply "${CURRENT_PACKAGE}" --rollback-ipk "${LEGACY_PACKAGE}" --yes
-[ "$(opkg status mors | awk -F': ' '/^Version:/{print $2; exit}')" = '1.3.0~rc1-1' ]
+[ "$(opkg status mors | awk -F': ' '/^Version:/{print $2; exit}')" = "${CURRENT_VERSION}" ]
 [ -f /opt/apps/mors/bin/libs/ndm ]
 [ ! -e /opt/apps/mors/etc/ndm/ndm ]
 [ -s /opt/etc/.mors/ownership/package-ndm.cksum ]

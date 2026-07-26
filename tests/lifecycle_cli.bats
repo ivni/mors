@@ -121,7 +121,12 @@ setup() {
 @test "router smoke upgrades the legacy package and proves full purge" {
 	local smoke=${REPO_ROOT}/scripts/qa/router-smoke.sh workflow=${REPO_ROOT}/.github/workflows/router-smoke.yml
 	grep -Fq ': "${LEGACY_IPK_PATH:?LEGACY_IPK_PATH is required}"' "${smoke}"
+	grep -Fq 'current_version="$(package_version "${IPK_PATH}"' "${smoke}"
+	grep -Fq "CURRENT_VERSION='\${current_version}' LEGACY_VERSION='\${legacy_version}'" "${smoke}"
 	grep -Fq 'mors update apply "${CURRENT_PACKAGE}" --rollback-ipk "${LEGACY_PACKAGE}" --yes' "${smoke}"
+	grep -Fq '= "${CURRENT_VERSION}"' "${smoke}"
+	grep -Fq '= "${LEGACY_VERSION}"' "${smoke}"
+	! grep -Fq "1.3.0~rc1-" "${smoke}"
 	grep -Fq "[ ! -e /opt/apps/mors/etc/ndm/ndm ]" "${smoke}"
 	grep -Fq 'require_passive_snapshot "${remote_dir}/removed"' "${smoke}"
 	grep -Fq 'verify_shared_fixture adblock-sources' "${smoke}"

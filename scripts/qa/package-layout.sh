@@ -8,6 +8,7 @@ required_paths=(
 	Makefile
 	opt/bin/mors
 	opt/bin/libs/main
+	opt/bin/libs/interaction
 	opt/bin/libs/mors_purge
 	opt/bin/libs/ndm
 	opt/bin/libs/ownership
@@ -60,6 +61,7 @@ required_paths=(
 	docs/lifecycle-architecture.md
 	docs/telemetry-architecture.md
 	tests/setup_plan.bats
+	tests/interaction.bats
 	tests/setup_dns.bats
 	tests/setup_backup.bats
 	tests/setup_dataplane.bats

@@ -1,0 +1,80 @@
+#!/bin/sh
+
+CLI_CONFIRM_MAX_ATTEMPTS=3
+CLI_CONFIRM_MAX_BYTES=64
+
+cli_confirm__strip_padding() {
+	local value previous carriage_return
+	value=$1
+	carriage_return=$(printf '\r')
+
+	while :; do
+		previous=$value
+		while [ "${value# }" != "${value}" ]; do
+			value=${value# }
+		done
+		while [ "${value% }" != "${value}" ]; do
+			value=${value% }
+		done
+		case "${value}" in
+			*"${carriage_return}") value=${value%"${carriage_return}"} ;;
+		esac
+		[ "${value}" != "${previous}" ] || break
+	done
+
+	printf '%s' "${value}"
+}
+
+cli_confirm__normalize() {
+	local value length escape paste_begin paste_end
+	value=$1
+	length=$(LC_ALL=C printf '%s' "${value}" | wc -c) || return 1
+	[ "${length}" -le "${CLI_CONFIRM_MAX_BYTES}" ] || return 1
+
+	value=$(cli_confirm__strip_padding "${value}") || return 1
+	escape=$(printf '\033')
+	paste_begin="${escape}[200~"
+	paste_end="${escape}[201~"
+	case "${value}" in
+		"${paste_begin}"*"${paste_end}")
+			value=${value#"${paste_begin}"}
+			value=${value%"${paste_end}"}
+			value=$(cli_confirm__strip_padding "${value}") || return 1
+			;;
+	esac
+
+	if printf '%s' "${value}" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+		return 1
+	fi
+	printf '%s' "${value}"
+}
+
+cli_confirm__ask() {
+	local prompt answer normalized attempt normalize_status
+	prompt=$1
+	attempt=1
+
+	while [ "${attempt}" -le "${CLI_CONFIRM_MAX_ATTEMPTS}" ]; do
+		printf '%s [y/N]: ' "${prompt}"
+		if ! IFS= read -r answer; then
+			printf '%s\n' 'Не удалось прочитать ответ. Изменения не выполнены.' >&2
+			return 64
+		fi
+
+		normalized=$(cli_confirm__normalize "${answer}")
+		normalize_status=$?
+		if [ "${normalize_status}" -eq 0 ]; then
+			case "${normalized}" in
+				y|Y|yes|YES|Yes|да|Да|ДА) return 0 ;;
+				''|n|N|no|NO|No|нет|Нет|НЕТ) return 1 ;;
+			esac
+		fi
+
+		printf '%s\n' \
+			'Ответ не распознан. Введите y для продолжения или n для отмены.' >&2
+		attempt=$((attempt + 1))
+	done
+
+	printf '%s\n' 'Допустимое число попыток исчерпано. Изменения не выполнены.' >&2
+	return 64
+}
