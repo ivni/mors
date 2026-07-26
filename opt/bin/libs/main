@@ -10,6 +10,8 @@
 #	Дата: 21/05/2022
 #	Лицензия: Apache License 2.0
 # ------------------------------------------------------------------------------------------
+. /opt/apps/mors/bin/libs/service_action
+
 RED="\033[1;31m";
 GREEN="\033[1;32m";
 BLUE="\033[36m";
@@ -45,6 +47,7 @@ SHADOWSOCKS_CONF=/opt/etc/shadowsocks.json
 DNSMASQ_IPSET_HOSTS=/opt/etc/dnsmasq.d/mors.dnsmasq
 DNSMASQ_CONFIG=/opt/etc/dnsmasq.conf
 DNSCRYPT_CONFIG=/opt/etc/dnscrypt-proxy.toml
+MORS_HOSTS_FILE=/opt/etc/hosts
 ADBLOCK_LIST_EXCEPTION=/opt/etc/adblock/exception.list
 ADBLOCK_HOSTS_FILE=/opt/etc/adblock/ads.mors.list
 ADBLOCK_SOURCES_LIST=/opt/etc/adblock/sources.list
@@ -82,6 +85,7 @@ MORS_START_FILE=/opt/etc/init.d/S96mors
 # VLESS over Proxy
 PROXY_INFACE_NUMEBER=21
 PROXY_VLESS_NAME=Proxy${PROXY_INFACE_NUMEBER}
+PROXY_VLESS_ENTWARE=t2s${PROXY_INFACE_NUMEBER}
 
 # Файл с сетями, запросы к которым не должны попадать в тоннель
 # Данный файл постоянен, не доступен пользователям на редактирование
@@ -111,6 +115,20 @@ INFACE_PART_REQUEST="${LOCALHOST_IP}:79/rci/interface"
 SSR_ENTWARE_TEMPL=ezcfg
 MINUS=9
 
+mors_hosts__ensure_readable() {
+	local parent
+	if [ -L "${MORS_HOSTS_FILE}" ] || { [ -e "${MORS_HOSTS_FILE}" ] && [ ! -f "${MORS_HOSTS_FILE}" ]; }; then
+		error "${MORS_HOSTS_FILE} должен быть обычным файлом."
+		return 1
+	fi
+	if [ ! -e "${MORS_HOSTS_FILE}" ]; then
+		parent=$(dirname "${MORS_HOSTS_FILE}") || return 1
+		mkdir -p "${parent}" || return 1
+		(umask 022; : >"${MORS_HOSTS_FILE}") || return 1
+	fi
+	chmod 644 "${MORS_HOSTS_FILE}"
+}
+
 
 #-------------------------------------------------------------------------------
 # 
@@ -120,11 +138,11 @@ MINUS=9
 
 check_crypto_ssr_libs(){
 
-	[ -f /opt/lib/libmbedcrypto.so.16 ] || {
-		opkg install libmbedtls &> /dev/null
-		local libmbedcrypto=$(find /opt/lib/ -type f -name "libmbedcrypto.so*" | head -1)
-		[ -n "${libmbedcrypto}" ] && ln -sf "${libmbedcrypto}" /opt/lib/libmbedcrypto.so.16
-	}
+	local libmbedcrypto
+	[ -f /opt/lib/libmbedcrypto.so.16 ] && return 0
+	libmbedcrypto=$(find /opt/lib/ -type f -name 'libmbedcrypto.so*' | head -1)
+	[ -n "${libmbedcrypto}" ] || return 1
+	ln -sf "${libmbedcrypto}" /opt/lib/libmbedcrypto.so.16
 		
 }
 
@@ -347,9 +365,16 @@ clean_escape(){
 # Делаем копию файла
 #
 backup_copy(){
+	local source_file backup_file
 	source_file=${1}
 	backup_file=${2}
-	[ -f "${source_file}" ] && cp -f "${source_file}" "${backup_file}"
+
+	# Backup inputs are optional, but an existing input must be copied
+	# successfully. This lets callers distinguish a legitimate absence from an
+	# I/O or permissions failure without special-casing every optional file.
+	[ -e "${source_file}" ] || [ -L "${source_file}" ] || return 0
+	[ -f "${source_file}" ] || return 1
+	cp -f "${source_file}" "${backup_file}"
 }
 
 
@@ -627,11 +652,14 @@ is_vless_over_proxy_enabled() {
 
 
 has_adguard_enable() {
-	if [ -f "${ADGUARDHOME_DEMON}" ]; then  
-		"${ADGUARDHOME_DEMON}" status | grep -q alive
-	else
-		return 1
-	fi
+	local state
+	[ -f "${ADGUARDHOME_DEMON}" ] || return 1
+	state=$(service_action__state "${ADGUARDHOME_DEMON}" status \
+		"${MORS_SETUP_DNS_LOG:-}" \
+		"${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT:-15}" \
+		"${MORS_SETUP_DNS_SERVICE_KILL_AFTER:-2}" \
+		"${MORS_SETUP_DNS_TIMEOUT_CMD:-/opt/bin/timeout}") || return 1
+	[ "${state}" = running ]
 }
 
 # ------------------------------------------------------------------------------------------

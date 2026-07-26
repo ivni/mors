@@ -1,0 +1,89 @@
+#!/bin/sh
+
+# Public Mors entrypoints call this before loading telemetry libraries. Runtime
+# paths and the Monium transport are deliberately not configurable through the
+# environment: otherwise a shell profile could redirect the API key and
+# payload to a different executable or endpoint. Router-independent tests
+# source focused libraries directly and retain isolated path seams.
+
+telemetry_runtime__pin_production() {
+	MORS_SERVICE_PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+	PATH=${MORS_SERVICE_PATH}
+	MORS_LIB_DIR=/opt/apps/mors/bin/libs
+	MORS_LIFECYCLE_LOCK_DIR=/opt/var/lock/mors-lifecycle.lock
+	MORS_LIFECYCLE_STATE_FILE=/opt/etc/.mors/lifecycle/state.json
+	MORS_CONF_FILE=/opt/etc/mors.conf
+
+	TELEMETRY_CONFIG_ROOT=/opt/etc/mors/telemetry
+	TELEMETRY_CONFIG_FILE=${TELEMETRY_CONFIG_ROOT}/config.json
+	TELEMETRY_KEY_FILE=${TELEMETRY_CONFIG_ROOT}/monium.key
+	TELEMETRY_CURL_CONFIG=${TELEMETRY_CONFIG_ROOT}/curl.conf
+	TELEMETRY_CURSOR_FILE=${TELEMETRY_CONFIG_ROOT}/cursor
+	TELEMETRY_STATE_ROOT=/tmp/mors/telemetry
+	TELEMETRY_STATE_FILE=${TELEMETRY_STATE_ROOT}/state.json
+	TELEMETRY_DATA_ROOT=/opt/var/lib/mors/telemetry
+	TELEMETRY_QUEUE_FILE=${TELEMETRY_DATA_ROOT}/outbox.jsonl
+	TELEMETRY_ENDPOINT=https://ingest.monium.yandex.cloud/otlp/v1/logs
+	TELEMETRY_QUEUE_LIMIT=1000
+	TELEMETRY_QUEUE_BATCH_LIMIT=50
+	TELEMETRY_PAYLOAD_BYTE_LIMIT=524288
+	TELEMETRY_QUEUE_BYTE_LIMIT=16777216
+	TELEMETRY_BATCH_BYTE_LIMIT=4194304
+	TELEMETRY_MAX_AGE_SECONDS=72000
+	TELEMETRY_FUTURE_GRACE_SECONDS=300
+	TELEMETRY_INTERVAL_SECONDS=60
+	TELEMETRY_JQ=/opt/bin/jq
+
+	TELEMETRY_INIT=/opt/etc/init.d/S98mors-telemetry
+	TELEMETRY_INIT_SOURCE=/opt/apps/mors/etc/init.d/S98mors-telemetry
+	MORS_TELEMETRY_INIT=${TELEMETRY_INIT}
+	MORS_TELEMETRY_INIT_SOURCE=${TELEMETRY_INIT_SOURCE}
+	TELEMETRY_ADMIN_LOCK_DIR=/opt/var/run/mors/telemetry/admin.lock
+	TELEMETRY_ADMIN_LOCK_GRACE=5
+	TELEMETRY_SENDER_PROGRAM=/opt/apps/mors/bin/main/telemetry-sender
+	TELEMETRY_SENDER_ARGUMENT=run
+	TELEMETRY_PROCESS_ROOT=/proc
+	TELEMETRY_PID_FILE=/opt/var/run/mors/telemetry/sender.pid
+	TELEMETRY_PROCESS_LOCK_DIR=/opt/var/run/mors/telemetry/sender.lock
+	TELEMETRY_PROCESS_LOCK_GRACE=5
+	TELEMETRY_INIT_WAIT_STEPS=10
+	TELEMETRY_INIT_WAIT_DELAY=1
+
+	VLESS_STATE_FILE=/opt/var/lib/mors/vless/state.json
+	VLESS_EVENTS_FILE=/opt/var/lib/mors/vless/events.jsonl
+	TELEMETRY_VLESS_INIT=/opt/etc/init.d/S25mors-vless
+	TELEMETRY_XRAY_INIT=/opt/etc/init.d/S24xray
+	TELEMETRY_VLESS_PID_FILE=/opt/var/run/mors/vless/supervisor.pid
+	TELEMETRY_SYS_CLASS_NET=/sys/class/net
+	TELEMETRY_IPTABLES_SAVE=/opt/sbin/iptables-save
+	TELEMETRY_CURL=/opt/bin/curl
+	TELEMETRY_RUNTIME_PINNED=true
+
+	export PATH MORS_SERVICE_PATH MORS_LIB_DIR MORS_LIFECYCLE_LOCK_DIR
+	export MORS_LIFECYCLE_STATE_FILE MORS_CONF_FILE
+	export TELEMETRY_CONFIG_ROOT TELEMETRY_CONFIG_FILE TELEMETRY_KEY_FILE
+	export TELEMETRY_CURL_CONFIG TELEMETRY_CURSOR_FILE TELEMETRY_STATE_ROOT
+	export TELEMETRY_STATE_FILE TELEMETRY_DATA_ROOT TELEMETRY_QUEUE_FILE
+	export TELEMETRY_ENDPOINT TELEMETRY_QUEUE_LIMIT TELEMETRY_QUEUE_BATCH_LIMIT
+	export TELEMETRY_PAYLOAD_BYTE_LIMIT TELEMETRY_QUEUE_BYTE_LIMIT
+	export TELEMETRY_BATCH_BYTE_LIMIT TELEMETRY_MAX_AGE_SECONDS
+	export TELEMETRY_FUTURE_GRACE_SECONDS TELEMETRY_INTERVAL_SECONDS TELEMETRY_JQ
+	export TELEMETRY_INIT TELEMETRY_INIT_SOURCE TELEMETRY_ADMIN_LOCK_DIR
+	export MORS_TELEMETRY_INIT MORS_TELEMETRY_INIT_SOURCE
+	export TELEMETRY_ADMIN_LOCK_GRACE TELEMETRY_SENDER_PROGRAM
+	export TELEMETRY_SENDER_ARGUMENT TELEMETRY_PROCESS_ROOT TELEMETRY_PID_FILE
+	export TELEMETRY_PROCESS_LOCK_DIR TELEMETRY_PROCESS_LOCK_GRACE
+	export TELEMETRY_INIT_WAIT_STEPS TELEMETRY_INIT_WAIT_DELAY
+	export VLESS_STATE_FILE VLESS_EVENTS_FILE TELEMETRY_VLESS_INIT
+	export TELEMETRY_XRAY_INIT TELEMETRY_VLESS_PID_FILE TELEMETRY_SYS_CLASS_NET
+	export TELEMETRY_IPTABLES_SAVE TELEMETRY_CURL TELEMETRY_RUNTIME_PINNED
+}
+
+# Only the telemetry sender owns the Monium transport. Public `mors` and
+# upgrade entrypoints must retain proxy/custom-CA settings used by unrelated
+# update, VLESS and diagnostic curl calls.
+telemetry_runtime__pin_transport() {
+	unset CURL_HOME CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR
+	unset http_proxy https_proxy all_proxy no_proxy
+	unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
+}

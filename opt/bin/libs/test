@@ -2,7 +2,9 @@
 
 MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
 . "${MORS_LIB_DIR}/runtime_lock"
+. "${MORS_LIB_DIR}/lifecycle_state"
 . "${MORS_LIB_DIR}/test_result"
+. "${MORS_LIB_DIR}/ipv6_bypass"
 . "${MORS_LIB_DIR}/test_probe"
 . "${MORS_LIB_DIR}/test_tunnel"
 . "${MORS_LIB_DIR}/test_cold"
@@ -226,6 +228,22 @@ test__activate_fallback_target() {
 	test_probe__ipset_population
 }
 
+test__probe_inventory_item_with_fallback() {
+	local item="${1}"
+	MORS_TEST_CONNECTION_FALLBACK=false
+	if test_tunnel__probe_inventory_item "${item}"; then
+		export MORS_TEST_CONNECTION_FALLBACK
+		return 0
+	fi
+	if test__activate_fallback_target && test_tunnel__probe_inventory_item "${item}"; then
+		MORS_TEST_CONNECTION_FALLBACK=true
+		export MORS_TEST_CONNECTION_FALLBACK
+		return 0
+	fi
+	export MORS_TEST_CONNECTION_FALLBACK
+	return 1
+}
+
 test__cold_e2e() {
 	local failed=false MORS_TEST_DISABLE_FALLBACK=true
 	test__stage cold_firewall_route true true test_probe__firewall_route || failed=true
@@ -399,9 +417,15 @@ test__all() {
 				;;
 		esac
 		test__progress "connection_${kind}"
-		if test_tunnel__probe_inventory_item "${item}"; then
-			test_result__add_connection "${id}" "${kind}" "${role}" working \
-				connection_probe_ok 'Принудительный HTTPS probe успешен.'
+		if test__probe_inventory_item_with_fallback "${item}"; then
+			if [ "${MORS_TEST_CONNECTION_FALLBACK}" = true ]; then
+				test_result__add_connection "${id}" "${kind}" "${role}" working \
+					connection_probe_ok_fallback \
+					'Принудительный HTTPS probe успешен на резервной контрольной цели.'
+			else
+				test_result__add_connection "${id}" "${kind}" "${role}" working \
+					connection_probe_ok 'Принудительный HTTPS probe успешен.'
+			fi
 		else
 			test_result__add_connection "${id}" "${kind}" "${role}" error \
 				connection_probe_failed 'Принудительный HTTPS probe не выполнен.'

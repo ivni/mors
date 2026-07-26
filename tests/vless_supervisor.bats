@@ -25,6 +25,22 @@ setup() {
 	vless_runtime__override() { OVERRIDDEN_TAG="${1}"; return 0; }
 }
 
+@test "malformed derived state is rebuilt before a health cycle" {
+	printf '%s\n' '#!/bin/sh' 'damaged runtime state' >"${VLESS_STATE_FILE}"
+	vless_runtime__probe_connection() {
+		VLESS_PROBE_ERROR=''
+		VLESS_PROBE_LATENCY_MS=20
+		return 0
+	}
+
+	run vless_supervisor__once
+	[ "${status}" -eq 0 ]
+	[ "$(jq -r '.schema_version' "${VLESS_STATE_FILE}")" -eq 1 ]
+	[ "$(jq -r '.cycle' "${VLESS_STATE_FILE}")" -eq 1 ]
+	[ "$(jq -r '.overall_state' "${VLESS_STATE_FILE}")" = healthy ]
+	[ "$(jq -r '.active_id' "${VLESS_STATE_FILE}")" = vless-a ]
+}
+
 @test "confirmed active failure switches to a healthy standby" {
 	vless_runtime__probe_connection() {
 		if [ "${1}" -eq 11971 ]; then
@@ -74,6 +90,25 @@ setup() {
 	[ "$(jq -r '.last_switch' "${VLESS_STATE_FILE}")" = null ]
 }
 
+@test "direct fallback keeps the recovery choice but clears the current VLESS selection" {
+	vless_store__set_direct_fallback true
+	vless_runtime__probe_connection() {
+		VLESS_PROBE_ERROR=timeout
+		VLESS_PROBE_LATENCY_MS=null
+		return 1
+	}
+	vless_supervisor__confirm_active_failure() { return 1; }
+	vless_runtime__probe() { VLESS_PROBE_LATENCY_MS=10; VLESS_PROBE_ERROR=''; return 0; }
+
+	run vless_supervisor__once
+	[ "${status}" -ne 0 ]
+	[ "$(tail -n 1 "${VLESS_EVENTS_FILE}" | jq -r '.to_id')" = mors-direct ]
+	[ "$(tail -n 1 "${VLESS_EVENTS_FILE}" | jq -r '.reason')" = direct_fallback ]
+	[ "$(jq -r '.overall_state' "${VLESS_STATE_FILE}")" = direct_fallback ]
+	[ "$(jq -r '.active_id' "${VLESS_STATE_FILE}")" = null ]
+	[ "$(vless_runtime__active_id)" = vless-a ]
+}
+
 @test "global pause skips probes and preserves last active connection" {
 	vless_store__set_paused true
 	vless_runtime__probe_connection() { return 99; }
@@ -98,6 +133,33 @@ setup() {
 
 	run vless_supervisor__acquire_lock
 	[ "${status}" -eq 0 ]
+}
+
+@test "live unrelated PID does not block stale supervisor lock recovery" {
+	sleep 30 &
+	unrelated_pid=$!
+	mkdir -p "${VLESS_SUPERVISOR_LOCK_DIR}"
+	printf '%s\n' "${unrelated_pid}" >"${VLESS_SUPERVISOR_PID_FILE}"
+
+	run vless_supervisor__acquire_lock
+	result=${status}
+	kill -0 "${unrelated_pid}"
+	kill "${unrelated_pid}"
+	wait "${unrelated_pid}" 2>/dev/null || true
+	[ "${result}" -eq 0 ]
+}
+
+@test "wake never signals a live unrelated PID from a stale file" {
+	sleep 30 &
+	unrelated_pid=$!
+	printf '%s\n' "${unrelated_pid}" >"${VLESS_SUPERVISOR_PID_FILE}"
+
+	run vless_runtime__wake_supervisor
+	result=${status}
+	kill -0 "${unrelated_pid}"
+	kill "${unrelated_pid}"
+	wait "${unrelated_pid}" 2>/dev/null || true
+	[ "${result}" -ne 0 ]
 }
 
 @test "health endpoint must return exactly HTTP 204" {
@@ -143,16 +205,40 @@ setup() {
 	[ "$(tail -n 1 "${VLESS_EVENTS_FILE}" | jq -r '.result')" = error ]
 }
 
-@test "TERM exits supervisor and releases process lock" {
-	vless_supervisor__once() { return 0; }
+@test "USR1 wakes and TERM promptly stops supervisor during interval sleep" {
+	local cycles="${BATS_TEST_TMPDIR}/cycles" stopped=false
+	vless_supervisor__once() { printf '%s\n' cycle >>"${cycles}"; }
+	cycle_count() {
+		[ -f "${cycles}" ] && wc -l <"${cycles}" || printf '%s\n' 0
+	}
 	VLESS_SUPERVISOR_INTERVAL=30
 	vless_supervisor__run &
 	process_id=$!
-	for _ in 1 2 3 4 5; do [ -f "${VLESS_SUPERVISOR_PID_FILE}" ] && break; sleep 0.1; done
+	for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(cycle_count)" -ge 1 ] && break; sleep 0.1; done
+	kill -USR1 "${process_id}"
+	for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+		[ "$(cycle_count)" -ge 2 ] && break
+		sleep 0.1
+	done
+	[ "$(cycle_count)" -ge 2 ]
 	kill -TERM "${process_id}"
+	for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+		if ! kill -0 "${process_id}" 2>/dev/null; then stopped=true; break; fi
+		sleep 0.1
+	done
+	if [ "${stopped}" != true ]; then
+		kill -KILL "${process_id}" 2>/dev/null || true
+		wait "${process_id}" 2>/dev/null || true
+		false
+	fi
 	wait "${process_id}"
 	[ ! -e "${VLESS_SUPERVISOR_PID_FILE}" ]
 	[ ! -d "${VLESS_SUPERVISOR_LOCK_DIR}" ]
+}
+
+@test "interval sleep avoids the BusyBox background wait race" {
+	! grep -q 'wait "${sleep_pid}"' "${REPO_ROOT}/opt/bin/main/vless-supervisor"
+	grep -q 'VLESS_SUPERVISOR_WAKE_REQUESTED' "${REPO_ROOT}/opt/bin/main/vless-supervisor"
 }
 
 @test "ownerless decision lock is not removed immediately" {

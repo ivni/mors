@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. /opt/apps/mors/bin/libs/telemetry_runtime
+telemetry_runtime__pin_production
 . /opt/apps/mors/bin/libs/check
 . /opt/apps/mors/bin/libs/hosts
 . /opt/apps/mors/bin/libs/route
@@ -7,6 +9,8 @@
 . /opt/apps/mors/bin/libs/update
 . /opt/apps/mors/bin/libs/vless
 . /opt/apps/mors/bin/libs/vpn
+. /opt/apps/mors/bin/libs/lifecycle_state
+. /opt/apps/mors/bin/libs/telemetry
 . /opt/apps/mors/bin/libs/test
 . /opt/apps/mors/bin/main/setup
 
@@ -67,27 +71,56 @@ mors_cli__requires_runtime_lock() {
 	esac
 }
 
+mors_cli__has_json_flag() {
+	local argument
+	for argument in "$@"; do
+		[ "${argument}" = --json ] && return 0
+	done
+	return 1
+}
+
 MORS_CLI_RUNTIME_LOCKED=false
-if [ "${1:-}" != uninstall ] && [ "${1:-}" != test ] && \
-	[ "$(get_config_value "SETUP_FINISHED")" != true ]; then
-	print_line
-	echo "${2}" | grep -q "upgrade" && warning "Запускаем настройку пакета" || {
-		error "Настройка пакета не завершена, запускаем настройку пакета" "1"
-		print_line
-	}
-	cmd_install "${3}" || exit 1
-	print_line
+MORS_CLI_JSON_OUTPUT=false
+mors_cli__has_json_flag "$@" && MORS_CLI_JSON_OUTPUT=true
+MORS_CLI_LIFECYCLE_STATE=$(lifecycle_state__read) || {
+	error 'Не удалось прочитать lifecycle state Mors.'
+	echo 'Действие: проверьте /opt/etc/.mors/lifecycle/state.json или восстановите пакет.'
+	exit 4
+}
+
+mors_cli__print_lifecycle_status() {
+	case "${MORS_CLI_LIFECYCLE_STATE}" in
+		unconfigured)
+			echo 'Mors: НЕ НАСТРОЕНО'
+			echo 'Действие: выполните mors setup для просмотра плана настройки.'
+			;;
+		ready) echo 'Mors: РАБОТАЕТ' ;;
+		recovery_required)
+			echo 'Mors: ТРЕБУЕТСЯ ВОССТАНОВЛЕНИЕ'
+			echo 'Действие: выполните mors setup recover --yes.'
+			;;
+	esac
+}
+
+if [ -z "${1:-}" ]; then
+	mors_cli__print_lifecycle_status
 	exit 0
 fi
 
 if mors_cli__requires_runtime_lock "$@"; then
-	runtime_mutation_lock__acquire "mors ${1}" || {
-		lock_status=$?
-		[ "${lock_status}" -eq 2 ] && \
-			error 'Изменения заблокированы незавершённым cold test. Выполните mors test cold recover.' || \
-			error 'Другая операция изменения runtime Mors уже выполняется.'
+	if ! lifecycle_state__require_ready; then
+		MORS_CLI_LIFECYCLE_STATE=$(lifecycle_state__read 2>/dev/null || printf recovery_required)
+		mors_cli__print_lifecycle_status
+		if lifecycle_state__has_active_marker; then
+			echo 'Действие: завершите или восстановите активную lifecycle-транзакцию.'
+		fi
+		echo 'Изменения не выполнены.'
 		exit 3
-	}
+	fi
+fi
+
+if mors_cli__requires_runtime_lock "$@"; then
+	runtime_mutation_lock__acquire_or_explain "mors ${1}" || exit 3
 	MORS_CLI_RUNTIME_LOCKED=true
 	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
 	trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
@@ -95,11 +128,12 @@ fi
 
 #clear_file_content "${MORS_LIST_FILE}"
 
-[ "${1}" = test ] || print_line
+[ "${1}" = test ] || [ "${MORS_CLI_JSON_OUTPUT}" = true ] || print_line
 case "${1}" in
 	setup)
-							echo "Настройка пакета МОРС завершена!"
-							echo "Для удаления пакета наберите 'mors uninstall'"
+							shift
+							cmd_setup_cli "$@"
+							exit $?
 							;;
 
 	# Работа со списком
@@ -137,7 +171,18 @@ case "${1}" in
 	vless)
 		shift
 		cmd_vless_cli "$@"
+		vless_status=$?
+		[ "${MORS_CLI_JSON_OUTPUT}" = true ] || print_line
+		exit "${vless_status}"
 			;;
+
+	telemetry)
+		shift
+		cmd_telemetry_cli "$@"
+		telemetry_status=$?
+		[ "${MORS_CLI_JSON_OUTPUT}" = true ] || print_line
+		exit "${telemetry_status}"
+		;;
 
 	ssr)
 		case "${2}" in
@@ -291,9 +336,11 @@ case "${1}" in
 
 	version | ver)			version
 		;;
-	upgrade | update)		sh /opt/apps/mors/bin/main/upgrade "${2}" "${3}"; exit 0
+	upgrade | update)		shift
+							sh /opt/apps/mors/bin/main/upgrade "$@"; exit $?
 		;;
-	rollback)				sh /opt/apps/mors/bin/main/upgrade rollback "${2}"; exit 0
+	rollback)				shift
+							sh /opt/apps/mors/bin/main/upgrade rollback "$@"; exit $?
 		;;
 
 	# Отключение и удаление
@@ -301,7 +348,9 @@ case "${1}" in
 	pause|freeze)           cmd_pause_mors ;;
 	unpause|unfreeze)       cmd_unpause_mors ;;
 
-	uninstall ) 			cmd_uninstall  "${2}" "${3}"
+	uninstall )			shift
+							cmd_uninstall_cli "$@"
+							exit $?
 		;;
 
 	# Команды

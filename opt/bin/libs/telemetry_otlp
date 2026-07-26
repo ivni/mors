@@ -1,0 +1,451 @@
+#!/bin/sh
+
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+. "${MORS_LIB_DIR}/telemetry_store"
+. "${MORS_LIB_DIR}/vless_process"
+
+MORS_LIFECYCLE_STATE_FILE=${MORS_LIFECYCLE_STATE_FILE:-/opt/etc/.mors/lifecycle/state.json}
+MORS_CONF_FILE=${MORS_CONF_FILE:-/opt/etc/mors.conf}
+VLESS_STATE_FILE=${VLESS_STATE_FILE:-/opt/var/lib/mors/vless/state.json}
+VLESS_EVENTS_FILE=${VLESS_EVENTS_FILE:-/opt/var/lib/mors/vless/events.jsonl}
+TELEMETRY_VLESS_INIT=${TELEMETRY_VLESS_INIT:-/opt/etc/init.d/S25mors-vless}
+TELEMETRY_XRAY_INIT=${TELEMETRY_XRAY_INIT:-/opt/etc/init.d/S24xray}
+TELEMETRY_VLESS_PID_FILE=${TELEMETRY_VLESS_PID_FILE:-/opt/var/run/mors/vless/supervisor.pid}
+TELEMETRY_SYS_CLASS_NET=${TELEMETRY_SYS_CLASS_NET:-/sys/class/net}
+TELEMETRY_IPTABLES_SAVE=${TELEMETRY_IPTABLES_SAVE:-/opt/sbin/iptables-save}
+TELEMETRY_CURL=${TELEMETRY_CURL:-curl}
+
+telemetry_otlp__enum_or_unknown() {
+	local value=${1:-} allowed=${2:-} candidate
+	for candidate in ${allowed}; do
+		[ "${value}" = "${candidate}" ] && {
+			printf '%s\n' "${value}"
+			return 0
+		}
+	done
+	printf '%s\n' unknown
+}
+
+telemetry_otlp__nonnegative_or_null() {
+	local value=${1:-}
+	case "${value}" in
+		''|null|*[!0-9]*) printf '%s\n' null ;;
+		*) printf '%s\n' "${value}" ;;
+	esac
+}
+
+telemetry_otlp__checksum() {
+	cksum | awk '{ print $1 "-" $2 }'
+}
+
+telemetry_otlp__lifecycle_state() {
+	local state
+	state=$("${TELEMETRY_JQ}" -r '.state // "unknown"' "${MORS_LIFECYCLE_STATE_FILE}" 2>/dev/null || printf unknown)
+	telemetry_otlp__enum_or_unknown "${state}" 'unconfigured ready recovery_required'
+}
+
+telemetry_otlp__package_value() {
+	local key=${1} value
+	value=$(sed -n "s/^${key}=//p" "${MORS_CONF_FILE}" 2>/dev/null | head -n 1)
+	[ -n "${value}" ] && [ "${#value}" -le 64 ] || value=unknown
+	case "${value}" in
+		*[!A-Za-z0-9._~+:-]*) value=unknown ;;
+	esac
+	printf '%s\n' "${value}"
+}
+
+telemetry_otlp__service_alive() {
+	local service=${1}
+	[ -x "${service}" ] || {
+		printf '%s\n' false
+		return
+	}
+	if "${service}" status 2>/dev/null | grep -qiE '(^|[[:space:]])(alive|running)([[:space:].]|$)'; then
+		printf '%s\n' true
+	else
+		printf '%s\n' false
+	fi
+}
+
+telemetry_otlp__supervisor_alive() {
+	if vless_process__pid_from_file "${TELEMETRY_VLESS_PID_FILE}" service >/dev/null 2>&1; then
+		printf '%s\n' true
+	else
+		printf '%s\n' false
+	fi
+}
+
+telemetry_otlp__interface_counters() {
+	local interface rx tx
+	interface=$(sed -n 's/^INFACE_ENT=//p' "${MORS_CONF_FILE}" 2>/dev/null | head -n 1)
+	if ! telemetry_store__safe_value "${interface}" 32 || [ ! -d "${TELEMETRY_SYS_CLASS_NET}/${interface}/statistics" ]; then
+		printf '%s\n' '{"available":false,"rx_bytes":null,"tx_bytes":null}'
+		return
+	fi
+	rx=$(cat "${TELEMETRY_SYS_CLASS_NET}/${interface}/statistics/rx_bytes" 2>/dev/null || printf '')
+	tx=$(cat "${TELEMETRY_SYS_CLASS_NET}/${interface}/statistics/tx_bytes" 2>/dev/null || printf '')
+	[ -n "${rx}" ] && [ -n "${tx}" ] || {
+		printf '%s\n' '{"available":false,"rx_bytes":null,"tx_bytes":null}'
+		return
+	}
+	case "${rx}:${tx}" in
+		*[!0-9:]*) printf '%s\n' '{"available":false,"rx_bytes":null,"tx_bytes":null}'; return ;;
+	esac
+	"${TELEMETRY_JQ}" -n --argjson rx "${rx}" --argjson tx "${tx}" \
+		'{available: true, rx_bytes: $rx, tx_bytes: $tx}'
+}
+
+telemetry_otlp__firewall_counters() {
+	local counters packets bytes
+	if [ ! -x "${TELEMETRY_IPTABLES_SAVE}" ]; then
+		printf '%s\n' '{"available":false,"packets":null,"bytes":null}'
+		return
+	fi
+	counters=$("${TELEMETRY_IPTABLES_SAVE}" -c -t mangle 2>/dev/null | awk '
+		/-A PREROUTING/ && /-j MORS_MARK([[:space:]]|$)/ {
+			value=$1
+			gsub(/[][]/, "", value)
+			split(value, parts, ":")
+			if (parts[1] ~ /^[0-9]+$/ && parts[2] ~ /^[0-9]+$/) {
+				packets += parts[1]
+				bytes += parts[2]
+				found = 1
+			}
+		}
+		END { if (found) printf "%.0f %.0f\n", packets, bytes }
+	')
+	packets=${counters%% *}
+	bytes=${counters#* }
+	[ -n "${packets}" ] && [ -n "${bytes}" ] || {
+		printf '%s\n' '{"available":false,"packets":null,"bytes":null}'
+		return
+	}
+	case "${packets}:${bytes}" in
+		*[!0-9:]*) printf '%s\n' '{"available":false,"packets":null,"bytes":null}'; return ;;
+	esac
+	"${TELEMETRY_JQ}" -n --argjson packets "${packets}" --argjson bytes "${bytes}" \
+		'{available: true, packets: $packets, bytes: $bytes}'
+}
+
+telemetry_otlp__safe_vless_snapshot() {
+	local destination=${1} work connections row id event_key enabled status latency consecutive recent
+	local overall upstream active cycle last_cycle
+	work="${TELEMETRY_STATE_ROOT}/vless-snapshot.$$"
+	connections="${TELEMETRY_STATE_ROOT}/vless-connections.$$"
+	: >"${connections}" || return 1
+	if "${TELEMETRY_JQ}" -e 'type == "object" and (.connections | type == "object")' "${VLESS_STATE_FILE}" >/dev/null 2>&1; then
+		overall=$("${TELEMETRY_JQ}" -r '.overall_state // "unknown"' "${VLESS_STATE_FILE}")
+		upstream=$("${TELEMETRY_JQ}" -r '.upstream_state // "unknown"' "${VLESS_STATE_FILE}")
+		active=$("${TELEMETRY_JQ}" -r '.active_id // empty' "${VLESS_STATE_FILE}")
+		cycle=$("${TELEMETRY_JQ}" -r '.cycle // 0' "${VLESS_STATE_FILE}")
+		last_cycle=$("${TELEMETRY_JQ}" -r '.last_cycle_at // empty' "${VLESS_STATE_FILE}")
+		overall=$(telemetry_otlp__enum_or_unknown "${overall}" 'unconfigured starting healthy degraded unavailable direct_fallback paused')
+		upstream=$(telemetry_otlp__enum_or_unknown "${upstream}" 'up down unknown')
+		telemetry_store__safe_connection_id "${active}" || active=''
+		cycle=$(telemetry_otlp__nonnegative_or_null "${cycle}")
+		[ "${cycle}" = null ] && cycle=0
+		telemetry_store__safe_value "${last_cycle}" 64 || last_cycle=''
+		"${TELEMETRY_JQ}" -c '.connections | to_entries[]' "${VLESS_STATE_FILE}" 2>/dev/null |
+		while IFS= read -r row; do
+			id=$(printf '%s\n' "${row}" | "${TELEMETRY_JQ}" -r '.key // empty')
+			telemetry_store__safe_connection_id "${id}" || continue
+			event_key=$(printf '%s' "${id}" | telemetry_otlp__checksum) || continue
+			enabled=$(printf '%s\n' "${row}" | "${TELEMETRY_JQ}" -r 'if .value.enabled == true then "true" else "false" end')
+			status=$(printf '%s\n' "${row}" | "${TELEMETRY_JQ}" -r '.value.status // "unknown"')
+			status=$(telemetry_otlp__enum_or_unknown "${status}" 'checking active standby unstable unavailable disabled draining')
+			latency=$(printf '%s\n' "${row}" | "${TELEMETRY_JQ}" -r '.value.latency_ms // "null"')
+			consecutive=$(printf '%s\n' "${row}" | "${TELEMETRY_JQ}" -r '.value.consecutive_failures // 0')
+			recent=$(printf '%s\n' "${row}" | "${TELEMETRY_JQ}" -r '.value.recent_failures // 0')
+			latency=$(telemetry_otlp__nonnegative_or_null "${latency}")
+			consecutive=$(telemetry_otlp__nonnegative_or_null "${consecutive}")
+			recent=$(telemetry_otlp__nonnegative_or_null "${recent}")
+			[ "${consecutive}" = null ] && consecutive=0
+			[ "${recent}" = null ] && recent=0
+			"${TELEMETRY_JQ}" -nc \
+				--arg id "${id}" --arg event_key "${event_key}" --arg status "${status}" \
+				--argjson enabled "${enabled}" --argjson latency "${latency}" \
+				--argjson consecutive "${consecutive}" --argjson recent "${recent}" \
+				'{id: $id, event_key: $event_key, enabled: $enabled, status: $status, latency_ms: $latency,
+				  consecutive_failures: $consecutive, recent_failures: $recent}' >>"${connections}"
+		done
+	else
+		overall=unconfigured upstream=unknown active='' cycle=0 last_cycle=''
+	fi
+	"${TELEMETRY_JQ}" -n \
+		--arg overall "${overall}" --arg upstream "${upstream}" \
+		--arg active "${active}" --arg last_cycle "${last_cycle}" \
+		--argjson cycle "${cycle}" --slurpfile connections "${connections}" '{
+			overall_state: $overall,
+			upstream_state: $upstream,
+			active_id: (if $active == "" then null else $active end),
+			cycle: $cycle,
+			last_cycle_at: (if $last_cycle == "" then null else $last_cycle end),
+			connections: $connections
+		}' >"${work}" || {
+		rm -f "${work}" "${connections}"
+		return 1
+	}
+	mv -f "${work}" "${destination}"
+	chmod 600 "${destination}" || return 1
+	rm -f "${connections}"
+}
+
+telemetry_otlp__event_valid() {
+	local event=${1} type reason result at from to
+	type=$(printf '%s\n' "${event}" | "${TELEMETRY_JQ}" -r '.type // empty')
+	reason=$(printf '%s\n' "${event}" | "${TELEMETRY_JQ}" -r '.reason // empty')
+	result=$(printf '%s\n' "${event}" | "${TELEMETRY_JQ}" -r '.result // empty')
+	at=$(printf '%s\n' "${event}" | "${TELEMETRY_JQ}" -r '.at // empty')
+	from=$(printf '%s\n' "${event}" | "${TELEMETRY_JQ}" -r '.from_id // empty')
+	to=$(printf '%s\n' "${event}" | "${TELEMETRY_JQ}" -r '.to_id // empty')
+	case "${type}" in switch|cycle|all_unavailable|pause|resume) ;; *) return 1 ;; esac
+	case "${reason}" in sticky_restore_failed|concurrent_change|health_failure|api_override_failed|direct_fallback|fail_closed|manual_disable|manual|manual_remove) ;; *) return 1 ;; esac
+	case "${result}" in ok|error|aborted) ;; *) return 1 ;; esac
+	telemetry_store__safe_value "${at}" 64 || return 1
+	telemetry_store__safe_connection_id "${from}" || return 1
+	telemetry_store__safe_connection_id "${to}" || return 1
+}
+
+telemetry_otlp__normalize_event() {
+	local line=${1} normalized event_key
+	normalized=$(printf '%s\n' "${line}" | "${TELEMETRY_JQ}" -c '{at, type, from_id, to_id, reason, result}' 2>/dev/null) || return 1
+	telemetry_otlp__event_valid "${normalized}" || return 1
+	event_key=$(printf '%s' "${normalized}" | telemetry_otlp__checksum) || return 1
+	printf '%s\n' "${normalized}" | "${TELEMETRY_JQ}" -c --arg event_key "${event_key}" '. + {event_key: $event_key}'
+}
+
+telemetry_otlp__cursor_initialize() {
+	local line normalized last=''
+	if [ -f "${VLESS_EVENTS_FILE}" ] && [ ! -L "${VLESS_EVENTS_FILE}" ]; then
+		while IFS= read -r line || [ -n "${line}" ]; do
+			normalized=$(telemetry_otlp__normalize_event "${line}" 2>/dev/null || true)
+			[ -n "${normalized}" ] && last=${normalized}
+		done <"${VLESS_EVENTS_FILE}"
+	fi
+	printf '%s\n' "${last}" | telemetry_store__atomic_from_stdin "${TELEMETRY_CURSOR_FILE}" 600
+}
+
+telemetry_otlp__collect_events() {
+	local destination=${1} next_cursor=${2} cursor='' found=false line normalized last=''
+	local events_file
+	events_file="${TELEMETRY_STATE_ROOT}/events.$$"
+	: >"${events_file}" || return 1
+	[ -r "${TELEMETRY_CURSOR_FILE}" ] && cursor=$(cat "${TELEMETRY_CURSOR_FILE}")
+	[ -z "${cursor}" ] && found=true
+	if [ -f "${VLESS_EVENTS_FILE}" ] && [ ! -L "${VLESS_EVENTS_FILE}" ]; then
+		while IFS= read -r line || [ -n "${line}" ]; do
+			normalized=$(telemetry_otlp__normalize_event "${line}" 2>/dev/null || true)
+			[ -n "${normalized}" ] || continue
+			last=${normalized}
+			if [ "${found}" = false ]; then
+				[ "${normalized}" = "${cursor}" ] && found=true
+				continue
+			fi
+			[ "${normalized}" = "${cursor}" ] && continue
+			printf '%s\n' "${normalized}" >>"${events_file}"
+		done <"${VLESS_EVENTS_FILE}"
+	fi
+	if [ -n "${cursor}" ] && [ "${found}" = false ]; then
+		: >"${events_file}"
+	fi
+	"${TELEMETRY_JQ}" -s '.' "${events_file}" >"${destination}" || return 1
+	printf '%s\n' "${last:-${cursor}}" >"${next_cursor}" || return 1
+	chmod 600 "${destination}" "${next_cursor}" || return 1
+	rm -f "${events_file}"
+}
+
+telemetry_otlp__cursor_commit() {
+	local source=${1} current='' next=''
+	[ -f "${source}" ] && [ ! -L "${source}" ] || return 1
+	[ ! -L "${TELEMETRY_CURSOR_FILE}" ] || return 1
+	[ ! -r "${TELEMETRY_CURSOR_FILE}" ] || current=$(cat "${TELEMETRY_CURSOR_FILE}") || return 1
+	next=$(cat "${source}") || return 1
+	[ "${current}" != "${next}" ] || return 0
+	telemetry_store__atomic_from_stdin "${TELEMETRY_CURSOR_FILE}" 600 <"${source}"
+}
+
+telemetry_otlp__build_payload() {
+	local destination=${1} kind=${2:-snapshot} events_file=${3:-} now seconds nanos
+	local vless_file interface_json firewall_json lifecycle version release instance service
+	local supervisor_alive xray_alive owned_events=false
+	telemetry_store__config_valid || return 1
+	telemetry_store__ensure_directories || return 1
+	now=$(telemetry_store__now) || return 1
+	seconds=$(telemetry_store__now_seconds) || return 1
+	nanos="${seconds}000000000"
+	version=$(telemetry_otlp__package_value APP_VERSION)
+	release=$(telemetry_otlp__package_value APP_RELEASE)
+	instance=$("${TELEMETRY_JQ}" -r '.instance_id' "${TELEMETRY_CONFIG_FILE}") || return 1
+	service=$("${TELEMETRY_JQ}" -r '.service' "${TELEMETRY_CONFIG_FILE}") || return 1
+	lifecycle=$(telemetry_otlp__lifecycle_state)
+	supervisor_alive=$(telemetry_otlp__supervisor_alive)
+	xray_alive=$(telemetry_otlp__service_alive "${TELEMETRY_XRAY_INIT}")
+	interface_json=$(telemetry_otlp__interface_counters) || return 1
+	firewall_json=$(telemetry_otlp__firewall_counters) || return 1
+	vless_file="${TELEMETRY_STATE_ROOT}/vless.$$"
+	telemetry_otlp__safe_vless_snapshot "${vless_file}" || return 1
+	if [ -z "${events_file}" ]; then
+		events_file="${TELEMETRY_STATE_ROOT}/empty-events.$$"
+		printf '%s\n' '[]' >"${events_file}"
+		owned_events=true
+	fi
+	"${TELEMETRY_JQ}" -n \
+		--arg now "${now}" --arg nanos "${nanos}" --arg kind "${kind}" \
+		--arg version "${version}" --arg release "${release}" \
+		--arg instance "${instance}" --arg service "${service}" --arg lifecycle "${lifecycle}" \
+		--argjson supervisor_alive "${supervisor_alive}" \
+		--argjson xray_alive "${xray_alive}" \
+		--argjson interface "${interface_json}" \
+		--argjson firewall "${firewall_json}" \
+		--slurpfile vless "${vless_file}" --slurpfile events "${events_file}" '
+		def s($key; $value): {key: $key, value: {stringValue: ($value | tostring)}};
+		def i($key; $value): {key: $key, value: {intValue: ($value | tostring)}};
+		def b($key; $value): {key: $key, value: {boolValue: $value}};
+		def record($id; $body; $severity; $attributes): {
+			timeUnixNano: $nanos,
+			observedTimeUnixNano: $nanos,
+			severityNumber: $severity,
+			severityText: (if $severity >= 17 then "ERROR" else "INFO" end),
+			body: {stringValue: $body},
+			attributes: ([s("mors.event.id"; $id)] + $attributes)
+		};
+		($vless[0]) as $v |
+		([
+			s("mors.event"; (if $kind == "test" then "telemetry_test" else "health_snapshot" end)),
+			s("mors.lifecycle.state"; $lifecycle),
+			s("mors.vless.state"; $v.overall_state),
+			s("mors.vless.upstream_state"; $v.upstream_state),
+			i("mors.vless.cycle"; $v.cycle),
+			i("mors.vless.enabled_count"; ([$v.connections[] | select(.enabled)] | length)),
+			i("mors.vless.standby_count"; ([$v.connections[] | select(.status == "standby")] | length)),
+			i("mors.vless.unavailable_count"; ([$v.connections[] | select(.status == "unavailable")] | length)),
+			b("mors.vless.supervisor_alive"; $supervisor_alive),
+			b("mors.xray.alive"; $xray_alive),
+			b("mors.tunnel.interface_counters_available"; $interface.available),
+			b("mors.firewall.counters_available"; $firewall.available)
+		] + (if $v.active_id == null then [] else [s("mors.vless.active_id"; $v.active_id)] end)
+		  + (if $interface.available then [i("mors.tunnel.rx_bytes"; $interface.rx_bytes), i("mors.tunnel.tx_bytes"; $interface.tx_bytes)] else [] end)
+		  + (if $firewall.available then [i("mors.firewall.rule_match_packets"; $firewall.packets), i("mors.firewall.rule_match_bytes"; $firewall.bytes)] else [] end)) as $summary_attributes |
+		(record(($instance + ":" + $nanos + ":" + $kind + ":summary");
+			(if $kind == "test" then "Проверка доставки телеметрии Mors" else "Состояние Mors" end);
+			9; $summary_attributes)) as $summary |
+		([$v.connections[] | record(
+			($instance + ":" + $nanos + ":connection:" + .event_key);
+			"Состояние соединения Mors";
+			(if .status == "unavailable" then 17 else 9 end);
+			([s("mors.event"; "connection_health"), s("mors.connection.id"; .id),
+			  s("mors.connection.status"; .status), b("mors.connection.enabled"; .enabled),
+			  i("mors.connection.consecutive_failures"; .consecutive_failures),
+			  i("mors.connection.recent_failures"; .recent_failures)]
+			 + (if .latency_ms == null then [] else [i("mors.connection.latency_ms"; .latency_ms)] end))
+		)]) as $connections |
+		([$events[0][] | record(
+			($instance + ":" + .at + ":" + .type + ":" + .event_key);
+			"Событие VLESS";
+			(if .result == "error" then 17 else 9 end);
+			([s("mors.event"; "vless_event"), s("mors.vless.event_type"; .type),
+			  s("mors.vless.reason"; .reason), s("mors.vless.result"; .result),
+			  s("mors.vless.event_at"; .at)]
+			 + (if .from_id == null then [] else [s("mors.vless.from_id"; .from_id)] end)
+			 + (if .to_id == null then [] else [s("mors.vless.to_id"; .to_id)] end))
+		)]) as $event_records |
+		{
+			resourceLogs: [{
+				resource: {attributes: [
+					s("service.name"; $service),
+					s("service.version"; ($version + "-" + $release)),
+					s("service.instance.id"; $instance),
+					s("telemetry.sdk.name"; "mors")
+				]},
+				scopeLogs: [{
+					scope: {name: "mors.telemetry", version: "1"},
+					logRecords: ([$summary] + (if $kind == "test" then [] else $connections + $event_records end))
+				}]
+			}]
+		}' >"${destination}" || {
+		rm -f "${vless_file}"
+		[ "${owned_events}" = false ] || rm -f "${events_file}"
+		return 1
+	}
+	chmod 600 "${destination}" || return 1
+	rm -f "${vless_file}"
+	[ "${owned_events}" = false ] || rm -f "${events_file}"
+	telemetry_store__payload_valid "${destination}"
+}
+
+telemetry_otlp__classify_curl_error() {
+	case "${1}" in
+		6) printf '%s\n' dns ;;
+		28) printf '%s\n' timeout ;;
+		35|51|58|60|77|83|90) printf '%s\n' tls ;;
+		*) printf '%s\n' transport ;;
+	esac
+}
+
+telemetry_otlp__send() {
+	local payload=${1} response error_file http_code curl_status rejected
+	TELEMETRY_DELIVERY_ERROR=''
+	TELEMETRY_DELIVERY_HTTP_CODE=null
+	telemetry_store__payload_valid "${payload}" "${TELEMETRY_BATCH_BYTE_LIMIT}" || {
+		TELEMETRY_DELIVERY_ERROR=invalid_payload TELEMETRY_DELIVERY_HTTP_CODE=null
+		export TELEMETRY_DELIVERY_ERROR TELEMETRY_DELIVERY_HTTP_CODE
+		return 1
+	}
+	telemetry_store__credentials_valid || {
+		TELEMETRY_DELIVERY_ERROR=invalid_config TELEMETRY_DELIVERY_HTTP_CODE=null
+		export TELEMETRY_DELIVERY_ERROR TELEMETRY_DELIVERY_HTTP_CODE
+		return 1
+	}
+	telemetry_store__ensure_directories || return 1
+	response="${TELEMETRY_STATE_ROOT}/response.$$"
+	error_file="${TELEMETRY_STATE_ROOT}/curl-error.$$"
+	http_code=$("${TELEMETRY_CURL}" -q --config "${TELEMETRY_CURL_CONFIG}" \
+		--output "${response}" --write-out '%{http_code}' \
+		--max-filesize 65536 \
+		--data-binary "@${payload}" 2>"${error_file}")
+	curl_status=$?
+	if [ "${curl_status}" -ne 0 ]; then
+		TELEMETRY_DELIVERY_ERROR=$(telemetry_otlp__classify_curl_error "${curl_status}")
+		TELEMETRY_DELIVERY_HTTP_CODE=null
+		rm -f "${response}" "${error_file}"
+		export TELEMETRY_DELIVERY_ERROR TELEMETRY_DELIVERY_HTTP_CODE
+		return 1
+	fi
+	rm -f "${error_file}"
+	case "${http_code}" in
+		2??) ;;
+		4??) TELEMETRY_DELIVERY_ERROR=http_4xx ;;
+		5??) TELEMETRY_DELIVERY_ERROR=http_5xx ;;
+		*) TELEMETRY_DELIVERY_ERROR=invalid_response ;;
+	esac
+	TELEMETRY_DELIVERY_HTTP_CODE=${http_code}
+	if [ -n "${TELEMETRY_DELIVERY_ERROR:-}" ]; then
+		rm -f "${response}"
+		export TELEMETRY_DELIVERY_ERROR TELEMETRY_DELIVERY_HTTP_CODE
+		return 1
+	fi
+	if [ -s "${response}" ]; then
+		rejected=$("${TELEMETRY_JQ}" -r '(.partialSuccess.rejectedLogRecords // 0) | tonumber' "${response}" 2>/dev/null) || {
+			TELEMETRY_DELIVERY_ERROR=invalid_response
+			rm -f "${response}"
+			export TELEMETRY_DELIVERY_ERROR TELEMETRY_DELIVERY_HTTP_CODE
+			return 1
+		}
+		if [ "${rejected}" -ne 0 ]; then
+			TELEMETRY_DELIVERY_ERROR=partial_reject
+			rm -f "${response}"
+			export TELEMETRY_DELIVERY_ERROR TELEMETRY_DELIVERY_HTTP_CODE
+			return 1
+		fi
+		if [ "$("${TELEMETRY_JQ}" -r '.partialSuccess.errorMessage // empty' "${response}" 2>/dev/null)" != '' ]; then
+			TELEMETRY_DELIVERY_ERROR=partial_reject
+			rm -f "${response}"
+			export TELEMETRY_DELIVERY_ERROR TELEMETRY_DELIVERY_HTTP_CODE
+			return 1
+		fi
+	fi
+	rm -f "${response}"
+	TELEMETRY_DELIVERY_ERROR=''
+	export TELEMETRY_DELIVERY_ERROR TELEMETRY_DELIVERY_HTTP_CODE
+	return 0
+}

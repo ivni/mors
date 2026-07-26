@@ -1,0 +1,53 @@
+#!/bin/sh
+
+# Hard-bounded init-script action used by lifecycle operations. Callers own
+# service-specific readiness checks; this helper guarantees that the action
+# process cannot outlive both the TERM deadline and the following KILL grace.
+
+service_action__run() {
+	local service action log timeout_seconds kill_after timeout_command status
+	service=${1}
+	action=${2}
+	log=${3:-}
+	timeout_seconds=${4:-15}
+	kill_after=${5:-2}
+	timeout_command=${6:-/opt/bin/timeout}
+	[ -x "${service}" ] || return 127
+	[ -x "${timeout_command}" ] || return 127
+	"${timeout_command}" -k "${kill_after}" "${timeout_seconds}" \
+		"${service}" "${action}"
+	status=$?
+	case "${status}" in
+		124|137)
+			[ -z "${log}" ] || printf 'service-action-timeout service=%s action=%s timeout=%s kill-after=%s exit=%s\n' \
+				"${service}" "${action}" "${timeout_seconds}" "${kill_after}" "${status}" >>"${log}"
+			;;
+	esac
+	return "${status}"
+}
+
+service_action__state() {
+	local output status
+	if output=$(service_action__run "$@" 2>/dev/null); then
+		status=0
+	else
+		status=$?
+	fi
+	case "${status}" in
+		124|127|137)
+			printf '%s\n' unknown
+			return 1
+			;;
+	esac
+	if printf '%s\n' "${output}" | grep -qiE 'dead|not[[:space:]]+running|stopped'; then
+		printf '%s\n' stopped
+		return 0
+	fi
+	if [ "${status}" -eq 0 ] && \
+		printf '%s\n' "${output}" | grep -qiE '(^|[[:space:]])(alive|running)([[:space:].]|$)'; then
+		printf '%s\n' running
+		return 0
+	fi
+	printf '%s\n' unknown
+	return 1
+}

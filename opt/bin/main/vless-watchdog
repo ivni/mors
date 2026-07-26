@@ -5,6 +5,10 @@ MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
 . "${MORS_LIB_DIR}/vless_store"
 # shellcheck source=../libs/runtime_lock
 . "${MORS_LIB_DIR}/runtime_lock"
+# shellcheck source=../libs/lifecycle_state
+. "${MORS_LIB_DIR}/lifecycle_state"
+
+lifecycle_state__runtime_allowed || exit 0
 
 VLESS_SUPERVISOR_INIT=${VLESS_SUPERVISOR_INIT:-/opt/etc/init.d/S25mors-vless}
 MORS_CONF_FILE=${MORS_CONF_FILE:-/opt/etc/mors.conf}

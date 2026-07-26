@@ -53,8 +53,10 @@ cache) даёт общий `degraded`, если обязательный тра�
 11. `wan_request` — direct WAN evidence получено, когда это возможно.
 12. `exit_comparison` — Mors exit совпадает с forced tunnel и не доказывает
     bypass.
-13. `ipv6_bypass_risk` — пассивная оценка AAAA/global IPv6 при отсутствии Mors
-    IPv6 routing.
+13. `ipv6_bypass_risk` — пассивная оценка AAAA, usable default IPv6 route и
+    client-facing global IPv6 на домашнем интерфейсе при отсутствии Mors IPv6
+    routing. IPv6-адрес выхода внутри тоннеля, неприменимый default route или
+    IPv6 только на WAN не являются доказательством обхода.
 
 Все A-адреса одного ответа обязательны. Обычный Mors request не начинается до
 успеха DNS, ipset, firewall/routing и active tunnel prerequisites; forced tunnel
@@ -95,6 +97,24 @@ ipset, firewall/routing и forced-tunnel probes исправны. Cold всё р
 завершается общим `degraded`, пока клиентский тракт не доказан; подтверждённый
 bypass или ошибка обязательного dataplane по-прежнему блокируют mutation.
 
+Setup dataplane gate принимает только безусловный канонический путь домашней
+сети: точный PREROUTING jump и MARK без дополнительных predicates или инверсий,
+точный policy rule и единственный IPv4 default route через выбранный интерфейс
+и сохранённый gateway.
+`unreachable`, `blackhole`, `prohibit`, `throw`, `linkdown`, а также частичные
+правила для отдельного source/destination не подтверждают готовность dataplane.
+Сборщик при этом обязан fail-fast вернуть ошибку каждого заявленного guest,
+per-IP или per-network правила: обязательный home gate не маскирует частичную
+потерю пользовательской политики. Тот же nonzero проходит через VPN switch,
+boot hooks и изменяющие список CLI-команды.
+
+Mocked integration исполняет сами init/NDM entrypoints, а не проверяет их текст:
+инъекция ошибки mutator должна дать ненулевой exit status, освободить runtime
+lock и не запустить следующий сервис или dataplane-шаг. Retry-тесты отдельно
+покрывают отсутствующую policy table с nonzero `iproute2`, TCP-only цепочки,
+near-miss значений, затеняющий `RETURN`, смену source exclusions, конфликтующие
+defaults, потерянные policy rule/table и ошибку чтения `iptables-save`.
+
 ## 6. Tunnel adapters и inventory
 
 VLESS использует общий низкоуровневый read-only probe и не вызывает health
@@ -103,12 +123,17 @@ cycle supervisor. Shadowsocks использует временный localhost-
 desired/link state и forced-interface request.
 
 Inventory `--all` строится из active Mors choice, enabled VLESS registry,
-валидного Shadowsocks config и client VPN interfaces live RCI. WAN/LAN/bridge,
-Wi-Fi, server VPN и disabled connections исключаются. Неизвестный desired state
-даёт `not_checked`.
+операционно заполненного Shadowsocks config и client VPN interfaces live RCI.
+Синтаксически корректный, но незаполненный шаблон Shadowsocks не является
+соединением. RCI inventory принимает обе формы Keenetic API — object и array —
+без зависимости от regex-функций `jq`. WAN/LAN/bridge, Wi-Fi, server VPN и
+disabled connections исключаются. Неизвестный desired state даёт `not_checked`.
 
 Порядок: active, reserves, остальные working connections. Исчерпание бюджета
 после успешного active path даёт общий `degraded`.
+Каждый дополнительный tunnel probe применяет тот же настроенный fallback
+контрольной HTTPS-цели, что и active path: ответ IPv6 не принимается как
+доказательство IPv4-тракта, но после него проверяется резервная IPv4-цель.
 
 ## 7. Deadline и конкурентное состояние
 
@@ -138,6 +163,11 @@ Runtime mutator никогда не получает test lock. Busy возвр�
 безопасной owner metadata. NDM event ставит cancellation marker, cold
 восстанавливает snapshot и освобождает runtime lock, после чего hook продолжает
 изменение.
+
+Если read-only test попал в промежуточный health-state активного VLESS под
+decision lock supervisor, он ограниченно ждёт завершения уже идущего решения и
+только затем фиксирует active connection. Временный `unstable` внутри cycle не
+должен превращать рабочий active tunnel и все registry entries в резервы.
 
 ## 9. Cold transaction и recovery
 
@@ -176,9 +206,14 @@ snapshots и введённый пользователем external IP обра�
 
 ## 11. IPv6
 
-Активные probes IPv4-only (`A`, `curl -4`). AAAA/global IPv6 при отсутствии
+Активные probes IPv4-only (`A`, `curl -4`). Client-facing global IPv6 при отсутствии
 Mors IPv6 routing является пассивным bypass risk и даёт `degraded`, но не
-отменяет подтверждение IPv4 path. Реализация IPv6 routing вне scope.
+отменяет подтверждение IPv4 path. Setup и `mors test` используют один detector
+и одинаковые reason codes: риск существует только при одновременном наличии
+AAAA-ответа через локальный DNS, usable default IPv6 route и global IPv6 на
+домашнем интерфейсе. WAN-only IPv6, unreachable/blackhole default и IPv6-адрес
+внешнего выхода внутри принудительного VLESS-туннеля сами по себе не являются bypass.
+Реализация IPv6 routing вне scope.
 
 ## 12. Release gates
 

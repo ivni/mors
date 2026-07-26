@@ -26,6 +26,34 @@ teardown() {
 	test_lock__acquire recovered
 }
 
+@test "metadata-free runtime lock is reclaimed only after its grace period" {
+	mkdir -p "${MORS_RUNTIME_LOCK_DIR}"
+	for file in pid owner_start token command started_at; do
+		: >"${MORS_RUNTIME_LOCK_DIR}/${file}"
+	done
+
+	MORS_LOCK_EMPTY_STALE_MINUTES=1
+	run runtime_mutation_lock__acquire fresh
+	[ "${status}" -ne 0 ]
+	[ -d "${MORS_RUNTIME_LOCK_DIR}" ]
+
+	touch -d '2 minutes ago' "${MORS_RUNTIME_LOCK_DIR}"
+	runtime_mutation_lock__acquire recovered
+	[ -s "${MORS_RUNTIME_LOCK_DIR}/pid" ]
+	[ "$(cat "${MORS_RUNTIME_LOCK_DIR}/command")" = recovered ]
+}
+
+@test "reported runtime lock acquisition explains a live owner" {
+	runtime_mutation_lock__acquire owner
+	run env -u MORS_RUNTIME_LOCK_TOKEN -u MORS_RUNTIME_LOCK_DEPTH \
+		MORS_LOCK_ROOT="${MORS_LOCK_ROOT}" MORS_RUNTIME_LOCK_DIR="${MORS_RUNTIME_LOCK_DIR}" \
+		MORS_COLD_JOURNAL_DIR="${MORS_COLD_JOURNAL_DIR}" \
+		sh -c '. "$1"; runtime_mutation_lock__acquire_or_explain contender' \
+		sh "${REPO_ROOT}/opt/bin/libs/runtime_lock"
+	[ "${status}" -eq 1 ]
+	[[ "${output}" == *'Другая операция изменения runtime Mors уже выполняется.'* ]]
+}
+
 @test "runtime lock is reentrant and recovery journal blocks mutations" {
 	runtime_mutation_lock__acquire outer
 	runtime_mutation_lock__acquire inner
@@ -65,6 +93,52 @@ teardown() {
 	runtime_mutation_lock__release
 }
 
+@test "bounded runtime wait acquires after a live owner releases" {
+	local ready=${BATS_TEST_TMPDIR}/holder-ready holder
+	env MORS_LOCK_ROOT="${MORS_LOCK_ROOT}" \
+		MORS_RUNTIME_LOCK_DIR="${MORS_RUNTIME_LOCK_DIR}" \
+		MORS_COLD_JOURNAL_DIR="${MORS_COLD_JOURNAL_DIR}" \
+		READY_FILE="${ready}" sh -c '
+			. "$1"
+			runtime_mutation_lock__acquire holder || exit 1
+			: >"${READY_FILE}"
+			sleep 1
+			runtime_mutation_lock__release
+		' sh "${REPO_ROOT}/opt/bin/libs/runtime_lock" &
+	holder=$!
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		[ -e "${ready}" ] && break
+		sleep 0.1
+	done
+	[ -e "${ready}" ]
+
+	runtime_mutation_lock__acquire_wait_or_explain waiter 5
+	wait "${holder}"
+	[ "${MORS_RUNTIME_LOCK_DEPTH}" -eq 1 ]
+}
+
+@test "bounded runtime wait reports an unfinished cold transaction immediately" {
+	mkdir -p "${MORS_COLD_JOURNAL_DIR}"
+
+	run runtime_mutation_lock__acquire_wait_or_explain waiter 5
+
+	[ "${status}" -eq 2 ]
+	[[ "${output}" == *'Изменения заблокированы незавершённым cold test.'* ]]
+}
+
+@test "bounded runtime wait reports an owner after its budget is exhausted" {
+	runtime_mutation_lock__acquire owner
+
+	run env -u MORS_RUNTIME_LOCK_TOKEN -u MORS_RUNTIME_LOCK_DEPTH \
+		MORS_LOCK_ROOT="${MORS_LOCK_ROOT}" MORS_RUNTIME_LOCK_DIR="${MORS_RUNTIME_LOCK_DIR}" \
+		MORS_COLD_JOURNAL_DIR="${MORS_COLD_JOURNAL_DIR}" \
+		sh -c '. "$1"; runtime_mutation_lock__acquire_wait_or_explain contender 0' \
+		sh "${REPO_ROOT}/opt/bin/libs/runtime_lock"
+
+	[ "${status}" -eq 1 ]
+	[[ "${output}" == *'Другая операция изменения runtime Mors уже выполняется.'* ]]
+}
+
 @test "mutating NDM hooks participate in runtime serialization" {
 	local hook
 	for hook in \
@@ -82,10 +156,13 @@ teardown() {
 @test "startup paths attempt cold recovery before normal initialization" {
 	grep -q 'test_cold__recover' "${REPO_ROOT}/opt/etc/ndm/fs.d/15-mors-start.sh"
 	grep -q 'test_cold__recover' "${REPO_ROOT}/opt/etc/init.d/S96mors"
+	grep -q 'runtime_mutation_lock__acquire_wait' "${REPO_ROOT}/opt/etc/init.d/S96mors"
 }
 
 @test "lifecycle and VLESS decision paths nest the runtime lock" {
 	grep -q 'lifecycle__run_locked setup__cmd_install_with_runtime' \
+		"${REPO_ROOT}/opt/bin/main/setup"
+	grep -q "runtime_mutation_lock__acquire_or_explain 'mors setup'" \
 		"${REPO_ROOT}/opt/bin/main/setup"
 	grep -q "runtime_mutation_lock__acquire 'vless decision'" \
 		"${REPO_ROOT}/opt/bin/libs/vless_runtime"

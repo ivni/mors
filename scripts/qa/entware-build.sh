@@ -9,18 +9,77 @@ if [ -z "${package_version}" ] || [[ ! "${package_release}" =~ ^[1-9][0-9]*$ ]];
 	echo 'Makefile has no valid PKG_VERSION/PKG_RELEASE pair.' >&2
 	exit 1
 fi
+
+entware_lock="${ENTWARE_LOCK_FILE:-${repo_root}/scripts/qa/entware.lock}"
+if [ ! -r "${entware_lock}" ]; then
+	echo "Entware revision lock is not readable: ${entware_lock}" >&2
+	exit 1
+fi
+
+locked_feeds_file=''
+python2_compat_dir=''
+cleanup() {
+	[ -n "${python2_compat_dir}" ] && rm -rf "${python2_compat_dir}"
+	[ -z "${locked_feeds_file}" ] || rm -f "${locked_feeds_file}"
+}
+trap cleanup EXIT
+
+locked_feeds_file="$(mktemp)"
+locked_names=''
+locked_feed_count=0
+locked_entware_repo=''
+locked_entware_revision=''
+while read -r lock_name lock_repo lock_revision lock_extra; do
+	case "${lock_name}" in
+		''|'#'*) continue ;;
+	esac
+	case "${lock_repo}" in
+		https://github.com/Entware/*.git) ;;
+		*) lock_repo_invalid=true ;;
+	esac
+	if [ -n "${lock_extra}" ] ||
+		[ "${lock_repo_invalid:-false}" = true ] ||
+		[[ ! "${lock_name}" =~ ^[a-z][a-z0-9_-]*$ ]] ||
+		[[ ! "${lock_revision}" =~ ^[0-9a-f]{40}$ ]]; then
+		echo "Invalid Entware lock entry: ${lock_name} ${lock_repo} ${lock_revision} ${lock_extra}" >&2
+		exit 1
+	fi
+	lock_repo_invalid=false
+	case " ${locked_names} " in
+		*" ${lock_name} "*)
+			echo "Duplicate Entware lock entry: ${lock_name}" >&2
+			exit 1
+			;;
+	esac
+	locked_names="${locked_names} ${lock_name}"
+	if [ "${lock_name}" = entware ]; then
+		locked_entware_repo="${lock_repo}"
+		locked_entware_revision="${lock_revision}"
+	else
+		printf 'src-git %s %s^%s\n' \
+			"${lock_name}" "${lock_repo}" "${lock_revision}" >>"${locked_feeds_file}"
+		locked_feed_count=$((locked_feed_count + 1))
+	fi
+done <"${entware_lock}"
+
+if [ -z "${locked_entware_repo}" ] || [ -z "${locked_entware_revision}" ] ||
+	[ "${locked_feed_count}" -eq 0 ]; then
+	echo 'Entware lock must contain the buildroot and at least one feed.' >&2
+	exit 1
+fi
+
 # Keep the buildroot outside the package source. package/mors is a symlink to
 # repo_root, so nesting Entware below it creates a recursive filesystem loop.
 entware_dir="${ENTWARE_DIR:-${repo_root}.entware-build}"
-entware_repo="${ENTWARE_REPO_URL:-https://github.com/Entware/Entware.git}"
+entware_repo="${ENTWARE_REPO_URL:-${locked_entware_repo}}"
+entware_revision="${ENTWARE_REVISION:-${locked_entware_revision}}"
 entware_config="${ENTWARE_CONFIG:-configs/aarch64-3.10.config}"
 jobs="${JOBS:-$(nproc)}"
-python2_compat_dir=''
 
-cleanup() {
-	[ -n "${python2_compat_dir}" ] && rm -rf "${python2_compat_dir}"
-}
-trap cleanup EXIT
+if [[ ! "${entware_revision}" =~ ^[0-9a-f]{40}$ ]]; then
+	echo "Invalid Entware revision: ${entware_revision}" >&2
+	exit 1
+fi
 
 # Entware globally probes Python 2.7 although only node_legacy needs it.
 # Ubuntu 24.04 no longer ships Python 2. The narrow shim satisfies `-V`, but
@@ -43,22 +102,37 @@ fi
 mkdir -p "$(dirname "${entware_dir}")"
 
 if [ ! -d "${entware_dir}/.git" ]; then
-	git clone --depth=1 "${entware_repo}" "${entware_dir}"
+	mkdir -p "${entware_dir}"
+	git -C "${entware_dir}" init
+	git -C "${entware_dir}" remote add origin "${entware_repo}"
+else
+	git -C "${entware_dir}" remote set-url origin "${entware_repo}"
 fi
+
+git -C "${entware_dir}" fetch --depth=1 origin "${entware_revision}"
+if git -C "${entware_dir}" ls-files --error-unmatch feeds.conf >/dev/null 2>&1; then
+	git -C "${entware_dir}" restore --source=HEAD --worktree -- feeds.conf
+fi
+git -C "${entware_dir}" -c advice.detachedHead=false checkout --detach "${entware_revision}"
 
 cd "${entware_dir}"
-git fetch --depth=1 origin
+cp "${locked_feeds_file}" feeds.conf
 
+printf 'Entware revision: %s\n' "${entware_revision}"
+printf 'Entware builder: %s\n' "${MORS_ENTWARE_BUILDER_ID:-local}"
+
+bash "${repo_root}/scripts/qa/entware-feed-lock.sh" \
+	sync-existing "${entware_lock}" "${entware_dir}"
 scripts/feeds update -a
+bash "${repo_root}/scripts/qa/entware-feed-lock.sh" \
+	verify "${entware_lock}" "${entware_dir}"
 scripts/feeds install -a
 
-if [ ! -f .config ]; then
-	if [ ! -f "${entware_config}" ]; then
-		entware_config="$(find configs -maxdepth 1 -type f -name 'aarch64-*.config' | sort | head -n 1)"
-	fi
-	test -n "${entware_config}"
-	cp "${entware_config}" .config
+if [ ! -f "${entware_config}" ]; then
+	entware_config="$(find configs -maxdepth 1 -type f -name 'aarch64-*.config' | sort | head -n 1)"
 fi
+test -n "${entware_config}"
+cp "${entware_config}" .config
 
 mkdir -p package
 ln -sfn "${repo_root}" package/mors
@@ -82,11 +156,22 @@ bash "${repo_root}/scripts/qa/opkg-version-order.sh" "${host_opkg}" "${package_v
 
 make -j"${jobs}" toolchain/install || make toolchain/install V=sc
 make -j"${jobs}" tools/go-src/compile || make tools/go-src/compile V=sc
+
+mkdir -p "${repo_root}/packages"
+find "${repo_root}/packages" -maxdepth 1 -type f -name 'mors_*_all.ipk' -exec rm -f {} +
+make package/mors/clean
+find bin/targets -type f -name 'mors_*_all.ipk' -exec rm -f {} +
 make -j"${jobs}" package/mors/compile || make package/mors/compile V=sc
 
 find bin/targets -type f -name "${expected_package}" -print -quit | grep -q .
-mkdir -p "${repo_root}/packages"
 find bin/targets -type f -name 'mors_*_all.ipk' -exec cp -f {} "${repo_root}/packages/" \;
 
 echo "Built packages:"
 find "${repo_root}/packages" -maxdepth 1 -type f -name 'mors_*_all.ipk' -print
+
+# Keep only reusable Entware state in the buildroot. A builder image may retain
+# this state, but the Mors package must always be rebuilt from the checkout SHA.
+make package/mors/clean
+find bin/targets -type f -name 'mors_*_all.ipk' -exec rm -f {} +
+rm -f package/mors
+du -sh "${entware_dir}" | awk '{ print "Entware buildroot size: " $1 }'

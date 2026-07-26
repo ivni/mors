@@ -1,0 +1,559 @@
+#!/bin/sh
+
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+. "${MORS_LIB_DIR}/telemetry_store"
+. "${MORS_LIB_DIR}/telemetry_process"
+. "${MORS_LIB_DIR}/lifecycle"
+. "${MORS_LIB_DIR}/service_action"
+
+TELEMETRY_INIT=${TELEMETRY_INIT:-/opt/etc/init.d/S98mors-telemetry}
+TELEMETRY_INIT_SOURCE=${TELEMETRY_INIT_SOURCE:-/opt/apps/mors/etc/init.d/S98mors-telemetry}
+TELEMETRY_ADMIN_LOCK_DIR=${TELEMETRY_ADMIN_LOCK_DIR:-/opt/var/run/mors/telemetry/admin.lock}
+TELEMETRY_ADMIN_LOCK_GRACE=${TELEMETRY_ADMIN_LOCK_GRACE:-5}
+TELEMETRY_ADMIN_LOCK_OWNED=false
+TELEMETRY_TERMINAL_STATE=''
+TELEMETRY_TEMP_SECRET_FILE=''
+TELEMETRY_LIFECYCLE_LOCK_OWNED=false
+MORS_TELEMETRY_SERVICE_ACTION_TIMEOUT=${MORS_TELEMETRY_SERVICE_ACTION_TIMEOUT:-15}
+MORS_TELEMETRY_SERVICE_KILL_AFTER=${MORS_TELEMETRY_SERVICE_KILL_AFTER:-2}
+MORS_TELEMETRY_TIMEOUT_CMD=${MORS_TELEMETRY_TIMEOUT_CMD:-/opt/bin/timeout}
+
+telemetry_lifecycle__stop_sender() {
+	local log
+	log=${MORS_SETUP_DNS_LOG:-}
+	service_action__run "${TELEMETRY_INIT_SOURCE}" stop "${log}" \
+		"${MORS_TELEMETRY_SERVICE_ACTION_TIMEOUT}" \
+		"${MORS_TELEMETRY_SERVICE_KILL_AFTER}" \
+		"${MORS_TELEMETRY_TIMEOUT_CMD}" || return $?
+	telemetry_process__running_pid >/dev/null 2>&1 && return 1
+	return 0
+}
+
+telemetry_cli__process_start() {
+	[ -r "/proc/${1}/stat" ] || return 1
+	awk '{ print $22 }' "/proc/${1}/stat" 2>/dev/null
+}
+
+telemetry_cli__admin_lock_acquire() {
+	local pid='' modified now stored_start='' current_start='' owner_start
+	local parent
+	parent=$(dirname "${TELEMETRY_ADMIN_LOCK_DIR}") || return 1
+	[ ! -L "${parent}" ] && [ ! -L "${TELEMETRY_ADMIN_LOCK_DIR}" ] || return 1
+	mkdir -p "${parent}" || return 1
+	chmod 700 "${parent}" || return 1
+	if ! mkdir "${TELEMETRY_ADMIN_LOCK_DIR}" 2>/dev/null; then
+		[ -r "${TELEMETRY_ADMIN_LOCK_DIR}/pid" ] && pid=$(tr -d '\r\n' <"${TELEMETRY_ADMIN_LOCK_DIR}/pid")
+		case "${pid}" in
+			''|*[!0-9]*) pid='' ;;
+		esac
+		[ -r "${TELEMETRY_ADMIN_LOCK_DIR}/owner_start" ] && \
+			stored_start=$(tr -d '\r\n' <"${TELEMETRY_ADMIN_LOCK_DIR}/owner_start")
+		if [ -n "${pid}" ] && [ -n "${stored_start}" ]; then
+			current_start=$(telemetry_cli__process_start "${pid}" 2>/dev/null || true)
+			[ -z "${current_start}" ] || [ "${current_start}" != "${stored_start}" ] || return 1
+		fi
+		if [ -z "${pid}" ] || [ -z "${stored_start}" ]; then
+			modified=$(stat -c '%Y' "${TELEMETRY_ADMIN_LOCK_DIR}" 2>/dev/null || printf 0)
+			now=$(date -u '+%s')
+			[ $((now - modified)) -ge "${TELEMETRY_ADMIN_LOCK_GRACE}" ] || return 1
+		fi
+		rm -f "${TELEMETRY_ADMIN_LOCK_DIR}/pid" "${TELEMETRY_ADMIN_LOCK_DIR}/owner_start"
+		rmdir "${TELEMETRY_ADMIN_LOCK_DIR}" 2>/dev/null || return 1
+		mkdir "${TELEMETRY_ADMIN_LOCK_DIR}" 2>/dev/null || return 1
+	fi
+	owner_start=$(telemetry_cli__process_start "$$") || owner_start=''
+	[ -n "${owner_start}" ] || {
+		rmdir "${TELEMETRY_ADMIN_LOCK_DIR}" 2>/dev/null || true
+		return 1
+	}
+	umask 077
+	printf '%s\n' "${owner_start}" >"${TELEMETRY_ADMIN_LOCK_DIR}/owner_start" &&
+		chmod 600 "${TELEMETRY_ADMIN_LOCK_DIR}/owner_start" &&
+		printf '%s\n' "$$" >"${TELEMETRY_ADMIN_LOCK_DIR}/pid" &&
+		chmod 600 "${TELEMETRY_ADMIN_LOCK_DIR}/pid" || {
+		rm -f "${TELEMETRY_ADMIN_LOCK_DIR}/pid" "${TELEMETRY_ADMIN_LOCK_DIR}/owner_start"
+		rmdir "${TELEMETRY_ADMIN_LOCK_DIR}" 2>/dev/null || true
+		return 1
+	}
+	TELEMETRY_ADMIN_LOCK_OWNED=true
+}
+
+telemetry_cli__admin_lock_release() {
+	[ "${TELEMETRY_ADMIN_LOCK_OWNED}" = true ] || return 0
+	rm -f "${TELEMETRY_ADMIN_LOCK_DIR}/pid" "${TELEMETRY_ADMIN_LOCK_DIR}/owner_start"
+	rmdir "${TELEMETRY_ADMIN_LOCK_DIR}" 2>/dev/null || true
+	TELEMETRY_ADMIN_LOCK_OWNED=false
+}
+
+telemetry_cli__restore_terminal() {
+	[ -n "${TELEMETRY_TERMINAL_STATE}" ] || return 0
+	stty "${TELEMETRY_TERMINAL_STATE}" 2>/dev/null || true
+	TELEMETRY_TERMINAL_STATE=''
+}
+
+telemetry_cli__cleanup() {
+	telemetry_cli__restore_terminal
+	[ -z "${TELEMETRY_TEMP_SECRET_FILE}" ] || rm -f "${TELEMETRY_TEMP_SECRET_FILE}"
+	TELEMETRY_TEMP_SECRET_FILE=''
+	telemetry_cli__admin_lock_release >/dev/null 2>&1 || true
+	telemetry_cli__lifecycle_lock_release >/dev/null 2>&1 || true
+}
+
+telemetry_cli__lifecycle_lock_acquire() {
+	lifecycle__acquire || return 1
+	TELEMETRY_LIFECYCLE_LOCK_OWNED=${MORS_LIFECYCLE_LOCK_OWNED}
+}
+
+telemetry_cli__lifecycle_lock_release() {
+	[ "${TELEMETRY_LIFECYCLE_LOCK_OWNED}" = true ] || return 0
+	lifecycle__release || return 1
+	TELEMETRY_LIFECYCLE_LOCK_OWNED=false
+}
+
+telemetry_cli__require_ready() {
+	if command -v lifecycle_state__require_ready >/dev/null 2>&1; then
+		lifecycle_state__require_ready
+		return $?
+	fi
+	. "${MORS_LIB_DIR}/lifecycle_state"
+	lifecycle_state__require_ready
+}
+
+telemetry_cli__confirm() {
+	local confirmed=${1:-false} answer
+	[ "${confirmed}" = true ] && return 0
+	[ -t 0 ] && [ -t 1 ] || {
+		printf '%s\n' 'Для неинтерактивного выполнения требуется --yes.' >&2
+		return 64
+	}
+	printf '%s' 'Mors будет отправлять обезличенную эксплуатационную телеметрию в Monium. Продолжить? [y/N]: '
+	IFS= read -r answer
+	case "${answer}" in y|Y|yes|YES) return 0 ;; esac
+	printf '%s\n' 'Включение отменено.'
+	return 1
+}
+
+telemetry_cli__read_secret() {
+	local destination=${1} terminal_state key status=0
+	[ -t 0 ] && [ -t 1 ] || return 64
+	telemetry_store__ensure_directories || return 1
+	TELEMETRY_TEMP_SECRET_FILE=${destination}
+	terminal_state=$(stty -g 2>/dev/null) || return 1
+	TELEMETRY_TERMINAL_STATE=${terminal_state}
+	printf '%s' 'API-ключ Monium: '
+	stty -echo || {
+		telemetry_cli__restore_terminal
+		return 1
+	}
+	IFS= read -r key || status=$?
+	telemetry_cli__restore_terminal
+	printf '\n'
+	[ "${status}" -eq 0 ] || return "${status}"
+	umask 077
+	printf '%s\n' "${key}" >"${destination}" || return 1
+	chmod 600 "${destination}" || return 1
+	key=''
+}
+
+telemetry_cli__status_json() {
+	local configured=false enabled=false running=false project='' cluster='' service=''
+	local queue_depth=0 queue_overflow=false dropped_samples=0
+	local last_attempt=null last_success=null last_error=null last_http=null state_status=0
+	if [ -e "${TELEMETRY_CONFIG_FILE}" ]; then
+		telemetry_store__config_valid || return 4
+		configured=true
+		enabled=$("${TELEMETRY_JQ}" -r '.enabled' "${TELEMETRY_CONFIG_FILE}")
+		project=$("${TELEMETRY_JQ}" -r '.project' "${TELEMETRY_CONFIG_FILE}")
+		cluster=$("${TELEMETRY_JQ}" -r '.cluster' "${TELEMETRY_CONFIG_FILE}")
+		service=$("${TELEMETRY_JQ}" -r '.service' "${TELEMETRY_CONFIG_FILE}")
+	fi
+	telemetry_process__running_pid >/dev/null 2>&1 && running=true
+	if [ -e "${TELEMETRY_QUEUE_FILE}" ]; then
+		[ -f "${TELEMETRY_QUEUE_FILE}" ] && [ ! -L "${TELEMETRY_QUEUE_FILE}" ] || return 4
+		queue_depth=$(telemetry_store__queue_depth) || return 4
+	fi
+	if [ -e "${TELEMETRY_STATE_FILE}" ]; then
+		telemetry_store__state_valid || state_status=4
+		if [ "${state_status}" -eq 0 ]; then
+			last_attempt=$("${TELEMETRY_JQ}" -c '.last_attempt_at' "${TELEMETRY_STATE_FILE}")
+			last_success=$("${TELEMETRY_JQ}" -c '.last_success_at' "${TELEMETRY_STATE_FILE}")
+			last_error=$("${TELEMETRY_JQ}" -c '.last_error' "${TELEMETRY_STATE_FILE}")
+			last_http=$("${TELEMETRY_JQ}" -c '.last_http_code' "${TELEMETRY_STATE_FILE}")
+			queue_overflow=$("${TELEMETRY_JQ}" -c '.queue_overflow' "${TELEMETRY_STATE_FILE}")
+			dropped_samples=$("${TELEMETRY_JQ}" -c '.dropped_samples' "${TELEMETRY_STATE_FILE}")
+		fi
+	fi
+	[ "${state_status}" -eq 0 ] || return "${state_status}"
+	"${TELEMETRY_JQ}" -n \
+		--argjson configured "${configured}" --argjson enabled "${enabled}" \
+		--argjson running "${running}" --arg project "${project}" \
+		--arg cluster "${cluster}" --arg service "${service}" \
+		--argjson queue_depth "${queue_depth}" \
+		--argjson queue_overflow "${queue_overflow}" --argjson dropped_samples "${dropped_samples}" \
+		--argjson last_attempt "${last_attempt}" --argjson last_success "${last_success}" \
+		--argjson last_error "${last_error}" --argjson last_http "${last_http}" '{
+			schema_version: 1,
+			provider: (if $configured then "monium" else null end),
+			configured: $configured,
+			enabled: $enabled,
+			running: $running,
+			project: (if $configured then $project else null end),
+			cluster: (if $configured then $cluster else null end),
+			service: (if $configured then $service else null end),
+			queue_depth: $queue_depth,
+			queue_overflow: $queue_overflow,
+			dropped_samples: $dropped_samples,
+			last_attempt_at: $last_attempt,
+			last_success_at: $last_success,
+			last_error: $last_error,
+			last_http_code: $last_http
+		}'
+}
+
+cmd_telemetry_status() {
+	local json=false data
+	case "$#" in
+		0) ;;
+		1) [ "${1}" = --json ] || { printf '%s\n' 'Использование: mors telemetry status [--json]' >&2; return 64; }; json=true ;;
+		*) printf '%s\n' 'Использование: mors telemetry status [--json]' >&2; return 64 ;;
+	esac
+	data=$(telemetry_cli__status_json) || {
+		printf '%s\n' 'Состояние telemetry повреждено или недоступно.' >&2
+		return 4
+	}
+	if [ "${json}" = true ]; then
+		printf '%s\n' "${data}"
+		return 0
+	fi
+	printf 'Телеметрия: %s\n' "$(printf '%s\n' "${data}" | "${TELEMETRY_JQ}" -r '
+		if .enabled and .running then "ВКЛЮЧЕНА"
+		elif .enabled then "ОШИБКА: SENDER НЕ РАБОТАЕТ"
+		elif .configured then "ОТКЛЮЧЕНА"
+		else "НЕ НАСТРОЕНА" end')"
+	printf 'Провайдер: %s\n' "$(printf '%s\n' "${data}" | "${TELEMETRY_JQ}" -r '.provider // "нет"')"
+	printf 'Project: %s\n' "$(printf '%s\n' "${data}" | "${TELEMETRY_JQ}" -r '.project // "нет"')"
+	printf 'Очередь: %s\n' "$(printf '%s\n' "${data}" | "${TELEMETRY_JQ}" -r '.queue_depth')"
+	printf 'Отброшено при переполнении: %s\n' "$(printf '%s\n' "${data}" | "${TELEMETRY_JQ}" -r '.dropped_samples')"
+	printf 'Последняя доставка: %s\n' "$(printf '%s\n' "${data}" | "${TELEMETRY_JQ}" -r '.last_success_at // "ещё не выполнялась"')"
+	printf 'Последняя ошибка: %s\n' "$(printf '%s\n' "${data}" | "${TELEMETRY_JQ}" -r '.last_error // "нет"')"
+}
+
+telemetry_cli__prepare_initial_config() {
+	local project=${1} cluster=${2} service=${3} key_source=${4} temporary_key=${5:-}
+	telemetry_store__write_config "${project}" "${cluster}" "${service}" false || return 1
+	telemetry_store__write_key "${key_source}" || return 1
+	telemetry_store__write_curl_config || return 1
+	. "${MORS_LIB_DIR}/telemetry_otlp"
+	telemetry_otlp__cursor_initialize || return 1
+	[ -z "${temporary_key}" ] || rm -f "${temporary_key}"
+}
+
+telemetry_cli__ensure_init_hook() {
+	local target
+	TELEMETRY_INIT_CREATED=false
+	if [ -L "${TELEMETRY_INIT}" ]; then
+		target=$(readlink "${TELEMETRY_INIT}") || return 1
+		[ "${target}" = "${TELEMETRY_INIT_SOURCE}" ]
+		return $?
+	fi
+	[ ! -e "${TELEMETRY_INIT}" ] || return 1
+	mkdir -p "$(dirname "${TELEMETRY_INIT}")" || return 1
+	ln -s "${TELEMETRY_INIT_SOURCE}" "${TELEMETRY_INIT}" || return 1
+	TELEMETRY_INIT_CREATED=true
+}
+
+telemetry_cli__init_hook_managed() {
+	local target
+	[ -L "${TELEMETRY_INIT}" ] || return 1
+	target=$(readlink "${TELEMETRY_INIT}") || return 1
+	[ "${target}" = "${TELEMETRY_INIT_SOURCE}" ]
+}
+
+cmd_telemetry_enable() {
+	local provider=${1:-} project='' cluster=home service=mors key_source='' confirmed=false
+	local temporary_key='' existing=false prior_enabled=false prior_running=false sender_started=false status
+	[ "${provider}" = monium ] || {
+		printf '%s\n' 'Использование: mors telemetry enable monium [--project PROJECT] [--cluster CLUSTER] [--service SERVICE] [--key-file PATH] [--yes]' >&2
+		return 64
+	}
+	shift
+	while [ "$#" -gt 0 ]; do
+		case "${1}" in
+			--project) [ "$#" -ge 2 ] || return 64; project=${2}; shift 2 ;;
+			--cluster) [ "$#" -ge 2 ] || return 64; cluster=${2}; shift 2 ;;
+			--service) [ "$#" -ge 2 ] || return 64; service=${2}; shift 2 ;;
+			--key-file) [ "$#" -ge 2 ] || return 64; key_source=${2}; shift 2 ;;
+			--yes) confirmed=true; shift ;;
+			*) printf 'Неизвестный параметр: %s\n' "${1}" >&2; return 64 ;;
+		esac
+	done
+	telemetry_cli__lifecycle_lock_acquire || {
+		printf '%s\n' 'Другая lifecycle-операция Mors уже выполняется.' >&2
+		return 3
+	}
+	telemetry_cli__admin_lock_acquire || {
+		printf '%s\n' 'Другая операция telemetry уже выполняется.' >&2
+		telemetry_cli__lifecycle_lock_release >/dev/null 2>&1 || true
+		return 3
+	}
+	trap 'telemetry_cli__cleanup' 0
+	trap 'telemetry_cli__cleanup; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
+	if ! telemetry_cli__require_ready; then
+		printf '%s\n' 'Телеметрия включается только после завершённого mors setup.' >&2
+		status=3
+	elif [ -e "${TELEMETRY_CONFIG_FILE}" ]; then
+		existing=true
+		if [ -n "${project}" ] || [ "${cluster}" != home ] || [ "${service}" != mors ] || [ -n "${key_source}" ]; then
+			printf '%s\n' 'Telemetry уже настроена. Для замены реквизитов сначала выполните disable --purge --yes.' >&2
+			status=64
+		else
+			if telemetry_store__credentials_valid; then
+				prior_enabled=$("${TELEMETRY_JQ}" -r '.enabled' "${TELEMETRY_CONFIG_FILE}")
+			else
+				status=4
+			fi
+		fi
+	else
+		if [ -z "${project}" ]; then
+			[ -t 0 ] && [ -t 1 ] || {
+				printf '%s\n' 'Для неинтерактивного включения требуется --project.' >&2
+				status=64
+			}
+			if [ -z "${status:-}" ]; then
+				printf '%s' 'Project ID Monium: '
+				IFS= read -r project
+			fi
+		fi
+		telemetry_store__safe_value "${project}" 256 || status=64
+		telemetry_store__safe_value "${cluster}" 64 || status=64
+		telemetry_store__safe_value "${service}" 64 || status=64
+		if [ -z "${key_source}" ] && [ -z "${status:-}" ]; then
+			temporary_key="${TELEMETRY_STATE_ROOT}/interactive-key.$$"
+			telemetry_cli__read_secret "${temporary_key}" || status=$?
+			key_source=${temporary_key}
+		fi
+		[ -n "${key_source}" ] && telemetry_store__key_valid "${key_source}" || status=64
+	fi
+	if [ -z "${status:-}" ]; then
+		telemetry_cli__confirm "${confirmed}" || status=$?
+	fi
+	if [ -z "${status:-}" ] && [ "${existing}" = false ]; then
+		telemetry_cli__prepare_initial_config "${project}" "${cluster}" "${service}" "${key_source}" "${temporary_key}" || {
+			telemetry_store__purge
+			status=1
+		}
+	fi
+	rm -f "${temporary_key}"
+	TELEMETRY_TEMP_SECRET_FILE=''
+	if [ -z "${status:-}" ]; then
+		telemetry_process__running_pid >/dev/null 2>&1 && prior_running=true
+		if ! "${TELEMETRY_SENDER_PROGRAM}" test >/dev/null 2>&1; then
+			if [ "${prior_enabled}" = true ]; then
+				printf '%s\n' 'Monium не подтвердил тестовую запись. Существующая настройка не изменена.' >&2
+			else
+				printf '%s\n' 'Monium не подтвердил тестовую запись. Конфигурация сохранена выключенной.' >&2
+			fi
+			status=2
+		else
+			telemetry_store__set_enabled true || status=1
+		fi
+	fi
+	if [ -z "${status:-}" ]; then
+		telemetry_cli__ensure_init_hook || status=1
+		if [ -z "${status:-}" ] && [ "${prior_running}" = false ]; then
+			if "${TELEMETRY_INIT}" start >/dev/null 2>&1; then
+				sender_started=true
+			else
+				status=1
+			fi
+		fi
+	fi
+	if [ -n "${status:-}" ]; then
+		[ "${status}" -eq 2 ] || {
+			[ "${sender_started}" = false ] || "${TELEMETRY_INIT}" stop >/dev/null 2>&1 || true
+			telemetry_store__set_enabled "${prior_enabled}" >/dev/null 2>&1 || true
+			[ "${TELEMETRY_INIT_CREATED:-false}" = false ] || rm -f "${TELEMETRY_INIT}"
+		}
+		telemetry_cli__admin_lock_release
+		telemetry_cli__lifecycle_lock_release
+		trap - 0 HUP INT TERM
+		return "${status}"
+	fi
+	printf '%s\n' 'Телеметрия Monium включена.'
+	telemetry_cli__admin_lock_release
+	telemetry_cli__lifecycle_lock_release
+	trap - 0 HUP INT TERM
+}
+
+cmd_telemetry_test() {
+	local json=false status data
+	case "$#" in
+		0) ;;
+		1) [ "${1}" = --json ] || return 64; json=true ;;
+		*) return 64 ;;
+	esac
+	telemetry_cli__lifecycle_lock_acquire || return 3
+	telemetry_cli__admin_lock_acquire || {
+		telemetry_cli__lifecycle_lock_release >/dev/null 2>&1 || true
+		return 3
+	}
+	trap 'telemetry_cli__cleanup' 0
+	trap 'telemetry_cli__cleanup; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
+	if telemetry_store__credentials_valid; then
+		"${TELEMETRY_SENDER_PROGRAM}" test >/dev/null 2>&1
+		status=$?
+	else
+		status=3
+	fi
+	data=$(telemetry_cli__status_json 2>/dev/null || printf '{}')
+	telemetry_cli__admin_lock_release
+	telemetry_cli__lifecycle_lock_release
+	trap - 0 HUP INT TERM
+	if [ "${json}" = true ]; then
+		printf '%s\n' "${data}" | "${TELEMETRY_JQ}" --argjson delivered "$([ "${status}" -eq 0 ] && printf true || printf false)" '. + {test_delivered: $delivered}'
+	elif [ "${status}" -eq 0 ]; then
+		printf '%s\n' 'Тестовая запись принята Monium.'
+	else
+		printf 'Тестовая запись не доставлена: %s.\n' "$(printf '%s\n' "${data}" | "${TELEMETRY_JQ}" -r '.last_error // "неизвестная ошибка"')" >&2
+	fi
+	[ "${status}" -eq 3 ] && return 3
+	[ "${status}" -eq 0 ] && return 0
+	return 2
+}
+
+telemetry_lifecycle__hook_state() {
+	if [ -L "${TELEMETRY_INIT}" ]; then
+		telemetry_cli__init_hook_managed && {
+			printf '%s\n' managed
+			return 0
+		}
+		printf '%s\n' unexpected
+		return 0
+	fi
+	if [ -e "${TELEMETRY_INIT}" ]; then
+		printf '%s\n' unexpected
+	else
+		printf '%s\n' missing
+	fi
+}
+
+# Upgrade replaces the executable tree underneath long-running shell scripts.
+# Stop only the validated Mors sender before opkg, while keeping config and the
+# managed hook intact so a supported target can restore the captured state.
+telemetry_lifecycle__quiesce_for_upgrade() {
+	local hook_state running=false
+	hook_state=$(telemetry_lifecycle__hook_state) || return 1
+	telemetry_process__running_pid >/dev/null 2>&1 && running=true
+	if [ "${hook_state}" = unexpected ] && [ "${running}" = true ]; then
+		printf '%s\n' 'Обновление остановлено: работающий sender потерял managed init-hook.' >&2
+		return 4
+	fi
+	if [ "${running}" = true ] || [ "${hook_state}" = managed ]; then
+		[ -x "${TELEMETRY_INIT_SOURCE}" ] || return 1
+		telemetry_lifecycle__stop_sender >/dev/null 2>&1 || return 1
+	fi
+}
+
+# A target package without telemetry cannot safely own the sender or its hook.
+# Disable the valid config and remove only the exact managed symlink before
+# opkg. An unrelated operator hook remains untouched and is not executed.
+telemetry_lifecycle__deactivate_for_unsupported_target() {
+	local hook_state
+	hook_state=$(telemetry_lifecycle__hook_state) || return 1
+	telemetry_lifecycle__quiesce_for_upgrade || return $?
+	if telemetry_store__config_valid; then
+		telemetry_store__set_enabled false || return 1
+	elif [ -e "${TELEMETRY_CONFIG_FILE}" ] || [ -L "${TELEMETRY_CONFIG_FILE}" ]; then
+		return 4
+	fi
+	if [ "${hook_state}" = managed ]; then
+		rm -f "${TELEMETRY_INIT}" || return 1
+	elif [ "${hook_state}" = unexpected ]; then
+		printf 'Неожиданный init-hook сохранён при переходе на пакет без telemetry: %s.\n' \
+			"${TELEMETRY_INIT}" >&2
+	fi
+	telemetry_process__running_pid >/dev/null 2>&1 && return 1
+	return 0
+}
+
+# Passive/unconfigured lifecycle permits an operator-owned S98 path but never a
+# Mors-managed hook or a live validated sender process.
+telemetry_lifecycle__passive_runtime_removed() {
+	local hook_state
+	hook_state=$(telemetry_lifecycle__hook_state) || return 1
+	[ "${hook_state}" != managed ] || return 1
+	telemetry_process__running_pid >/dev/null 2>&1 && return 1
+	return 0
+}
+
+# Caller owns the lifecycle lock. The trusted packaged init script is the only
+# executable used for stop; an unexpected system hook is preserved and
+# reported, but it never prevents disabling the valid Mors sender/config.
+telemetry_lifecycle__deactivate() {
+	local purge=${1:-false} hook_state running=false status=0
+	[ "${purge}" = true ] || [ "${purge}" = false ] || return 64
+	hook_state=$(telemetry_lifecycle__hook_state) || return 1
+	telemetry_process__running_pid >/dev/null 2>&1 && running=true
+	if [ "${running}" = true ] || [ "${hook_state}" = managed ]; then
+		[ -x "${TELEMETRY_INIT_SOURCE}" ] || return 1
+		telemetry_lifecycle__stop_sender >/dev/null 2>&1 || return 1
+	fi
+	if telemetry_store__config_valid; then
+		telemetry_store__set_enabled false || return 1
+	elif [ -e "${TELEMETRY_CONFIG_FILE}" ] || [ -L "${TELEMETRY_CONFIG_FILE}" ]; then
+		[ "${purge}" = true ] || status=4
+	fi
+	if [ "${hook_state}" = managed ]; then
+		rm -f "${TELEMETRY_INIT}" || return 1
+	elif [ "${hook_state}" = unexpected ]; then
+		printf 'Неожиданный init-hook сохранён: %s. Переместите его вручную и повторите операцию.\n' \
+			"${TELEMETRY_INIT}" >&2
+		status=4
+	fi
+	[ "${purge}" = false ] || telemetry_store__purge || return 1
+	return "${status}"
+}
+
+cmd_telemetry_disable() {
+	local purge=false confirmed=false status=0
+	while [ "$#" -gt 0 ]; do
+		case "${1}" in
+			--purge) purge=true; shift ;;
+			--yes) confirmed=true; shift ;;
+			*) return 64 ;;
+		esac
+	done
+	[ "${confirmed}" = true ] || {
+		printf '%s\n' 'Для отключения требуется --yes.' >&2
+		return 64
+	}
+	telemetry_cli__lifecycle_lock_acquire || return 3
+	telemetry_cli__admin_lock_acquire || {
+		telemetry_cli__lifecycle_lock_release >/dev/null 2>&1 || true
+		return 3
+	}
+	trap 'telemetry_cli__cleanup' 0
+	trap 'telemetry_cli__cleanup; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
+	telemetry_lifecycle__deactivate "${purge}" || status=$?
+	telemetry_cli__admin_lock_release
+	telemetry_cli__lifecycle_lock_release
+	trap - 0 HUP INT TERM
+	[ "${status}" -eq 0 ] || return "${status}"
+	if [ "${purge}" = true ]; then
+		printf '%s\n' 'Телеметрия отключена, конфигурация и очередь удалены.'
+	else
+		printf '%s\n' 'Телеметрия отключена. Конфигурация сохранена.'
+	fi
+}
+
+cmd_telemetry_cli() {
+	local action=${1:-status}
+	[ "$#" -eq 0 ] || shift
+	case "${action}" in
+		enable) cmd_telemetry_enable "$@" ;;
+		disable) cmd_telemetry_disable "$@" ;;
+		status) cmd_telemetry_status "$@" ;;
+		test) cmd_telemetry_test "$@" ;;
+		*) printf '%s\n' 'Использование: mors telemetry enable|disable|status|test' >&2; return 64 ;;
+	esac
+}

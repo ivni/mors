@@ -1,387 +1,483 @@
 #!/bin/sh
+
+. /opt/apps/mors/bin/libs/telemetry_runtime
+telemetry_runtime__pin_production
+. /opt/apps/mors/bin/libs/main
+. /opt/apps/mors/bin/libs/vpn
+. /opt/apps/mors/bin/libs/vless
 . /opt/apps/mors/bin/libs/lifecycle
+. /opt/apps/mors/bin/libs/lifecycle_state
+. /opt/apps/mors/bin/libs/lifecycle_snapshot
 . /opt/apps/mors/bin/libs/runtime_lock
+. /opt/apps/mors/bin/libs/telemetry_upgrade
+. /opt/apps/mors/bin/libs/upgrade_artifact
 
-lifecycle__guard_shell || exit 1
-runtime_mutation_lock__acquire 'mors upgrade' || exit $?
-trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; lifecycle__release >/dev/null 2>&1 || true' 0
-trap 'exit 130' HUP INT TERM
-#--------------------------------------------------------------------------------------------------------------
-#
-#	Файл обновления пакета
-#
-#--------------------------------------------------------------------------------------------------------------
+MORS_RELEASE_API=${MORS_RELEASE_API:-https://api.github.com/repos/ivni/mors/releases/latest}
+MORS_UPDATE_CACHE=${MORS_UPDATE_CACHE:-/opt/packages/mors-lifecycle}
+MORS_UPDATE_RUNTIME_LOCK_WAIT=${MORS_UPDATE_RUNTIME_LOCK_WAIT:-60}
+MORS_UPDATE_PREFLIGHT_ROOT=${MORS_UPDATE_PREFLIGHT_ROOT:-/tmp}
+MORS_UPDATE_ROLLBACK_STUB=${MORS_UPDATE_ROLLBACK_STUB:-${MORS_LIFECYCLE_ROOT}/rollback-active.sh}
 
-# по умолчанию включаем режим обновления Морса
-UPDATE_MODE=true
+upgrade__usage() {
+	cat <<'EOF'
+Использование:
+  mors update check [--json]
+  mors update apply IPK --rollback-ipk PREVIOUS_IPK --yes
+  mors update recover --yes
+  mors rollback IPK --rollback-ipk CURRENT_IPK --yes
 
-#--------------------------------------------------------------------------------------------------------------
-# Аргументы запуска данного файла
-#--------------------------------------------------------------------------------------------------------------
-# пусто 	- обычный режим проверки версии обновления
-# force  	- режим с полным удалением пакета и принудительным обновлением, даже если версии одинаковые
-# rollback 	- режим отката на предыдущую версию пакета, которая есть в релизах на GitHub
-# full 		- полное удаление пакета со всеми файлами конфигурации, может задаваться вместе с force или rollback
-#--------------------------------------------------------------------------------------------------------------
-#	Функции обновления пакета
-#--------------------------------------------------------------------------------------------------------------
-set_escapes(){
-# Устанавливаем эскейп-последовательности
-# для управления опциями экрана терминала
-	RED="\033[1;31m";
-	GREEN="\033[1;32m";
-	BLUE="\033[36m";
-	NOCL="\033[m";
-	QST="${RED}?${NOCL}"
-}
-WGET='/opt/bin/wget -q --no-check-certificate'
-# Вы полняем команду отключения DNS провайдера без перезагрузки и выхода из сессии
-rci_post()($WGET -qO - --post-data="$1" localhost:79/rci/ > /dev/null 2>&1)
-
-
-has_no_internet_here(){
-#	Если в возвращаемых аргументах нет false значит интернет присутствует
-	# test -z "$(curl -s "localhost:79/rci/show/internet/status" \
-	# | jq -r 'select(.enabled==true and .reliable==true and ."gateway-accessible"==true and ."captive-accessible"==true and ."dns-accessible"==true and .internet==true)')"
-
-	# curl -s "localhost:79/rci/show/internet/status" \
-	# 	| grep -E 'reliable|gateway-accessible|dns-accessible|internet|enabled|captive-accessible' \
-	# 	| grep -q false
-	curl -s "localhost:79/rci/show/internet/status" \
-		| grep -E 'gateway-accessible|dns-accessible|internet|captive-accessible' \
-		| grep -q false
-}
-#--------------------------------------------------------------------------------------------------------------
-print_line(){
-#	Функция печати строки из WIDTH символов "-"
-	printf "%${WIDTH}s\n" | tr " " "-"
+IPK и PREVIOUS_IPK должны иметь соседний файл с суффиксом .sha256.
+EOF
 }
 
-get_n_spaces(){
-#	Функция возвращает сроку из N пробелов, где N это число переданных пробелов в $1
-	printf "%${1}s"
-}
-#--------------------------------------------------------------------------------------------------------------
-diff_len() {
-#	Функция вычисления разницы между шириной WIDTH и длинной переданной строки
-# 	используется для фунции ready
-	charlen=$(echo "${1}" | sed -r "s/[\]033\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g")
-	charlen=${#charlen}
-	echo $(( WIDTH - charlen ))
-}
-
-#--------------------------------------------------------------------------------------------------------------
-ready() {
-#	Функция печати строки состояния текущей операции исполнения
-#	которая печатает переданную строку и оставляет курсор на этой же строке
-        size=$(diff_len "${1}")
-        printf "%b%-${size}s%b" "${1}"
-}
-
-print_error(){
-	print_line
-	echo -e "${RED}[ОШИБКА]${NOCL} ${1}"
-	print_line
-}
-#--------------------------------------------------------------------------------------------------------------
-when_ok() {
-#	Функция работает в купе с ready и применяется следующим образом для примера:
-#	ready 'Запускаем в работу...' {исполняемый код} && when_ok || when_err
-#	печатает слово ГОТОВО зеленым цветом на одной строке с выводимым ready сообщением
-# 	в случае, когда исполняемый код успешно выполнен
-	ok_text=${1:-ГОТОВО}
-	num_left=$((${#ok_text} + 2))
-	to_left="\033[${num_left}D"
-	echo -e "${to_left}${GREEN}${ok_text}${NOCL}"
-}
-
-#--------------------------------------------------------------------------------------------------------------
-when_err() {
-#	Функция работает в купе с ready и применяется следующим образом для примера:
-#	ready 'Запускаем в работу...' {исполняемый код} && when_ok || when_err
-#	печатает слово ОШИБКА красным цветом на одной строке с выводимым ready сообщением
-# 	в случае, когда исполняемый код выполнен с ошибкой
-	err_text=${1:-ОШИБКА}
-	num_left=$((${#err_text} + 1))
-	to_left="\033[${num_left}D"
-	echo -e "${to_left}${RED}${err_text}${NOCL}"
-}
-
-#--------------------------------------------------------------------------------------------------------------
-get_package_name(){
-#	Функция возвращает имя пакета из передаваемой в нее ссылке на ipk пакет
-	echo "${1}" | sed 's/.*\/\(.*ipk\)$/\1/'
-}
-
-#--------------------------------------------------------------------------------------------------------------
-rm_tmp_cache(){
-#	Функция удаляет все временные файлы при установке пакета,
-#	чтобы кеш не мешал установке нового пакета Морс
-
-	# переводим вывод ошибок в стандартный файл err.stdout
-	# в связи с тем, что это единственный способ перенаправить ошибки
-	# об отсутствии доступа к некоторым файлам которые функция find
-	# в купе с xargs выводят в терминал
-	exec 2> err.stdout
-	find / | grep '/tmp' \
-		   | grep -v "${package_name}" | grep mors | xargs rm -rf
-#   Переводим вывод ошибок в терминал
-	rm -f err.stdout; exec 2>&1
-}
-
-#--------------------------------------------------------------------------------------------------------------
-select_release_from_list(){
-#	Функция выводит на экран доступные в репозитории версии пакетов Морс
-# 	и позволяет выбрать один из них в случае использования режима "отката"
-
-	url_list=$(curl -s "${release_url}" | jq -r '.[] | .assets | .[] | .browser_download_url')
-	rel_list=$(echo "${url_list}" | cut -d'/' -f8)
-	num=1; total=$(echo "${rel_list}" | wc -l)
-
-	if [ -n "${rel_list}" ]; then
-		print_line
-		echo -e "${GREEN}Список доступных релизов пакета Морс:${NOCL}"
-		print_line
-#		читаем данные из переменной со списком доступных релизов
-#		и выводим их на экран, при этом крайняя версия пакета всегда в списке первая
-		printf '%s\n' "${rel_list}" |
-		while IFS= read -r release ; do
-			[ "${num}" -eq 1 ] && latest="${release} ${BLUE}[новая версия]${NOCL}" || latest="${release}"
-			n_spaces=$((${#total} - ${#num})); spaces=$(get_n_spaces "${n_spaces}")
-			echo -e "${GREEN}${num}.${NOCL}${spaces} Версия ${latest}"
-			num=$((num + 1))
-		done
-
-#		Производим выбор одного из доступных вариантов в списке релизов
-		while true; do
-			print_line
-			echo -en "${QST}${GREEN} Введите номер из списка${NOCL} [1-${total}, Q-выход, Enter-новая версия]: "
-			read -r num_release
-			case "${num_release}" in
-				[qQ])					# если выбрали выход
-					print_error "Прервано пользователем!"
-					exit 0 ;;
-				[1-["${total}"])		# если выбрали один из номеров из списка
-					print_line
-					eval "${1}=$(echo "${url_list}" | sed -n "${num_release}p")"
-					break ;;
-				'')						# если просто нажали Enter (выбираем 1 позицию - крайний релиз)
-					print_line
-					eval "${1}=$(echo "${url_list}" | sed -n '1p')"
-					break ;;
-				*)						# при прочих вариантах - выводим сообщение об ошибке
-					print_line
-					echo -e "${RED}Введите цифру от 1 до ${total}.${NOCL}" ;;
-				esac
-		done
+upgrade__check() {
+	local json latest current
+	json=${1:-false}
+	latest=$(curl -fsSL "${MORS_RELEASE_API}" | jq -er '.tag_name') || {
+		error 'Не удалось получить сведения о последнем релизе Mors.'
+		return 2
+	}
+	current=$(opkg status mors 2>/dev/null | awk -F': ' '/^Version:/{print $2; exit}')
+	if [ "${json}" = true ]; then
+		jq -n --arg current "${current}" --arg latest "${latest}" \
+			'{schema_version: 1, command: "update check", current: $current, latest: $latest}'
+	else
+		echo "Установлено: ${current:-не определено}"
+		echo "Последний релиз: ${latest}"
 	fi
 }
 
-# ---------------------------------------------------------------------------------------------
-# Удаляем пакет nano из системы если он установлен, вместо него установим nano-full
-# ---------------------------------------------------------------------------------------------
-remove_nano(){
-	nano_name=$(opkg list-installed | grep 'nano ' | cut -d' ' -f1)
-	[ -n "${nano_name}" ] && opkg --force-remove --force-depends remove "${nano_name}" &> /dev/null
+upgrade__verify_artifact() {
+	local artifact=${1}
+	[ -r "${artifact}" ] || {
+		error "IPK не найден: ${artifact}."
+		return 1
+	}
+	[ -r "${artifact}.sha256" ] || {
+		error "Отсутствует digest: ${artifact}.sha256."
+		return 1
+	}
+	upgrade_artifact__verified_digest "${artifact}" >/dev/null || {
+		error "SHA-256 не совпадает для ${artifact}."
+		return 1
+	}
 }
 
-#--------------------------------------------------------------------------------------------------------------
-#	Переменные используемые в обновлении пакета
-#--------------------------------------------------------------------------------------------------------------
+upgrade__preflight_artifacts() {
+	local work_directory result=0
+	[ -d "${MORS_UPDATE_PREFLIGHT_ROOT}" ] && [ ! -L "${MORS_UPDATE_PREFLIGHT_ROOT}" ] || {
+		error 'Недоступен безопасный каталог для preflight IPK.'
+		return 1
+	}
+	work_directory=$(mktemp -d "${MORS_UPDATE_PREFLIGHT_ROOT%/}/mors-upgrade-preflight.XXXXXX") || {
+		error 'Не удалось создать каталог для preflight IPK.'
+		return 1
+	}
+	chmod 700 "${work_directory}" || result=1
+	if [ "${result}" -eq 0 ] && \
+		! upgrade_artifact__preflight "${MORS_UPDATE_ARTIFACT}" "${work_directory}" candidate; then
+		error 'Candidate IPK отклонён: shell preflight не пройден.'
+		result=1
+	fi
+	if [ "${result}" -eq 0 ] && \
+		! upgrade_artifact__preflight "${MORS_UPDATE_ROLLBACK}" "${work_directory}" rollback; then
+		error 'Rollback IPK отклонён: shell preflight не пройден.'
+		result=1
+	fi
+	rmdir "${work_directory}" 2>/dev/null || [ "${result}" -ne 0 ] || result=1
+	return "${result}"
+}
 
-# Ссылка на репозиторий на GitHub для получения крайней версии пакета
-release_url=https://api.github.com/repos/ivni/mors/releases
-# Получаем ссылку на крайний релиз пакета на GitHub
-package_url=$(curl -sH "Accept: application/vnd.github.v3+json" ${release_url}/latest | sed -n 's/.*browser_download_url\": "\(.*\)\"/\1/p;'| tr -d ' ' |  sed '/^$/d')
-# Выделяем имя пакета из ссылки
-package_name=$(get_package_name "${package_url}")
-# путь к файлу конфигурации пакета Морс
-mors_conf=/opt/etc/mors.conf
-# Вычисляем текущую ширину экрана для печати линий определенной ширины
-length=$(stty size 2>/dev/null | cut -d' ' -f2)
-# длина распечатываемой линии символов будет меньше на 12 символов чем ширина экрана
-[ "${length}" -gt 80 ] && WIDTH=$((length*2/3)) || WIDTH=68
+upgrade__reload_installed_runtime() {
+	# opkg has replaced /opt/apps/mors. Reload functions before migrations,
+	# verification or rollback so the installed package validates itself.
+	if [ -r /opt/apps/mors/bin/libs/telemetry_runtime ]; then
+		. /opt/apps/mors/bin/libs/telemetry_runtime || return 1
+		telemetry_runtime__pin_production || return 1
+	fi
+	. /opt/apps/mors/bin/libs/main || return 1
+	. /opt/apps/mors/bin/libs/vpn || return 1
+	. /opt/apps/mors/bin/libs/vless || return 1
+	. /opt/apps/mors/bin/main/setup || return 1
+	if [ -r /opt/apps/mors/bin/libs/telemetry_upgrade ]; then
+		. /opt/apps/mors/bin/libs/telemetry_upgrade || return 1
+	fi
+	if [ -r /opt/apps/mors/bin/libs/upgrade_artifact ]; then
+		. /opt/apps/mors/bin/libs/upgrade_artifact || return 1
+	fi
+}
 
-sed -i 's/\(export TERM=\).*/\1xterm-256color/' /opt/etc/profile
+upgrade__load_committed_plan() {
+	MORS_SETUP_INTERFACE_CLI=$(get_config_value INFACE_CLI)
+	MORS_SETUP_INTERFACE_ENTWARE=$(get_config_value INFACE_ENT)
+	[ -n "${MORS_SETUP_INTERFACE_CLI}" ] && [ -n "${MORS_SETUP_INTERFACE_ENTWARE}" ] || return 1
+	if has_adguard_enable; then
+		MORS_SETUP_DNS_BACKEND=adguard
+	else
+		MORS_SETUP_DNS_BACKEND=dnscrypt
+	fi
+	export MORS_SETUP_INTERFACE_CLI MORS_SETUP_INTERFACE_ENTWARE MORS_SETUP_DNS_BACKEND
+}
 
-#--------------------------------------------------------------------------------------------------------------
-#
-# 	Код исполнения файла
-#
-#--------------------------------------------------------------------------------------------------------------
-# устанавливаем доступные переменные эскейп-последовательностей
-set_escapes
+upgrade__run_migrations() {
+	local active_id legacy_backup
+	if [ -f "${VLESS_REGISTRY_FILE}" ]; then
+		vless_store__ensure || return 1
+		active_id=$(vless_runtime__active_id)
+		vless_domain__apply_generated "${active_id}" false || return 1
+	elif [ -f "${VLESS_CONFIG_FILE}" ]; then
+		legacy_backup=${VLESS_CONFIG_FILE}.legacy-1.1.9
+		[ ! -e "${legacy_backup}" ] || return 1
+		mv -f "${VLESS_CONFIG_FILE}" "${legacy_backup}" || return 1
+		vless_store__ensure || return 1
+		vless_domain__apply_generated '' false || return 1
+	fi
+}
 
-#--------------------------------------------------------------------------------------------------------------
-print_line	
-ready "Проверка наличия интернета"
-has_no_internet_here && {
-	when_err "ОТСУТСТВУЕТ"
-	print_error "Проверьте свое интернет соединение!"
-	exit 1
-} || when_ok "ГОТОВО"
+upgrade__install_artifact() {
+	local operation artifact
+	operation=${1}
+	artifact=${2}
+	case "${operation}" in
+		upgrade) opkg install "${artifact}" ;;
+		rollback) opkg install --force-downgrade "${artifact}" ;;
+		*) return 64 ;;
+	esac
+}
 
-#--------------------------------------------------------------------------------------------------------------
-# если в параметрах есть аргумент full,
-# то не важно на каком он месте мы делаем полное удаление пакета
-if echo "${*}" | grep -q full ; then
-	remove_mode=full
-	UPDATE_MODE=false
-else
-	remove_mode=''
-fi
+upgrade__restart_and_verify() {
+	upgrade__load_committed_plan || return 1
+	setup__activate_core_hooks || return 1
+	(
+		MORS_LIFECYCLE_APPLY=true
+		export MORS_LIFECYCLE_APPLY
+		cmd_mors_init no
+	) >/dev/null 2>&1 || return 1
+	telemetry_upgrade__restore_target "${MORS_UPDATE_TARGET_TELEMETRY}" || return 1
+	lifecycle_transaction__phase verifying || return 1
+	/opt/bin/mors version >/dev/null 2>&1 || return 1
+	setup__verify_committed
+}
 
-#--------------------------------------------------------------------------------------------------------------
-# clear
-#print_line
-#--------------------------------------------------------------------------------------------------------------
+upgrade__verify_passive_runtime() {
+	/opt/bin/mors version >/dev/null 2>&1 || return 1
+	opkg status mors 2>/dev/null | grep -q '^Status: install .* installed$' || return 1
+	setup__verify_runtime_removed
+}
 
-# ищем в параметрах запуска файла наличие ниже перечисленных аргументов
-if echo "${*}" | grep -qv 'force' ; then
-#	Если это не форсированная установка , то проверяем дальше
-	if echo "${*}" | grep -q 'rollback' ; then
-#		Если параметр rollback значит
-#		выбираем версию для обновления на предыдущую версию или "отката"
-		print_line
-		echo
-		echo -e "${RED}[ВНИМАНИЕ]${NOCL} ${GREEN}Активирован режим возврата к предыдущей версии.${NOCL}"
-		echo
-		select_release_from_list package_url
-		package_name=$(get_package_name "${package_url}")
+upgrade__verify_unconfigured() {
+	[ "$(lifecycle_state__read)" = unconfigured ] || return 1
+	upgrade__verify_passive_runtime
+}
 
-	elif [ -f /opt/bin/mors ] && [ -f ${mors_conf} ]; then
-	#	Если это не форсированная установка и не откат, то
-	#	проверяем - обнаружена ли предыдущая версия Морса
-	#	и сравниваем ее версию с новой версией
-		prev_ver=$(cat < ${mors_conf} \
-					| grep -E 'VERSION|RELEASE' \
-					| tr -d '\n' | tr '-' '_' \
-					| sed 's/^APP_VERSION=\(.*\)APP_RELEASE=\(.*\)/\1-\2\n/')
-		next_ver=$(echo "${package_name}" |  sed 's/mors_\(.*\)_all.*/\1/')
-		if [ "${prev_ver}" = "${next_ver}" ] ; then
-			print_error "Морс все еще свеж, обновлений пока нет."
-			exit 1
+upgrade__verify_installed_candidate() (
+	local state=${1} attestation=${2} temporary result=0
+	[ ! -e "${attestation}" ] && [ ! -L "${attestation}" ] || return 1
+	temporary="${attestation}.tmp.$$"
+	[ ! -e "${temporary}" ] && [ ! -L "${temporary}" ] || return 1
+	# Candidate code is loaded only in this child shell. A syntax error while
+	# sourcing it cannot terminate the trusted parent updater that owns rollback.
+	upgrade__reload_installed_runtime || return 1
+	if [ "${state}" = ready ]; then
+		upgrade__run_migrations || result=1
+	fi
+	if [ "${result}" -eq 0 ]; then
+		if [ "${state}" = ready ]; then
+			upgrade__restart_and_verify || result=1
+		else
+			lifecycle_transaction__phase verifying || result=1
+			[ "${result}" -ne 0 ] || \
+				telemetry_upgrade__restore_target "${MORS_UPDATE_TARGET_TELEMETRY}" || result=1
+			[ "${result}" -ne 0 ] || upgrade__verify_unconfigured || result=1
+		fi
+	fi
+	if [ "${result}" -eq 0 ]; then
+		(
+			umask 077
+			printf '%s\n' mors-candidate-verified-v1 >"${temporary}" &&
+				chmod 600 "${temporary}" &&
+				mv "${temporary}" "${attestation}"
+		) || result=1
+	fi
+	[ "${result}" -eq 0 ] || rm -f "${temporary}"
+	return "${result}"
+)
+
+upgrade__commit_installed_candidate() {
+	local state=${1} snapshot attestation result=0
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	attestation=${snapshot}/candidate-verified
+	[ ! -e "${attestation}" ] && [ ! -L "${attestation}" ] || return 1
+	if upgrade__verify_installed_candidate "${state}" "${attestation}" && \
+		upgrade_artifact__candidate_attestation_valid "${attestation}"; then
+		rm -f "${attestation}" || result=1
+		[ "${result}" -ne 0 ] || lifecycle_transaction__finish || result=1
+	else
+		rm -f "${attestation}" 2>/dev/null || true
+		result=1
+	fi
+	return "${result}"
+}
+
+upgrade__parse_apply() {
+	local argument
+	MORS_UPDATE_ARTIFACT=''
+	MORS_UPDATE_ROLLBACK=''
+	MORS_UPDATE_CONFIRMED=false
+	while [ "$#" -gt 0 ]; do
+		argument=$1
+		case "${argument}" in
+			--yes) MORS_UPDATE_CONFIRMED=true ;;
+			--rollback-ipk)
+				shift
+				[ "$#" -gt 0 ] || return 64
+				MORS_UPDATE_ROLLBACK=$1
+				;;
+			-*) return 64 ;;
+			*) [ -z "${MORS_UPDATE_ARTIFACT}" ] || return 64; MORS_UPDATE_ARTIFACT=${argument} ;;
+		esac
+		shift
+	done
+	[ -n "${MORS_UPDATE_ARTIFACT}" ] || return 64
+	[ -n "${MORS_UPDATE_ROLLBACK}" ] || return 64
+	[ "${MORS_UPDATE_CONFIRMED}" = true ] || return 64
+}
+
+upgrade__rollback_failed_apply() {
+	local result previous_state snapshot rollback_log
+	previous_state=$(jq -er '.previous_state' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
+	lifecycle_transaction__phase rolling_back || return 1
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	rollback_log=${snapshot}/rollback-stub.log
+	if [ -f "${MORS_UPDATE_ROLLBACK_STUB}" ] && [ ! -L "${MORS_UPDATE_ROLLBACK_STUB}" ]; then
+		/bin/sh "${MORS_UPDATE_ROLLBACK_STUB}" >"${rollback_log}" 2>&1 || return 1
+	else
+		# Backward-compatible recovery for a transaction created before the
+		# autonomous rollback contract existed.
+		opkg install --force-reinstall --force-downgrade \
+			"${MORS_UPDATE_ROLLBACK}" >"${rollback_log}" 2>&1 || return 1
+	fi
+	(
+		upgrade__reload_installed_runtime || exit 1
+		MORS_LIFECYCLE_APPLY=true
+		export MORS_LIFECYCLE_APPLY
+		lifecycle_snapshot__restore || exit 1
+		if [ "${previous_state}" = ready ]; then
+			upgrade__load_committed_plan || exit 1
+			cmd_mors_init no || exit 1
+			setup__verify_committed
+		else
+			upgrade__verify_passive_runtime
+		fi
+	) >/dev/null 2>&1 || return 1
+	lifecycle_transaction__rollback_finish
+	result=$?
+	[ "${result}" -ne 0 ] || \
+		upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
+	return "${result}"
+}
+
+upgrade__restore_pre_apply() {
+	local previous_state
+	previous_state=$(jq -er '.previous_state' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 1
+	lifecycle_transaction__phase rolling_back || return 1
+	upgrade__reload_installed_runtime || return 1
+	(
+		MORS_LIFECYCLE_APPLY=true
+		export MORS_LIFECYCLE_APPLY
+		lifecycle_snapshot__restore || exit 1
+		if [ "${previous_state}" = ready ]; then
+			upgrade__load_committed_plan || exit 1
+			cmd_mors_init no || exit 1
+			setup__verify_committed
+		else
+			upgrade__verify_passive_runtime
+		fi
+	) >/dev/null 2>&1 || return 1
+	lifecycle_transaction__rollback_finish || return 1
+	upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
+}
+
+upgrade__apply_locked() {
+	local operation state result rollback_result target_capability install_attempted=false snapshot
+	local candidate_fingerprint rollback_fingerprint staged_candidate staged_rollback
+	operation=${1}
+	state=$(lifecycle_state__read) || return 4
+	case "${state}" in ready|unconfigured) ;; *) return 3 ;; esac
+	! lifecycle_state__has_active_marker || return 3
+	candidate_fingerprint=$(upgrade_artifact__verified_digest "${MORS_UPDATE_ARTIFACT}") || return 64
+	rollback_fingerprint=$(upgrade_artifact__verified_digest "${MORS_UPDATE_ROLLBACK}") || return 64
+	if [ -e "${MORS_UPDATE_ROLLBACK_STUB}" ] || [ -L "${MORS_UPDATE_ROLLBACK_STUB}" ]; then
+		upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" || {
+			error "Обновление остановлено: найден небезопасный ${MORS_UPDATE_ROLLBACK_STUB}."
+			return 3
+		}
+	fi
+	upgrade__preflight_artifacts || return 64
+
+	runtime_mutation_lock__acquire_wait_or_explain "mors ${operation}" \
+		"${MORS_UPDATE_RUNTIME_LOCK_WAIT}" || return $?
+	lifecycle_transaction__begin "${operation}" "${state}" "${state}" >/dev/null || {
+		result=$?
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return "${result}"
+	}
+	lifecycle_snapshot__capture || {
+		result=$?
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return "${result}"
+	}
+	snapshot=$(lifecycle_transaction__snapshot_directory) || {
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	}
+	staged_candidate=${snapshot}/candidate.ipk
+	staged_rollback=${snapshot}/rollback.ipk
+	if ! mkdir -p "${MORS_UPDATE_CACHE}" || \
+		! upgrade_artifact__stage_pair "${MORS_UPDATE_ARTIFACT}" "${MORS_UPDATE_ROLLBACK}" \
+			"${snapshot}" "${candidate_fingerprint}" "${rollback_fingerprint}"; then
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || \
+			lifecycle_transaction__mark_recovery_required update_prepare_failed 2>/dev/null || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	fi
+	target_capability=$(telemetry_upgrade__artifact_capability "${staged_candidate}" "${snapshot}") || {
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	}
+	MORS_UPDATE_ARTIFACT=${staged_candidate}
+	MORS_UPDATE_ROLLBACK=${staged_rollback}
+	MORS_UPDATE_TARGET_TELEMETRY=${target_capability}
+	export MORS_UPDATE_ARTIFACT MORS_UPDATE_ROLLBACK MORS_UPDATE_TARGET_TELEMETRY
+	if ! upgrade_artifact__prepare_rollback_stub "${snapshot}" "${rollback_fingerprint}" \
+		"${MORS_UPDATE_ROLLBACK_STUB}" "$(command -v opkg)"; then
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || \
+			lifecycle_transaction__mark_recovery_required update_prepare_failed 2>/dev/null || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	fi
+	lifecycle_transaction__step rollback_stub_prepared || {
+		upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || \
+			lifecycle_transaction__mark_recovery_required update_prepare_failed 2>/dev/null || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	}
+	if ! lifecycle_transaction__phase prepared; then
+		upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
+		lifecycle_transaction__rollback_finish >/dev/null 2>&1 || \
+			lifecycle_transaction__mark_recovery_required update_prepare_failed 2>/dev/null || true
+		runtime_mutation_lock__release >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	if telemetry_upgrade__prepare_target "${MORS_UPDATE_TARGET_TELEMETRY}" && \
+		lifecycle_transaction__phase applying; then
+		install_attempted=true
+	else
+		result=1
+	fi
+
+	if [ "${result:-0}" -eq 0 ] && upgrade__install_artifact "${operation}" "${MORS_UPDATE_ARTIFACT}"; then
+		upgrade__commit_installed_candidate "${state}" || result=1
+	elif [ "${result:-0}" -eq 0 ]; then
+		result=1
+	fi
+
+	if [ "${result:-0}" -ne 0 ]; then
+		if [ "${install_attempted}" = true ]; then
+			upgrade__rollback_failed_apply || rollback_result=$?
+		else
+			upgrade__restore_pre_apply || rollback_result=$?
+		fi
+		if [ "${rollback_result:-0}" -eq 0 ]; then
+			error 'Обновление не завершено. Предыдущая версия восстановлена.'
+			result=2
+		else
+			lifecycle_transaction__mark_recovery_required update_rollback_failed 2>/dev/null || true
+			error "Не удалось восстановить предыдущую версию. Journal сохранён.\nАвтономный откат: /bin/sh ${MORS_UPDATE_ROLLBACK_STUB}"
+			result=2
 		fi
 	else
-	#	Если НЕ обнаружена предыдущая версия Морса
-	#	то это значит, что производим новую установку Морса
-		UPDATE_MODE=false
+		upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
 	fi
-fi
-
-#--------------------------------------------------------------------------------------------------------------
-# получаем из имени файла его номер версии
-version=$(echo "${package_name}" | sed 's/mors_\(.*\)_all.*/\1/; s/-/ /g; s/_/-/' )
-
-# если в параметрах нет аргумента rollback, то выводим линию
-echo "${*}" | grep -q 'rollback' && CL_VER=${RED} || { 
-	print_line
-	CL_VER=${BLUE}
-}
-# запускаем этап установки пакета
-echo -e "${GREEN}Установка пакета МОРС версии ${CL_VER}[${version}]${NOCL}"
-
-# в случае отсутствия возможности создания новой папки
-cd /opt && mkdir -p /opt/packages || {
-	print_error "Невозможно создать папку ${BLUE}/opt/packages${NOCL}";
-	exit 1
-}
-print_line
-
-#--------------------------------------------------------------------------------------------------------------
-ready 'Обновляем библиотеку пакетов opkg...'
-{
-	opkg update
-} &>/dev/null && when_ok || when_err
-
-# удаляем nano, чтобы поставить nano-full
-remove_nano
-
-#--------------------------------------------------------------------------------------------------------------
-ready 'Загружаем пакет...'
-{
-
-	cd /opt/packages
-	rm -f "/opt/packages/${package_name}"
-	curl -sOL "${package_url}"
-
-} &>/dev/null && when_ok || when_err
-# в случае если отсутствует соединение с интернетом
-! [ -f "${package_name}" ] && {
-	print_error "Проверьте свое интернет соединение!"
-	exit 1
+	runtime_mutation_lock__release || [ "${result:-0}" -ne 0 ] || result=1
+	return "${result:-0}"
 }
 
-#--------------------------------------------------------------------------------------------------------------
-# если обнаружена предыдущая незавершенная установка пакета
-if [ -f /opt/bin/mors ] && mors | grep -q 'Настройка пакета не завершена' ; then
-	ready 'Удаляем незавершенную ранее установку пакета ...'
-	mors uninstall "${remove_mode}" yes &>/dev/null && when_ok || when_err
-else
-#	если все хорошо и обнаружена предыдущая версия пакета, то удаляем ее
-	if [ -f /opt/bin/mors ]; then
-		ver=$(grep "APP_VERSION=" "${mors_conf}" | cut -d'=' -f2)
-		rel=$(grep "APP_RELEASE=" "${mors_conf}" | cut -d'=' -f2)
-		#ready "Удаляем предыдущую версию пакета  [${ver} ${rel}]..."
-		mors uninstall "${remove_mode}" yes # && when_ok || when_err
-	fi
-fi
-
-#--------------------------------------------------------------------------------------------------------------
-ready "Устанавливаем новую версию пакета [${version}]..."
-{
-	opkg update &> /dev/null
-	opkg install "/opt/packages/${package_name}"
-
-} &>/dev/null && when_ok || when_err
-
-#--------------------------------------------------------------------------------------------------------------
-connect_home_nets(){
-	# подключаем одну гостевую сеть к Морсу, если она имеется
-	/opt/sbin/ip a | grep global | grep -v br0 | grep -qE br[1-9] &&  {
-		clear
-		mors vpn net add
+upgrade__apply() {
+	local operation
+	operation=${1}
+	shift
+	# Remove the public action name (`apply` or `rollback`) forwarded by CLI.
+	shift
+	upgrade__parse_apply "$@" || {
+		upgrade__usage
+		return 64
 	}
+	lifecycle__run_locked upgrade__apply_locked "${operation}"
 }
 
-if ! [ -f /opt/bin/mors ] ; then
-	print_line
-# 	если файл пакета не найден после установки пакета, значит произошла ошибка
-	print_error "Пакет установлен некорректно - отсутствуют исполняемые файлы!"
-	echo -e "${GREEN}Попробуйте установить пакет вручную командой "
-	echo -e "${BLUE}'opkg update && opkg install /opt/packages/${package_name}'${NOCL}"
-	print_line
-	exit 1
-else
-	sleep 1
-	curl -s "http://localhost:79/rci/opkg/dns-override" | grep -q true || {
-		# Отключаем системный DNS-сервер роутера
-		echo 'Отключаем работу через DNS-провайдера  роутера...'
-		echo "Возможно, что сейчас произойдет выход из сессии..."
-		echo "В этом случае необходимо заново войти в сессию по ssh"
-		echo "и выполнить команду 'mors setup ${UPDATE_MODE}'"
-		rci_post '[{"opkg": {"dns-override": true}},{"system": {"configuration": {"save": true}}}]' &>/dev/null 
-	}
-		# 	если файл пакета найден после установки пакета,
-	# 	то запускаем установку и затем тестирование пакета
-	mors setup "${UPDATE_MODE}" && {
-		# подключаем гостевые сети, если они имется
-		connect_home_nets
-		print_line
-		echo 'Тестируем настройки...'
-		# Setup may have started the long-lived VLESS supervisor. Release the
-		# mutation transaction so the supervisor can acquire its own token before
-		# the read-only end-to-end test.
-		runtime_mutation_lock__release >/dev/null 2>&1 || true
-		unset MORS_RUNTIME_LOCK_TOKEN MORS_RUNTIME_LOCK_DEPTH
-		sleep 1
-#		В данном случае, чтобы не печатать линию после
-#		окончания тестирования дважды передаем параметр upgrade
-		mors test --verbose
-	}
-fi
+upgrade__recover_locked() {
+	local operation phase snapshot result
+	operation=$(jq -er '.operation' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 3
+	phase=$(jq -er '.phase' "$(lifecycle_transaction__journal_file)" 2>/dev/null) || return 4
+	case "${operation}" in
+		upgrade|rollback) ;;
+		*) return 3 ;;
+	esac
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 4
+	runtime_mutation_lock__acquire_wait_or_explain 'mors update recover' \
+		"${MORS_UPDATE_RUNTIME_LOCK_WAIT}" || return $?
+	case "${phase}" in
+		planning)
+			lifecycle_transaction__rollback_finish
+			result=$?
+			[ "${result}" -ne 0 ] || \
+				upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
+			;;
+		prepared)
+			upgrade__restore_pre_apply
+			result=$?
+			;;
+		completed)
+			lifecycle_transaction__reconcile_completed
+			result=$?
+			[ "${result}" -ne 0 ] || \
+				upgrade_artifact__remove_rollback_stub "${MORS_UPDATE_ROLLBACK_STUB}" >/dev/null 2>&1 || true
+			;;
+		*)
+			MORS_UPDATE_ROLLBACK=${snapshot}/rollback.ipk
+			if upgrade__verify_artifact "${MORS_UPDATE_ROLLBACK}" && upgrade__rollback_failed_apply; then
+				result=0
+			else
+				result=1
+			fi
+			;;
+	esac
+	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
+	[ "${result}" -eq 0 ] || lifecycle_transaction__mark_recovery_required update_recovery_failed 2>/dev/null || true
+	return "${result}"
+}
 
-rm -f upgrade install
-runtime_mutation_lock__release || exit 1
-lifecycle__unguard_shell || exit 1
+upgrade__recover() {
+	[ "${2:-}" = --yes ] || return 64
+	lifecycle__run_locked upgrade__recover_locked
+}
 
+case "${1:-check}" in
+	check)
+		case "${2:-}" in
+			'') upgrade__check false ;;
+			--json) upgrade__check true ;;
+			*) upgrade__usage; exit 64 ;;
+		esac
+		;;
+	apply) upgrade__apply upgrade "$@" ;;
+	rollback) upgrade__apply rollback "$@" ;;
+	recover) upgrade__recover "$@" ;;
+	*) upgrade__usage; exit 64 ;;
+esac

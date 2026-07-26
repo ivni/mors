@@ -29,7 +29,9 @@ setup() {
 	local version='9.9.9~beta1-4'
 
 	mkdir -p "${artifact_dir}" "${control_dir}" \
-		"${data_dir}/opt/apps/mors/bin/libs" "${outer_dir}"
+		"${data_dir}/opt/apps/mors/bin/libs" \
+		"${data_dir}/opt/apps/mors/bin/main" \
+		"${data_dir}/opt/apps/mors/etc/init.d" "${outer_dir}"
 	printf '%s\n' \
 		'Package: mors' \
 		"Version: ${version}" \
@@ -37,6 +39,15 @@ setup() {
 	: >"${data_dir}/opt/apps/mors/bin/mors"
 	: >"${data_dir}/opt/apps/mors/bin/libs/main"
 	: >"${data_dir}/opt/apps/mors/bin/libs/test"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_runtime"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_store"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_otlp"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_process"
+	: >"${data_dir}/opt/apps/mors/bin/libs/telemetry_upgrade"
+	: >"${data_dir}/opt/apps/mors/bin/libs/upgrade_artifact"
+	: >"${data_dir}/opt/apps/mors/bin/main/telemetry-sender"
+	: >"${data_dir}/opt/apps/mors/etc/init.d/S98mors-telemetry"
 	printf '2.0\n' >"${outer_dir}/debian-binary"
 	tar -czf "${outer_dir}/control.tar.gz" -C "${control_dir}" ./control
 	tar -czf "${outer_dir}/data.tar.gz" -C "${data_dir}" ./opt
@@ -67,6 +78,39 @@ setup() {
 		"${REPO_ROOT}/scripts/qa/entware-build.sh"
 }
 
+@test "package workflow resolves and verifies an immutable Entware builder" {
+	local workflow=${REPO_ROOT}/.github/workflows/package.yml
+	local dockerfile=${REPO_ROOT}/builder/entware/Dockerfile
+
+	grep -q 'runs-on: ubuntu-24.04' "${workflow}"
+	grep -q 'docker buildx imagetools inspect' "${workflow}"
+	grep -q 'docker buildx build' "${workflow}"
+	grep -q 'Unable to publish Entware builder after' "${workflow}"
+	grep -q -- '--platform linux/amd64' "${workflow}"
+	grep -q 'image: ${{ needs.builder.outputs.image }}' "${workflow}"
+	grep -q 'bash scripts/qa/verify-entware-builder.sh' "${workflow}"
+	grep -q 'bash scripts/qa/entware-builder-package.sh' "${workflow}"
+	! grep -q 'run: bash scripts/qa/entware-build.sh' "${workflow}"
+	grep -q 'builder_image:' "${workflow}"
+	! grep -q 'actions/cache@' "${workflow}"
+	grep -Eq '^FROM ubuntu:24\.04@sha256:[0-9a-f]{64} AS runtime-base$' \
+		"${dockerfile}"
+	grep -q '^\*\*$' "${dockerfile}.dockerignore"
+	! grep -q 'TEST_INFRASTRUCTURE' "${dockerfile}.dockerignore"
+	[ "$(grep -c '^ENV FORCE_UNSAFE_CONFIGURE=1$' "${dockerfile}")" -eq 1 ]
+	grep -q -- '--mount=type=bind,source=opt,target=/src/mors/opt,readonly' \
+		"${dockerfile}"
+	grep -q 'directly in the final stage' "${dockerfile}"
+	! grep -q '^COPY ' "${dockerfile}"
+	grep -q 'runtime-dependencies.mk' "${REPO_ROOT}/Makefile"
+	grep -q 'make package/mors/clean' "${REPO_ROOT}/scripts/qa/entware-build.sh"
+	grep -q 'rm -f package/mors' "${REPO_ROOT}/scripts/qa/entware-build.sh"
+	grep -q -- '-C package/mors' \
+		"${REPO_ROOT}/scripts/qa/entware-builder-package.sh"
+	! grep -q 'package/mors/compile' \
+		"${REPO_ROOT}/scripts/qa/entware-builder-package.sh"
+}
+
 @test "release publication depends on QA package and artifact gates" {
 	local workflow=${REPO_ROOT}/.github/workflows/release.yml
 	local artifact_line tag_line
@@ -75,6 +119,7 @@ setup() {
 	grep -q 'uses: ./\.github/workflows/qa.yml' "${workflow}"
 	grep -q 'uses: ./\.github/workflows/package.yml' "${workflow}"
 	grep -q 'verify-release-artifact.sh' "${workflow}"
+	grep -q 'needs.package.outputs.builder_image' "${workflow}"
 	grep -q 'git tag -a' "${workflow}"
 	grep -q -- '--verify-tag' "${workflow}"
 

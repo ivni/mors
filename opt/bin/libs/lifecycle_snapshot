@@ -1,0 +1,545 @@
+#!/bin/sh
+
+# Exact file/service snapshot for lifecycle operations. Runtime firewall/ipset
+# cleanup remains the responsibility of the owning operation adapter.
+
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+. "${MORS_LIB_DIR}/service_action"
+
+MORS_TELEMETRY_INIT=${MORS_TELEMETRY_INIT:-/opt/etc/init.d/S98mors-telemetry}
+MORS_TELEMETRY_INIT_SOURCE=${MORS_TELEMETRY_INIT_SOURCE:-/opt/apps/mors/etc/init.d/S98mors-telemetry}
+MORS_LEGACY_XRAY_INIT=${MORS_LEGACY_XRAY_INIT:-/opt/etc/init.d/S97xray}
+MORS_XRAY_INIT_SOURCE=${MORS_XRAY_INIT_SOURCE:-/opt/apps/mors/etc/init.d/S97xray}
+MORS_LIFECYCLE_SERVICE_ACTION_TIMEOUT=${MORS_LIFECYCLE_SERVICE_ACTION_TIMEOUT:-15}
+MORS_LIFECYCLE_SERVICE_KILL_AFTER=${MORS_LIFECYCLE_SERVICE_KILL_AFTER:-2}
+MORS_LIFECYCLE_TIMEOUT_CMD=${MORS_LIFECYCLE_TIMEOUT_CMD:-/opt/bin/timeout}
+MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT=${MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT:-15}
+MORS_LIFECYCLE_SERVICE_RETRY_INTERVAL=${MORS_LIFECYCLE_SERVICE_RETRY_INTERVAL:-1}
+MORS_LIFECYCLE_SERVICE_RUNNING_STABLE_SECONDS=${MORS_LIFECYCLE_SERVICE_RUNNING_STABLE_SECONDS:-3}
+MORS_LIFECYCLE_SERVICE_CAPTURE_RUNNING_CHECKS=${MORS_LIFECYCLE_SERVICE_CAPTURE_RUNNING_CHECKS:-3}
+MORS_LIFECYCLE_SERVICE_CAPTURE_INTERVAL=${MORS_LIFECYCLE_SERVICE_CAPTURE_INTERVAL:-2}
+
+lifecycle_snapshot__service_log_path() {
+	local transaction_directory
+	if [ -n "${MORS_SETUP_DNS_LOG:-}" ]; then
+		printf '%s\n' "${MORS_SETUP_DNS_LOG}"
+	else
+		transaction_directory=$(lifecycle_transaction__directory) || return 1
+		printf '%s/lifecycle-services.log\n' "${transaction_directory}"
+	fi
+}
+
+lifecycle_snapshot__prepare_service_log() {
+	local log
+	log=$(lifecycle_snapshot__service_log_path) || return 1
+	[ ! -L "${log}" ] || return 1
+	if [ -e "${log}" ] && [ ! -f "${log}" ]; then
+		return 1
+	fi
+	(umask 077; : >>"${log}") || return 1
+	chmod 600 "${log}"
+}
+
+lifecycle_snapshot__service_action() {
+	local service action log
+	service=${1}
+	action=${2}
+	log=$(lifecycle_snapshot__service_log_path) || return 1
+	service_action__run "${service}" "${action}" "${log}" \
+		"${MORS_LIFECYCLE_SERVICE_ACTION_TIMEOUT}" \
+		"${MORS_LIFECYCLE_SERVICE_KILL_AFTER}" \
+		"${MORS_LIFECYCLE_TIMEOUT_CMD}"
+}
+
+lifecycle_snapshot__service_state() {
+	local service log action_timeout
+	service=${1}
+	action_timeout=${2:-${MORS_LIFECYCLE_SERVICE_ACTION_TIMEOUT}}
+	log=$(lifecycle_snapshot__service_log_path 2>/dev/null || true)
+	service_action__state "${service}" status "${log}" \
+		"${action_timeout}" \
+		"${MORS_LIFECYCLE_SERVICE_KILL_AFTER}" \
+		"${MORS_LIFECYCLE_TIMEOUT_CMD}"
+}
+
+lifecycle_snapshot__capture_service_state() {
+	local service state checks interval observed=1
+	service=${1}
+	checks=${MORS_LIFECYCLE_SERVICE_CAPTURE_RUNNING_CHECKS}
+	interval=${MORS_LIFECYCLE_SERVICE_CAPTURE_INTERVAL}
+	case "${checks}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	case "${interval}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	state=$(lifecycle_snapshot__service_state "${service}") || return 1
+	if [ "${state}" != running ] || [ "${checks}" -le 1 ]; then
+		printf '%s\n' "${state}"
+		return 0
+	fi
+	while [ "${observed}" -lt "${checks}" ]; do
+		[ "${interval}" -eq 0 ] || sleep "${interval}"
+		state=$(lifecycle_snapshot__service_state "${service}") || return 1
+		if [ "${state}" != running ]; then
+			printf '%s\n' "${state}"
+			return 0
+		fi
+		observed=$((observed + 1))
+	done
+	printf '%s\n' running
+}
+
+lifecycle_snapshot__wait_service_state() {
+	local service expected log started now wall logical=0 elapsed remaining action_timeout step state
+	local stable_started=-1 stable_seconds
+	service=${1}
+	expected=${2}
+	stable_seconds=${MORS_LIFECYCLE_SERVICE_RUNNING_STABLE_SECONDS}
+	case "${stable_seconds}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	log=$(lifecycle_snapshot__service_log_path) || return 1
+	started=$(date +%s) || return 1
+	while :; do
+		now=$(date +%s) || return 1
+		wall=$((now - started))
+		[ "${wall}" -ge "${logical}" ] && elapsed=${wall} || elapsed=${logical}
+		remaining=$((MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT - elapsed - MORS_LIFECYCLE_SERVICE_KILL_AFTER))
+		[ "${remaining}" -gt 0 ] || break
+		action_timeout=${MORS_LIFECYCLE_SERVICE_ACTION_TIMEOUT}
+		[ "${action_timeout}" -le "${remaining}" ] || action_timeout=${remaining}
+		state=$(lifecycle_snapshot__service_state "${service}" "${action_timeout}") || {
+			printf 'restore-status-error service=%s expected=%s elapsed=%s\n' \
+				"${service}" "${expected}" "${elapsed}" >>"${log}"
+			return 1
+		}
+		now=$(date +%s) || return 1
+		wall=$((now - started))
+		[ "${wall}" -ge "${logical}" ] && elapsed=${wall} || elapsed=${logical}
+		if [ "${state}" = "${expected}" ]; then
+			if [ "${expected}" != running ]; then
+				stable_started=${elapsed}
+			else
+				[ "${stable_started}" -ge 0 ] || stable_started=${elapsed}
+			fi
+			if { [ "${expected}" != running ] || \
+				[ $((elapsed - stable_started)) -ge "${stable_seconds}" ]; } && \
+				[ "${elapsed}" -le "${MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT}" ]; then
+				printf 'restore-state service=%s expected=%s elapsed=%s\n' \
+					"${service}" "${expected}" "${elapsed}" >>"${log}"
+				return 0
+			fi
+		else
+			stable_started=-1
+		fi
+		[ "${elapsed}" -ge "${MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT}" ] && break
+		remaining=$((MORS_LIFECYCLE_SERVICE_STATE_TIMEOUT - elapsed))
+		step=${MORS_LIFECYCLE_SERVICE_RETRY_INTERVAL}
+		[ "${step}" -le "${remaining}" ] || step=${remaining}
+		[ "${step}" -gt 0 ] || break
+		sleep "${step}"
+		logical=$((logical + step))
+	done
+	printf 'restore-state-timeout service=%s expected=%s elapsed=%s\n' \
+		"${service}" "${expected}" "${elapsed}" >>"${log}"
+	return 1
+}
+
+lifecycle_snapshot__telemetry_hook_state() {
+	local target
+	if [ -L "${MORS_TELEMETRY_INIT}" ]; then
+		target=$(readlink "${MORS_TELEMETRY_INIT}") || return 1
+		if [ "${target}" = "${MORS_TELEMETRY_INIT_SOURCE}" ]; then
+			printf '%s\n' managed
+		else
+			printf '%s\n' external
+		fi
+	elif [ -e "${MORS_TELEMETRY_INIT}" ]; then
+		printf '%s\n' external
+	else
+		printf '%s\n' missing
+	fi
+}
+
+lifecycle_snapshot__legacy_xray_hook_state() {
+	local target
+	if [ -L "${MORS_LEGACY_XRAY_INIT}" ]; then
+		target=$(readlink "${MORS_LEGACY_XRAY_INIT}") || return 1
+		if [ "${target}" = "${MORS_XRAY_INIT_SOURCE}" ]; then
+			printf '%s\n' managed
+		else
+			printf '%s\n' external
+		fi
+	elif [ -e "${MORS_LEGACY_XRAY_INIT}" ]; then
+		printf '%s\n' external
+	else
+		printf '%s\n' missing
+	fi
+}
+
+lifecycle_snapshot__files() {
+	cat <<EOF
+/opt/etc/mors.conf
+/opt/etc/mors.list
+/opt/etc/hosts
+/opt/etc/dnsmasq.conf
+/opt/etc/dnscrypt-proxy.toml
+/opt/etc/AdGuardHome/AdGuardHome.yaml
+/opt/etc/shadowsocks.json
+/opt/etc/xray/mors.json
+/opt/etc/xray/mors.json.legacy-1.1.9
+/opt/etc/dnsmasq.d/mors.dnsmasq
+/opt/etc/adblock/sources.list
+/opt/etc/adblock/exception.list
+/opt/etc/adblock/ads.mors.list
+/opt/etc/inface_equals
+/opt/etc/init.d/S96mors
+/opt/etc/init.d/S25mors-vless
+/opt/etc/init.d/S97xray
+/opt/etc/init.d/S98mors-telemetry
+/opt/etc/ndm/fs.d/15-mors-start.sh
+/opt/etc/ndm/netfilter.d/100-dns-local
+/opt/etc/ndm/netfilter.d/100-vpn-mark
+/opt/etc/ndm/netfilter.d/100-proxy-redirect
+/opt/etc/ndm/ifcreated.d/mors-iface-add
+/opt/etc/ndm/ifdestroyed.d/mors-iface-del
+/opt/etc/ndm/iflayerchanged.d/100-mors-vpn
+/opt/etc/cron.5mins/vless-watchdog
+/opt/etc/cron.5mins/check_vpn
+/opt/lib/libmbedcrypto.so.16
+${MORS_LIFECYCLE_SERVICE_BASELINE_FILE}
+EOF
+}
+
+lifecycle_snapshot__directories() {
+	cat <<'EOF'
+/opt/etc/mors/vless
+/opt/etc/mors/telemetry
+EOF
+}
+
+lifecycle_snapshot__known_path() {
+	local expected
+	expected=${1}
+	{
+		lifecycle_snapshot__files
+		lifecycle_snapshot__directories
+	} | while IFS= read -r path; do
+		[ "${path}" = "${expected}" ] && exit 0
+	done
+}
+
+lifecycle_snapshot__services() {
+	cat <<'EOF'
+/opt/etc/init.d/S56dnsmasq
+/opt/etc/init.d/S09dnscrypt-proxy2
+/opt/etc/init.d/S99adguardhome
+/opt/etc/init.d/S22shadowsocks
+/opt/etc/init.d/S24xray
+/opt/etc/init.d/S25mors-vless
+/opt/etc/init.d/S98mors-telemetry
+EOF
+}
+
+lifecycle_snapshot__capture() (
+	local snapshot manifest services path index backup state target hook_state
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	manifest="${snapshot}/files.tsv"
+	services="${snapshot}/services.tsv"
+	umask 077
+	lifecycle_snapshot__prepare_service_log || return 1
+	: >"${manifest}.tmp" || return 1
+	index=0
+	{
+		lifecycle_snapshot__files
+		lifecycle_snapshot__directories
+	} | while IFS= read -r path; do
+		index=$((index + 1))
+		backup=$(printf 'file-%03d' "${index}")
+		if [ "${path}" = "${MORS_TELEMETRY_INIT}" ]; then
+			hook_state=$(lifecycle_snapshot__telemetry_hook_state) || exit 1
+			if [ "${hook_state}" = external ]; then
+				printf '%s\texternal\t%s\n' "${backup}" "${path}"
+				continue
+			fi
+		elif [ "${path}" = "${MORS_LEGACY_XRAY_INIT}" ]; then
+			hook_state=$(lifecycle_snapshot__legacy_xray_hook_state) || exit 1
+			if [ "${hook_state}" = external ]; then
+				printf '%s\texternal\t%s\n' "${backup}" "${path}"
+				continue
+			fi
+		fi
+		if [ -L "${path}" ]; then
+			target=$(readlink "${path}") || exit 1
+			printf '%s\n' "${target}" >"${snapshot}/${backup}.link" || exit 1
+			chmod 600 "${snapshot}/${backup}.link" || exit 1
+			printf '%s\tsymlink\t%s\n' "${backup}" "${path}"
+		elif [ -d "${path}" ]; then
+			cp -pR "${path}" "${snapshot}/${backup}" || exit 1
+			printf '%s\tdirectory\t%s\n' "${backup}" "${path}"
+		elif [ -e "${path}" ]; then
+			cp -p "${path}" "${snapshot}/${backup}" || exit 1
+			printf '%s\tfile\t%s\n' "${backup}" "${path}"
+		else
+			printf '%s\tmissing\t%s\n' "${backup}" "${path}"
+		fi
+	done >"${manifest}.tmp" || {
+		rm -f "${manifest}.tmp"
+		return 1
+	}
+	chmod 600 "${manifest}.tmp" || return 1
+	mv -f "${manifest}.tmp" "${manifest}" || return 1
+
+	: >"${services}.tmp" || return 1
+	lifecycle_snapshot__services | while IFS= read -r path; do
+		if [ "${path}" = "${MORS_TELEMETRY_INIT}" ]; then
+			hook_state=$(lifecycle_snapshot__telemetry_hook_state) || exit 1
+			if [ "${hook_state}" = external ]; then
+				printf 'external\t%s\n' "${path}"
+				continue
+			fi
+		fi
+		if [ ! -x "${path}" ]; then
+			state=missing
+		else
+			state=$(lifecycle_snapshot__capture_service_state "${path}") || state=unknown
+		fi
+		printf '%s\t%s\n' "${state}" "${path}"
+	done >"${services}.tmp" || {
+		rm -f "${services}.tmp"
+		return 1
+	}
+	chmod 600 "${services}.tmp" || return 1
+	mv -f "${services}.tmp" "${services}" || return 1
+	if awk -F '\t' '$1 == "unknown" { found = 1 } END { exit(found ? 0 : 1) }' "${services}"; then
+		return 1
+	fi
+	sync
+)
+
+lifecycle_snapshot__restore_files() {
+	local snapshot manifest backup presence path parent target hook_state
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	manifest="${snapshot}/files.tsv"
+	[ -r "${manifest}" ] || return 1
+	while IFS="$(printf '\t')" read -r backup presence path; do
+		[ -n "${path}" ] || return 1
+		lifecycle_snapshot__known_path "${path}" || return 1
+		if [ "${path}" = "${MORS_TELEMETRY_INIT}" ] && [ "${presence}" != external ]; then
+			hook_state=$(lifecycle_snapshot__telemetry_hook_state) || return 1
+			[ "${hook_state}" != external ] || return 1
+		elif [ "${path}" = "${MORS_LEGACY_XRAY_INIT}" ] && [ "${presence}" != external ]; then
+			hook_state=$(lifecycle_snapshot__legacy_xray_hook_state) || return 1
+			[ "${hook_state}" != external ] || return 1
+		fi
+		case "${presence}" in
+			file)
+				[ -e "${snapshot}/${backup}" ] || [ -L "${snapshot}/${backup}" ] || return 1
+				parent=$(dirname "${path}")
+				mkdir -p "${parent}" || return 1
+				rm -f "${path}" || return 1
+				cp -p "${snapshot}/${backup}" "${path}" || return 1
+				;;
+			symlink)
+				[ -r "${snapshot}/${backup}.link" ] || return 1
+				target=$(cat "${snapshot}/${backup}.link") || return 1
+				[ -n "${target}" ] || return 1
+				parent=$(dirname "${path}")
+				mkdir -p "${parent}" || return 1
+				rm -f "${path}" || return 1
+				ln -s "${target}" "${path}" || return 1
+				;;
+			directory)
+				[ -d "${snapshot}/${backup}" ] || return 1
+				parent=$(dirname "${path}")
+				mkdir -p "${parent}" || return 1
+				rm -rf "${path}" || return 1
+				cp -pR "${snapshot}/${backup}" "${path}" || return 1
+				;;
+			missing)
+				if [ -d "${path}" ] && [ ! -L "${path}" ]; then
+					rm -rf "${path}" || return 1
+				else
+					rm -f "${path}" || return 1
+				fi
+				;;
+			external) ;;
+			*) return 1 ;;
+		esac
+	done <"${manifest}"
+}
+
+lifecycle_snapshot__stop_service() {
+	local service state action_status=0 log
+	service=${1}
+	[ -x "${service}" ] || return 0
+	state=$(lifecycle_snapshot__service_state "${service}") || return 1
+	[ "${state}" = stopped ] && return 0
+	[ "${state}" = running ] || return 1
+	lifecycle_snapshot__service_action "${service}" stop >/dev/null 2>&1 || action_status=$?
+	if lifecycle_snapshot__wait_service_state "${service}" stopped; then
+		if [ "${action_status}" -ne 0 ]; then
+			log=$(lifecycle_snapshot__service_log_path) || return 1
+			printf 'restore-stop-postcondition-satisfied service=%s action-exit=%s\n' \
+				"${service}" "${action_status}" >>"${log}"
+		fi
+		return 0
+	fi
+	[ "${action_status}" -eq 0 ] || return "${action_status}"
+	return 1
+}
+
+lifecycle_snapshot__captured_service_state() {
+	local snapshot services path
+	path=${1}
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	services="${snapshot}/services.tsv"
+	[ -r "${services}" ] || return 1
+	awk -F '\t' -v expected="${path}" '
+		$2 == expected { count++; state = $1 }
+		END { if (count == 1) print state; else exit 1 }
+	' "${services}"
+}
+
+lifecycle_snapshot__persist_service_baseline_from() (
+	local services baseline temporary
+	services=${1}
+	baseline=${MORS_LIFECYCLE_SERVICE_BASELINE_FILE}
+	temporary="${baseline}.tmp"
+	[ -f "${services}" ] && [ ! -L "${services}" ] && [ -r "${services}" ] || return 1
+	umask 077
+	mkdir -p "$(dirname "${baseline}")" || return 1
+	cp -p "${services}" "${temporary}" || return 1
+	chmod 600 "${temporary}" || return 1
+	mv -f "${temporary}" "${baseline}" || return 1
+	sync
+)
+
+lifecycle_snapshot__persist_service_baseline() {
+	local snapshot
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	lifecycle_snapshot__persist_service_baseline_from "${snapshot}/services.tsv"
+}
+
+lifecycle_snapshot__migrate_service_baseline() (
+	local directory name rest epoch journal services best_epoch=0 best_services=''
+	[ ! -e "${MORS_LIFECYCLE_SERVICE_BASELINE_FILE}" ] && \
+		[ ! -L "${MORS_LIFECYCLE_SERVICE_BASELINE_FILE}" ] || return 1
+	for directory in "${MORS_LIFECYCLE_TRANSACTION_ROOT}"/setup-*; do
+		[ -d "${directory}" ] && [ ! -L "${directory}" ] || continue
+		name=${directory##*/}
+		rest=${name#setup-}
+		epoch=${rest%%-*}
+		case "${epoch}" in ''|*[!0-9]*) continue ;; esac
+		journal="${directory}/journal.json"
+		services="${directory}/snapshot/services.tsv"
+		[ -f "${journal}" ] && [ ! -L "${journal}" ] || continue
+		[ -f "${services}" ] && [ ! -L "${services}" ] || continue
+		jq -e '
+			.operation == "setup" and
+			.phase == "completed" and
+			.outcome == "success" and
+			.target_state == "ready"
+		' "${journal}" >/dev/null 2>&1 || continue
+		if [ "${epoch}" -ge "${best_epoch}" ]; then
+			best_epoch=${epoch}
+			best_services=${services}
+		fi
+	done
+	[ -n "${best_services}" ] || return 1
+	lifecycle_snapshot__persist_service_baseline_from "${best_services}"
+)
+
+lifecycle_snapshot__baseline_service_state() {
+	local path
+	path=${1}
+	if [ ! -r "${MORS_LIFECYCLE_SERVICE_BASELINE_FILE}" ]; then
+		lifecycle_snapshot__migrate_service_baseline || return 1
+	fi
+	awk -F '\t' -v expected="${path}" '
+		$2 == expected { count++; state = $1 }
+		END {
+			if (count != 1 || state !~ /^(running|stopped|missing|external|unknown)$/) exit 1
+			print state
+		}
+	' "${MORS_LIFECYCLE_SERVICE_BASELINE_FILE}"
+}
+
+lifecycle_snapshot__restore_telemetry_service_state() {
+	local state=${1} hook_state
+	hook_state=$(lifecycle_snapshot__telemetry_hook_state) || return 1
+	case "${state}:${hook_state}" in
+		external:*) return 0 ;;
+		missing:missing) return 0 ;;
+		missing:managed)
+			lifecycle_snapshot__stop_service "${MORS_TELEMETRY_INIT}" || return 1
+			rm -f "${MORS_TELEMETRY_INIT}"
+			;;
+		running:managed)
+			[ -x "${MORS_TELEMETRY_INIT}" ] || return 1
+			lifecycle_snapshot__service_action "${MORS_TELEMETRY_INIT}" restart >/dev/null 2>&1 || return 1
+			lifecycle_snapshot__wait_service_state "${MORS_TELEMETRY_INIT}" running
+			;;
+		stopped:managed)
+			lifecycle_snapshot__stop_service "${MORS_TELEMETRY_INIT}"
+			;;
+		*) return 1 ;;
+	esac
+	return 0
+}
+
+lifecycle_snapshot__quiesce_new_services() {
+	local snapshot services state path hook_state
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	services="${snapshot}/services.tsv"
+	[ -r "${services}" ] || return 1
+	while IFS="$(printf '\t')" read -r state path; do
+		[ "${state}" = missing ] || continue
+		if [ "${path}" = "${MORS_TELEMETRY_INIT}" ]; then
+			hook_state=$(lifecycle_snapshot__telemetry_hook_state) || return 1
+			[ "${hook_state}" != external ] || continue
+		fi
+		[ -x "${path}" ] || continue
+		lifecycle_snapshot__stop_service "${path}" || return 1
+	done <"${services}"
+}
+
+lifecycle_snapshot__restore_telemetry_service() {
+	local state
+	state=$(lifecycle_snapshot__captured_service_state "${MORS_TELEMETRY_INIT}") || return 1
+	lifecycle_snapshot__restore_telemetry_service_state "${state}"
+}
+
+lifecycle_snapshot__restore_services() {
+	local snapshot services state path
+	snapshot=$(lifecycle_transaction__snapshot_directory) || return 1
+	services="${snapshot}/services.tsv"
+	[ -r "${services}" ] || return 1
+	while IFS="$(printf '\t')" read -r state path; do
+		if [ "${path}" = "${MORS_TELEMETRY_INIT}" ]; then
+			lifecycle_snapshot__restore_telemetry_service_state "${state}" || return 1
+			continue
+		fi
+		case "${state}" in
+			running)
+				[ -x "${path}" ] || return 1
+				lifecycle_snapshot__service_action "${path}" restart >/dev/null 2>&1 || return 1
+				lifecycle_snapshot__wait_service_state "${path}" running || return 1
+				;;
+			stopped)
+				lifecycle_snapshot__stop_service "${path}" || return 1
+				;;
+			missing|external) ;;
+			*) return 1 ;;
+		esac
+	done <"${services}"
+}
+
+lifecycle_snapshot__restore() {
+	lifecycle_snapshot__prepare_service_log || return 1
+	lifecycle_snapshot__quiesce_new_services || return 1
+	lifecycle_snapshot__restore_files || return 1
+	lifecycle_snapshot__restore_services || return 1
+	sync
+}

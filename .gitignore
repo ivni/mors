@@ -6,6 +6,7 @@
 .builded
 .devices
 .qa/
+.agents/
 .codex-remote-attachments/
 /TEST_INFRASTRUCTURE.local.md
 packages/

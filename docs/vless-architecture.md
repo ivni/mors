@@ -46,7 +46,7 @@ Mors управляет одним глобальным списком из од
 - отдельный localhost-only диагностический SOCKS inbound для каждого включённого outbound;
 - `direct` и `blackhole` outbound, между которыми supervisor выбирает по глобальной политике.
 
-Любое изменение проходит стадии `parse -> validate -> generate candidate -> xray run -test -> atomic replace -> runtime apply`. Ошибка на любой стадии сохраняет предыдущую рабочую ревизию.
+Любое изменение проходит стадии `parse -> validate -> generate candidate -> xray run -test -> atomic replace -> runtime apply`. Candidate и rollback-файлы сохраняют расширение `.json`, по которому Xray определяет формат. Ошибка на любой стадии сохраняет предыдущую рабочую ревизию.
 
 ### 3.3 Supervisor
 
@@ -64,7 +64,11 @@ Supervisor является отдельным Entware-сервисом. Он н
 - записывать структурированные события;
 - восстанавливать выбор после перезагрузки.
 
-Только один экземпляр supervisor может принимать решения. Process lock защищает от двух supervisor, а общий decision lock сериализует полный health-cycle со всеми изменяющими CLI-операциями. `status`, `list` и `events` не изменяют runtime state. Отдельный редкий watchdog проверяет наличие процесса и перезапускает сервис, но никогда не выбирает outbound.
+Перед каждым health-cycle supervisor проверяет schema производного
+`state.json`. Отсутствующий или повреждённый файл атомарно пересоздаётся из
+реестра и сохранённого active preference без изменения credentials.
+
+Только один экземпляр supervisor может принимать решения. Process lock защищает от двух supervisor, а общий decision lock сериализует полный health-cycle со всеми изменяющими CLI-операциями. Entware init управляет shell-процессом по защищённому PID-файлу supervisor и перед отправкой сигнала сверяет точный argv через `/proc`, поскольку стандартный `pidof` видит такой процесс только как `sh`. Интервальное ожидание supervisor использует секундные foreground-срезы: это исключает race BusyBox `ash` между background `sleep` и `wait`, `USR1` начинает новый health-cycle не позднее следующего среза, а `TERM` освобождает process lock и завершает сервис без ожидания полного интервала. Если BusyBox `ash` ждёт foreground probe и откладывает trap, init в пределах stop timeout повторно завершает только direct children с заново подтверждённым `PPid` этого supervisor. `status`, `list` и `events` не изменяют runtime state. Отдельный редкий watchdog проверяет наличие процесса и перезапускает сервис, но никогда не выбирает outbound.
 
 ## 4. Машина состояний
 
@@ -123,8 +127,30 @@ disabled -> checking -> standby -> unstable -> unavailable
 Конфигурация и оперативное состояние разделены:
 
 - `/opt/etc/mors/vless` содержит пользовательскую конфигурацию;
-- `/opt/var/lib/mors/vless` содержит последнее активное соединение и ограниченную историю событий;
+- `/opt/var/lib/mors/vless` содержит последнее выбранное VLESS-соединение для восстановления и ограниченную историю событий; это сохранённое предпочтение не считается текущим `active_id`, пока data-plane переведён в `direct_fallback` или fail-closed;
 - `/opt/var/run/mors/vless` содержит только runtime-файлы.
+
+`mors vless status|list` дополнительно ограничивает оперативное состояние
+lifecycle-пакета: роли `active` и `standby` являются текущими только в `ready`
+без active lifecycle marker. Незавершённая транзакция публикуется отдельно как
+`lifecycle_transaction_active: true`, скрывает текущие роли и не меняет
+сохранённый стабильный `lifecycle_state`.
+В `unconfigured` включённые профили имеют состояние `not_configured`, а в
+`recovery_required` — `unknown`; прежний health snapshot публикуется отдельно
+как `last_runtime` и не выдаётся за работающий data-plane.
+
+Системный runtime Xray использует `/opt/etc/init.d/S24xray`, принадлежащий
+Entware-пакету `xray`; Mors не владеет этим файлом и не удаляет его при uninstall.
+Managed exact symlink `/opt/etc/init.d/S97xray`, созданный предыдущими версиями,
+сохраняется в snapshot, снимается при успешном apply и восстанавливается при
+rollback. Внешний `S97xray` определяется до первой мутации setup, фиксируется как
+`external` без копирования, никогда не изменяется rollback и блокирует VLESS activation во избежание
+двух конкурирующих boot hooks. Lifecycle rollback до восстановления файлов
+останавливает Xray и supervisor, затем подтверждает их отсутствие по процессам.
+Восстановление исходно работающих сервисов считается успешным только после
+проверки устойчивого poststate. Остановка уже `dead`/`stopped` процесса
+идемпотентна; сырой exit code init-скрипта сохраняется для диагностики, но не
+перевешивает подтверждённый desired state.
 
 После успешного add/update/enable Mors до запуска Xray синхронизирует IP всех включённых endpoint в `MORS_DESTINATION_EXCLUDED`: сначала добавляет новые, затем удаляет только ранее управляемые VLESS-адреса.
 

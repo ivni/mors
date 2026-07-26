@@ -1,3 +1,81 @@
+## 1.3.0 beta 10 - 2026-07-26
+- GitHub package/release workflows переведены на immutable Entware builder image, адресуемый по проверенному digest и содержащий зафиксированные toolchain, buildroot и runtime-зависимости.
+- Перед сборкой fail-closed verifier подтверждает manifest builder, точные feed/dependency locks, host tools, target stamps и отсутствие исходников или готовых IPK Mors; текущий checkout передаётся через минимальный allowlist и собирается отдельным package submake.
+- Повторная сборка одного SHA использует тот же builder digest и компилирует только Mors вместо повторной подготовки Entware tools и зависимостей; публикация холодного builder защищена ограниченными повторами при временном сетевом сбое.
+
+## 1.3.0 beta 9 - 2026-07-26
+- Чистый VLESS setup теперь ограниченно ждёт подтверждённый переход созданного `Proxy21` в `up` вместо фиксированной задержки, сохраняет точный failing substep в lifecycle journal и запускает supervisor в отдельной commit-фазе с безопасной передачей runtime-lock; долгоживущий worker не наследует временное setup-разрешение.
+- Update до lifecycle mutation проверяет `/bin/sh -n` runtime и maintainer scripts обоих IPK и запрещает data payload вне `/opt/apps/mors`; перед `opkg` создаётся автономный root-only rollback-stub с exact-version verification, а candidate runtime загружается только в дочернем shell и подтверждает успех attestation, которую commit-ит доверенный родитель, поэтому syntax error или ранний `exit 0` новой версии не может уничтожить исполняющий откат updater.
+- Lifecycle service actions теперь оцениваются по подтверждённому desired state: повторная остановка `dead`/`stopped` Xray или Shadowsocks идемпотентна, а `running` принимается только после stability window. Setup сохраняет первый failing substep и exit code, а rollback завершает восстановление по проверенным конечным инвариантам.
+
+## 1.3.0 beta 8 - 2026-07-19
+- `mors update apply`, `mors rollback` и recovery ограниченно ожидают кратковременный runtime-lock VLESS supervisor, сохраняя немедленный отказ при незавершённом cold test и понятную диагностику после исчерпания бюджета.
+- Исправлены обнаруженные router-smoke дефекты uninstall, recovery, setup dataplane, lifecycle-статусов VLESS и диагностики IPv6.
+- Uninstall теперь отличает отсутствие необязательных файлов от реальной ошибки резервного копирования и останавливается при любой ошибке копирования существующей конфигурации.
+- Все lifecycle status/stop/restart проходят через единый wall-clock hard timeout с TERM→KILL границей и transaction-local журналом; ненулевой результат действия сохраняется как диагностика, подтверждённый desired state нормализует повторный `stop`, а неопознанный status остаётся блокирующей ошибкой. Cold activation, snapshot/rollback и recovery не могут бессрочно удерживать lifecycle lock.
+- Setup, uninstall и вызываемые ими AdGuard Home, DNSMasq, DNSCrypt, Shadowsocks, Xray и VLESS-supervisor пути не обходят hard timeout прямыми init-вызовами; timeout и ошибка запуска поднимаются до rollback, который проверяет фактическое состояние каждого восстановленного сервиса.
+- Runtime Xray использует внешний init-скрипт Entware `S24xray`, не заменяя и не удаляя его; принадлежавший старым версиям Mors `S97xray` транзакционно снимается только при доказанном ownership и восстанавливается rollback. Чужой `S97xray` определяется до первой мутации setup, не копируется в snapshot и никогда не заменяется rollback. До восстановления файлов rollback останавливает созданные Xray и VLESS-supervisor и подтверждает отсутствие их процессов.
+- Uninstall восстанавливает DNSCrypt по durable pre-setup service baseline; существующие ready-установки мигрируют baseline из последнего successful setup snapshot, а legacy `unknown` проверяет восстановленный resolver вместо молчаливого приравнивания к `stopped`.
+- Setup после последней сетевой регенерации повторно собирает dataplane и требует два последовательных согласованных снимка token-exact безусловного home-interface PREROUTING jump `MORS_LIST -> MORS_MARK`, безусловной метки `0xd1000/0xffffffff`, точного неинвертированного policy rule и единственного IPv4 default route таблицы `1001` через выбранный тоннель; guest/per-IP, дополнительные predicates, конфликтующий более приоритетный default, unreachable route, suffixed target и substring mark не маскируют отсутствие маршрутизации домашней сети.
+- Для Shadowsocks тот же dataplane gate требует точные TCP и UDP `REDIRECT` на настроенный `SSR_DNS_PORT`; правило другого протокола или порта больше не фиксирует ложное состояние ready.
+- `mors vless status|list` schema v2 учитывает стабильное lifecycle-состояние и active marker: незавершённая транзакция не показывает сохранённые `active/standby` как текущие роли, но сохраняет их отдельно в `last_runtime` без потери профилей и признака `enabled`.
+- Setup и `mors test` используют единый пассивный detector IPv6 bypass: риск требует одновременно AAAA, usable default route и global IPv6 на домашнем интерфейсе; IPv6-адрес выхода внутри VLESS, WAN-only IPv6 и unreachable route не вызывают ложное предупреждение.
+- Develop-uninstall прекращается при неопознанном состоянии AdGuard Home и при любой ошибке stop, удаления hook-файла или `opkg remove`, не выдавая частично выполненное удаление за успешное.
+- Firewall builder теперь fail-fast распространяет ошибки создания и очистки цепочек, ipset, policy routes, а также каждого guest/per-IP правила; системные probes отличают отсутствие объекта от ошибки чтения, штатный `FIB table does not exist` считается отсутствующей policy table, а повторная попытка сверяет полный упорядоченный semantic fingerprint цепочек, удаляет near-miss/затенённые правила, синхронизирует source exclusions, UDP/TCP и MARK rule/table и достраивает ipset вместо принятия частичного dataplane за готовый.
+- Переключение VPN и Shadowsocks, guest DNS/routes, watchdog hooks, boot init и изменяющие список CLI-команды возвращают ошибку верхнему caller и не продолжают зависимый запуск после неуспешного runtime rebuild; корректный существующий Shadowsocks config и его `.mors`-архив остаются идемпотентным успешным входом.
+
+## 1.3.0 beta 7 - 2026-07-19
+- Исправлен первый `mors setup` на чистом Entware: конфигурация DNSCrypt сначала проверяется отдельно, затем DNSCrypt и dnsmasq запускаются ровно по одному разу в порядке зависимостей и проходят ограниченные по времени DNS-проверки на `127.0.0.1:9153` и `127.0.0.1:9753`.
+- Lifecycle-verifier теперь подтверждает не только статус init-скриптов, но и реальные DNS-ответы обоих уровней; подробности cold-start сохраняются в защищённом журнале транзакции.
+- `/opt/etc/hosts` создаётся как обычный файл с правами `0644`, проверяется на подмену симлинком и включён в lifecycle snapshot, поэтому dnsmasq с пользователем `nobody` может прочитать файл, а rollback восстанавливает исходное состояние.
+- Закрыта утечка `umask 077` из lifecycle metadata, snapshot и атомарного сохранения выбранного интерфейса в последующие операции setup.
+- Исправлена семантика `norestart` для настройки dnsmasq и DNSCrypt: подготовка конфигурации больше не запускает скрытые перезапуски перед commit-фазой.
+- Setup безопасно принимает стандартный legacy-интерфейс `Kvas-proxy-vless` на `Proxy21` без удаления его идентичности и восстанавливает прежнее описание при rollback; произвольный чужой `Proxy21` больше не считается управляемым и не перезаписывается.
+- Строгий setup корректно принимает пустой, IP-only и одно-доменный пользовательский список; rollback незавершённого создания `Proxy21` подтверждает устойчивое отсутствие интерфейса, но оставляет pending и foreign состояния заблокированными для безопасного восстановления.
+
+## 1.3.0 beta 6 - 2026-07-19
+- Добавлена явно включаемая команда `mors telemetry` для безопасной отправки эксплуатационных OTLP/HTTP JSON-событий в Monium с обязательной тестовой доставкой до запуска sender.
+- Телеметрия изолирована от маршрутизации и VLESS supervisor: sender читает только подтверждённые snapshots и агрегированные счётчики, не запускает health-check и не меняет DNS, firewall, Xray или активное соединение.
+- Добавлен privacy allowlist: в Monium не передаются VLESS URI, UUID, ключи Reality, адреса серверов и клиентов, домены, syslog, debug, имена соединений, API-ключ и необработанный stderr.
+- API-ключ хранится только в файлах `0600`, не попадает в argv и shell history при интерактивном вводе; package entrypoint игнорирует environment overrides и `.curlrc`, пользовательские endpoint, transport, заголовки и отключение проверки TLS запрещены.
+- Добавлена ограниченная offline-очередь: не более 1000 payload и 16 MiB, срок хранения 20 часов, payload до 512 KiB и batch до 4 MiB; неизменное содержимое не переписывается, а при заполнении новый sample отбрасывается без дополнительной записи на USB.
+- `mors telemetry status` отдельно и до перезагрузки показывает факт переполнения и число отброшенных samples, не скрывая текущую ошибку доставки.
+- Производное состояние и временные payload sender размещены в `/tmp`, поэтому нормальная каждоминутная доставка не создаёт write/delete цикл на USB; постоянная очередь используется только после ошибки доставки.
+- Lifecycle snapshot, uninstall, upgrade и rollback учитывают telemetry config, init hook и состояние сервиса; работающий sender останавливается перед заменой файлов и перезапускается уже из нового пакета, а downgrade на пакет без telemetry безопасно отключает передачу. Telemetry mutations используют общий lifecycle lock и не удаляют неожиданный operator-owned hook, а установка IPK остаётся пассивной и никогда не включает внешнюю передачу автоматически.
+- Update устанавливает candidate и выполняет аварийный rollback только из защищённых snapshot-копий, повторно связанных с первоначальными SHA-256 fingerprint; подмена исходного IPK после prepare не влияет на транзакцию.
+
+## 1.3.0 beta 5 - 2026-07-18
+- Исправлен bootstrap чистой VLESS-установки: setup plan предлагает управляемый `Proxy21`, транзакционно создаёт отсутствующий интерфейс и допускает безопасный fail-closed запуск до добавления первого соединения; временные candidate/rollback-конфиги сохраняют расширение `.json`, необходимое Xray для определения формата.
+- Исправлен ложный отказ setup после успешной настройки dnsmasq: install-path теперь явно возвращает успех, не запуская runtime до commit-фазы.
+- Setup атомарно сохраняет выбранный интерфейс в `/opt/etc/inface_equals` до настройки DNSCrypt, корректно прерывается при ошибке активации DNSCrypt и сообщает об успешной установке только после lifecycle-верификации и commit.
+- Для управляемого `Proxy21` setup использует реальный системный интерфейс `t2s21`; ошибки создания route table теперь поднимаются до setup, а lifecycle-verifier сообщает конкретный нарушенный инвариант.
+- Проверка системного Proxy переведена с локализованного отображаемого имени компонента на стабильный идентификатор `proxy`.
+- Разрешено транзакционное обновление пассивной `unconfigured`-установки без запуска runtime и VLESS migrations; rollback/recovery учитывают исходное lifecycle-состояние и уже остановленные сервисы, а возврат к более старому IPK явно разрешает downgrade.
+- `mors test` обращается к активному DNS backend Mors на его реальном порту, а пакет явно устанавливает `coreutils-cksum`, необходимый для проверки неизменности runtime.
+- Исправлены статусы DNS и VLESS: `mors dnsmasq status` показывает настроенный адрес и порт без вывода AdGuard Home, а `mors vpn status` для управляемого Proxy использует каноническое состояние VLESS и не считает пустой fail-closed bootstrap рабочим тоннелем.
+- Исправлен интерактивный ввод VLESS: приглашения для ссылки, имени и переименования остаются видимыми, когда введённое значение безопасно захватывается внутренней командой.
+- Исправлено управление VLESS supervisor через Entware init: живой shell-процесс определяется и останавливается по защищённому PID-файлу с проверкой `/proc`, поэтому `status`, `stop` и `restart` больше не зависят от несовместимого `pidof`.
+- Ожидание между health-cycle supervisor стало прерываемым: `USR1` запускает проверку без задержки до 30 секунд, а `TERM` завершает сервис в пределах init timeout вместо ложного отказа `restart`.
+- Init stop повторно завершает только direct children подтверждённого supervisor с актуальным `PPid`, чтобы BusyBox `ash` мог обработать отложенный `TERM` даже во время активного health-probe.
+- VLESS JSON-команды больше не обрамляются CLI-разделителями, а dispatcher сохраняет документированные health exit codes, включая `1` для состояния `degraded`.
+- VLESS status больше не объявляет сохранённое recovery-соединение текущим active, когда data-plane переведён в прямой резерв или fail-closed.
+- Boot-init ограниченно ждёт первый health-cycle VLESS supervisor и больше не пропускает восстановление Mors firewall и policy routes из-за стартовой гонки lock.
+- Metadata-free runtime lock после прерванной записи больше не блокирует Mors навсегда: после защитного интервала он восстанавливается как stale, а lifecycle-команды явно сообщают о занятом runtime или незавершённом cold test.
+- Интервальное ожидание VLESS supervisor больше не использует подверженную race пару background `sleep`/`wait` в BusyBox `ash`; секундные foreground-срезы сохраняют быстрые `USR1`/`TERM` без вечного `sigsuspend`.
+- Повреждённый производный VLESS health-state теперь распознаётся по schema и атомарно пересоздаётся перед cycle из сохранённого реестра и active preference, не затрагивая credentials.
+- Повреждённые строки производного cache VLESS endpoint больше не передаются в `ipset`: при синхронизации принимаются только IPv4, а cache атомарно очищается от постороннего содержимого.
+- `mors test --all` больше не считает незаполненный Shadowsocks-шаблон включённым соединением и корректно нормализует object/array inventory Keenetic 5 без недоступных на роутере regex-функций `jq`.
+- `mors test` ограниченно ждёт завершения уже идущего VLESS health-decision, поэтому промежуточный `unstable` больше не даёт ложный `tunnel_unavailable` и не помечает active connection как reserve.
+- Дополнительные соединения в `mors test --all` используют настроенную резервную HTTPS-цель, если основная вернула не-IPv4 ответ или не прошла probe; IPv6 exit по-прежнему не засчитывается как IPv4-доказательство.
+
+## 1.3.0 beta 4 - 2026-07-12
+- Установка IPK стала пассивной: init/NDM hooks активируются только в commit-фазе подтверждённого `mors setup`; `mors`, `help` и `version` не запускают скрытую настройку.
+- Setup разделён на read-only RCI inventory/plan и неинтерактивный apply: интерфейс и DNS выбираются до transaction begin, сохраняются в journal и больше не запрашиваются во время мутаций.
+- Добавлены durable lifecycle state, атомарный transaction journal, защищённый snapshot, boot recovery и единый порядок блокировок setup/update/rollback/uninstall.
+- Setup больше не переустанавливает обязательные зависимости и не меняет их opkg ownership; установка Keenetic Proxy не продолжается через shell profile.
+- Uninstall очищает и проверяет runtime до `opkg remove`, восстанавливает штатный DNS и не использует опасный `--autoremove`; `prerm` блокирует прямое небезопасное удаление.
+- Update выполняется in-place, проверяет SHA-256 candidate/rollback IPK и восстанавливает предыдущий пакет и snapshot при ошибке.
+
 ## 1.3.0 beta 3 - 2026-07-12
 - Host `opkg` version-order gate изолирован от отсутствующего на build runner файла `/etc/opkg.conf` явной пустой конфигурацией.
 

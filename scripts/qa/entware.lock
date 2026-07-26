@@ -1,0 +1,9 @@
+# name repository revision
+entware https://github.com/Entware/Entware.git 2d92d7c0b4055cb27901025f8a08d2e6344e849e
+packages https://github.com/Entware/entware-packages.git 7360c3074eeb203a60d30625a42eb0545d42f16a
+routing https://github.com/Entware/entware-routing.git 188ec078acc7c1f36e5cb38d3b9ff1841567a4cb
+telephony https://github.com/Entware/entware-telephony.git 3051065345cd63b4a9e0f414bfac4cfb3d42e056
+oldports https://github.com/Entware/entware-oldpackages-ports.git 29255e06a278672ffbddb3be391f85a8f4028cf2
+rtndev https://github.com/Entware/rtndev.git 457fc537516a33cedb1f4919a3b1960f9ecd5713
+golang https://github.com/Entware/entware-go.git 8cfa3aeae3f907899f526789520e02f49e93c391
+rustlang https://github.com/Entware/entware-rust.git 379fa6ff578506a50e3158b92ac2c09bc22cb450

@@ -11,10 +11,13 @@
 #	Лицензия: Apache License 2.0
 # ------------------------------------------------------------------------------------------
 
-#	Подключаем библиотеку с функциями обработки ndm
-. /opt/apps/mors/bin/libs/ndm_d
-
-cli_inface="$(inface_cli)"
+if [ "${1}" = "hook" ]; then
+	. /opt/apps/mors/bin/libs/lifecycle_state
+	lifecycle_state__runtime_allowed || exit 0
+	# Подключаем библиотеку с функциями обработки ndm
+	. /opt/apps/mors/bin/libs/ndm_d
+	cli_inface="$(inface_cli)"
+fi
 
 if [ "${1}" = "hook" ] && echo "${id}" | grep -q "${cli_inface}"; then
 	ndm_runtime__begin interface_layer_changed || exit $?

@@ -1,0 +1,380 @@
+#!/bin/sh
+
+# Cold-start DNS orchestration used only by the transactional setup path.
+# Configuration is validated before commit; DNSCrypt and dnsmasq are then
+# started once, in dependency order, with bounded end-to-end readiness probes.
+
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+. "${MORS_LIB_DIR}/service_action"
+
+MORS_SETUP_DNSCRYPT_BIN=${MORS_SETUP_DNSCRYPT_BIN:-dnscrypt-proxy}
+MORS_SETUP_DNSCRYPT_CONFIG=${MORS_SETUP_DNSCRYPT_CONFIG:-${DNSCRYPT_CONFIG:-/opt/etc/dnscrypt-proxy.toml}}
+MORS_SETUP_DNSCRYPT_INIT=${MORS_SETUP_DNSCRYPT_INIT:-${DNSCRYPT_DEMON:-/opt/etc/init.d/S09dnscrypt-proxy2}}
+MORS_SETUP_DNSMASQ_INIT=${MORS_SETUP_DNSMASQ_INIT:-${DNSMASQ_DEMON:-/opt/etc/init.d/S56dnsmasq}}
+MORS_SETUP_DNS_TIMEOUT_CMD=${MORS_SETUP_DNS_TIMEOUT_CMD:-/opt/bin/timeout}
+MORS_SETUP_DNS_CHECK_TIMEOUT=${MORS_SETUP_DNS_CHECK_TIMEOUT:-90}
+MORS_SETUP_DNS_READY_TIMEOUT=${MORS_SETUP_DNS_READY_TIMEOUT:-60}
+MORS_SETUP_DNS_STOP_TIMEOUT=${MORS_SETUP_DNS_STOP_TIMEOUT:-30}
+MORS_SETUP_DNS_SERVICE_READY_TIMEOUT=${MORS_SETUP_DNS_SERVICE_READY_TIMEOUT:-15}
+MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT=${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT:-15}
+MORS_SETUP_DNS_SERVICE_KILL_AFTER=${MORS_SETUP_DNS_SERVICE_KILL_AFTER:-2}
+MORS_SETUP_DNS_SERVICE_RUNNING_STABLE_SECONDS=${MORS_SETUP_DNS_SERVICE_RUNNING_STABLE_SECONDS:-3}
+MORS_SETUP_DNS_PROBE_TIMEOUT=${MORS_SETUP_DNS_PROBE_TIMEOUT:-5}
+MORS_SETUP_DNS_RETRY_INTERVAL=${MORS_SETUP_DNS_RETRY_INTERVAL:-2}
+MORS_SETUP_DNS_PROBE_NAME=${MORS_SETUP_DNS_PROBE_NAME:-example.com}
+
+setup_dns__log_path() {
+	if [ -n "${MORS_SETUP_DNS_LOG:-}" ]; then
+		printf '%s\n' "${MORS_SETUP_DNS_LOG}"
+	else
+		printf '%s\n' /opt/tmp/mors.setup-dns.log
+	fi
+}
+
+setup_dns__prepare_log() {
+	local log parent
+	log=$(setup_dns__log_path) || return 1
+	parent=$(dirname "${log}") || return 1
+	mkdir -p "${parent}" || return 1
+	[ ! -L "${log}" ] || return 1
+	if [ -e "${log}" ] && [ ! -f "${log}" ]; then
+		return 1
+	fi
+	(umask 077; : >>"${log}") || return 1
+	chmod 600 "${log}"
+}
+
+setup_dns__reset_log() {
+	local log
+	setup_dns__prepare_log || return 1
+	log=$(setup_dns__log_path) || return 1
+	: >"${log}" || return 1
+	chmod 600 "${log}"
+}
+
+setup_dns__service_running() {
+	local service state
+	service=${1}
+	state=$(setup_dns__service_state "${service}") || return 1
+	[ "${state}" = running ]
+}
+
+setup_dns__service_stopped() {
+	local service state
+	service=${1}
+	state=$(setup_dns__service_state "${service}") || return 1
+	[ "${state}" = stopped ]
+}
+
+setup_dns__service_action() {
+	local service action log
+	service=${1}
+	action=${2}
+	log=$(setup_dns__log_path 2>/dev/null || true)
+	service_action__run "${service}" "${action}" "${log}" \
+		"${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT}" \
+		"${MORS_SETUP_DNS_SERVICE_KILL_AFTER}" \
+		"${MORS_SETUP_DNS_TIMEOUT_CMD}"
+}
+
+setup_dns__service_state() {
+	local service log action_timeout
+	service=${1}
+	action_timeout=${2:-${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT}}
+	log=$(setup_dns__log_path 2>/dev/null || true)
+	service_action__state "${service}" status "${log}" \
+		"${action_timeout}" \
+		"${MORS_SETUP_DNS_SERVICE_KILL_AFTER}" \
+		"${MORS_SETUP_DNS_TIMEOUT_CMD}"
+}
+
+setup_dns__now() {
+	date +%s
+}
+
+setup_dns__elapsed() {
+	local started logical now wall
+	started=${1}
+	logical=${2}
+	now=$(setup_dns__now) || return 1
+	wall=$((now - started))
+	[ "${wall}" -ge "${logical}" ] && printf '%s\n' "${wall}" || printf '%s\n' "${logical}"
+}
+
+setup_dns__bounded_timeout() {
+	local configured remaining safe
+	configured=${1}
+	remaining=${2}
+	# timeout(1) may keep the child alive for kill-after seconds after TERM.
+	# Reserve that grace inside the caller's wall-clock budget.
+	safe=$((remaining - MORS_SETUP_DNS_SERVICE_KILL_AFTER))
+	[ "${safe}" -gt 0 ] || return 1
+	[ "${configured}" -le "${safe}" ] && printf '%s\n' "${configured}" || printf '%s\n' "${safe}"
+}
+
+setup_dns__wait_stopped() {
+	local service elapsed=0 logical=0 log started state action_timeout step remaining
+	service=${1}
+	log=$(setup_dns__log_path) || return 1
+	started=$(setup_dns__now) || return 1
+	while :; do
+		elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+		remaining=$((MORS_SETUP_DNS_STOP_TIMEOUT - elapsed))
+		action_timeout=$(setup_dns__bounded_timeout "${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT}" "${remaining}") || break
+		state=$(setup_dns__service_state "${service}" "${action_timeout}") || {
+			printf 'stop-status-error service=%s elapsed=%s\n' "${service}" "${elapsed}" >>"${log}"
+			return 1
+		}
+		if [ "${state}" = stopped ]; then
+			elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+			if [ "${elapsed}" -le "${MORS_SETUP_DNS_STOP_TIMEOUT}" ]; then
+				printf 'stopped service=%s elapsed=%s\n' "${service}" "${elapsed}" >>"${log}"
+				return 0
+			fi
+			break
+		fi
+		elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+		[ "${elapsed}" -ge "${MORS_SETUP_DNS_STOP_TIMEOUT}" ] && break
+		remaining=$((MORS_SETUP_DNS_STOP_TIMEOUT - elapsed))
+		step=${MORS_SETUP_DNS_RETRY_INTERVAL}
+		[ "${step}" -le "${remaining}" ] || step=${remaining}
+		[ "${step}" -gt 0 ] || break
+		sleep "${step}"
+		logical=$((logical + step))
+	done
+	printf 'stop-timeout service=%s elapsed=%s\n' "${service}" "${elapsed}" >>"${log}"
+	return 1
+}
+
+setup_dns__stop_service() {
+	local service label log state stop_status=0
+	service=${1}
+	label=${2:-service}
+	setup_dns__prepare_log || return 1
+	log=$(setup_dns__log_path) || return 1
+	printf 'stop service=%s label=%s\n' "${service}" "${label}" >>"${log}"
+	if [ "${MORS_SETUP_DNS_STOP_TIMEOUT}" -gt "${MORS_SETUP_DNS_SERVICE_KILL_AFTER}" ]; then
+		state=$(setup_dns__service_state "${service}") || {
+			printf 'stop-status-error service=%s stage=precondition\n' "${service}" >>"${log}"
+			return 1
+		}
+		if [ "${state}" = stopped ]; then
+			printf 'already-stopped service=%s\n' "${service}" >>"${log}"
+			return 0
+		fi
+	fi
+	if setup_dns__service_action "${service}" stop >>"${log}" 2>&1; then
+		:
+	else
+		stop_status=$?
+		printf 'stop-failed service=%s exit=%s\n' "${service}" "${stop_status}" >>"${log}"
+	fi
+	if setup_dns__wait_stopped "${service}"; then
+		if [ "${stop_status}" -ne 0 ]; then
+			printf 'stop-postcondition-satisfied service=%s action-exit=%s\n' \
+				"${service}" "${stop_status}" >>"${log}"
+		fi
+		return 0
+	fi
+	if [ "${stop_status}" -ne 0 ]; then
+		return "${stop_status}"
+	fi
+	printf 'stop-failed service=%s exit=postcondition\n' "${service}" >>"${log}"
+	return 1
+}
+
+setup_dns__wait_running() {
+	local service elapsed=0 logical=0 log started state action_timeout step remaining
+	local stable_started=-1 stable_seconds
+	service=${1}
+	stable_seconds=${MORS_SETUP_DNS_SERVICE_RUNNING_STABLE_SECONDS}
+	case "${stable_seconds}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	log=$(setup_dns__log_path) || return 1
+	started=$(setup_dns__now) || return 1
+	while :; do
+		elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+		remaining=$((MORS_SETUP_DNS_SERVICE_READY_TIMEOUT - elapsed))
+		action_timeout=$(setup_dns__bounded_timeout "${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT}" "${remaining}") || break
+		state=$(setup_dns__service_state "${service}" "${action_timeout}") || {
+			printf 'start-status-error service=%s elapsed=%s\n' "${service}" "${elapsed}" >>"${log}"
+			return 1
+		}
+		if [ "${state}" = running ]; then
+			elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+			[ "${stable_started}" -ge 0 ] || stable_started=${elapsed}
+			if [ $((elapsed - stable_started)) -ge "${stable_seconds}" ] && \
+				[ "${elapsed}" -le "${MORS_SETUP_DNS_SERVICE_READY_TIMEOUT}" ]; then
+				printf 'running service=%s elapsed=%s\n' "${service}" "${elapsed}" >>"${log}"
+				return 0
+			fi
+		else
+			stable_started=-1
+		fi
+		elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+		[ "${elapsed}" -ge "${MORS_SETUP_DNS_SERVICE_READY_TIMEOUT}" ] && break
+		remaining=$((MORS_SETUP_DNS_SERVICE_READY_TIMEOUT - elapsed))
+		step=${MORS_SETUP_DNS_RETRY_INTERVAL}
+		[ "${step}" -le "${remaining}" ] || step=${remaining}
+		[ "${step}" -gt 0 ] || break
+		sleep "${step}"
+		logical=$((logical + step))
+	done
+	printf 'start-timeout service=%s elapsed=%s\n' "${service}" "${elapsed}" >>"${log}"
+	return 1
+}
+
+setup_dns__restart_service() {
+	local service label restart_status log
+	service=${1}
+	label=${2:-service}
+	setup_dns__prepare_log || return 1
+	log=$(setup_dns__log_path) || return 1
+	printf 'restart service=%s label=%s\n' "${service}" "${label}" >>"${log}"
+	if setup_dns__service_action "${service}" restart >>"${log}" 2>&1; then
+		:
+	else
+		restart_status=$?
+		printf 'restart-failed service=%s exit=%s\n' "${service}" "${restart_status}" >>"${log}"
+		return "${restart_status}"
+	fi
+	setup_dns__wait_running "${service}" || {
+		printf 'restart-failed service=%s exit=poststate\n' "${service}" >>"${log}"
+		return 1
+	}
+	printf 'restart-ready service=%s\n' "${service}" >>"${log}"
+}
+
+setup_dns__query() {
+	local host port output log probe_timeout
+	host=${1}
+	port=${2}
+	probe_timeout=${3:-${MORS_SETUP_DNS_PROBE_TIMEOUT}}
+	log=$(setup_dns__log_path) || return 1
+	if command -v kdig >/dev/null 2>&1; then
+		output=$("${MORS_SETUP_DNS_TIMEOUT_CMD}" -k "${MORS_SETUP_DNS_SERVICE_KILL_AFTER}" "${probe_timeout}" \
+			kdig "@${host}" -p "${port}" "${MORS_SETUP_DNS_PROBE_NAME}" A +short 2>>"${log}") || return 1
+	elif command -v dig >/dev/null 2>&1; then
+		output=$("${MORS_SETUP_DNS_TIMEOUT_CMD}" -k "${MORS_SETUP_DNS_SERVICE_KILL_AFTER}" "${probe_timeout}" \
+			dig "@${host}" -p "${port}" "${MORS_SETUP_DNS_PROBE_NAME}" A +short 2>>"${log}") || return 1
+	else
+		printf '%s\n' 'DNS probe tool is unavailable' >>"${log}"
+		return 1
+	fi
+	printf '%s\n' "${output}" | awk -F. '
+		NF == 4 {
+			valid = 1
+			for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) valid = 0
+			if (valid) found = 1
+		}
+		END { exit(found ? 0 : 1) }
+	'
+}
+
+setup_dns__wait_ready() {
+	local service host port elapsed=0 logical=0 log started state action_timeout probe_timeout step remaining
+	service=${1}
+	host=${2}
+	port=${3}
+	log=$(setup_dns__log_path) || return 1
+	started=$(setup_dns__now) || return 1
+	while :; do
+		elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+		remaining=$((MORS_SETUP_DNS_READY_TIMEOUT - elapsed))
+		action_timeout=$(setup_dns__bounded_timeout "${MORS_SETUP_DNS_SERVICE_ACTION_TIMEOUT}" "${remaining}") || break
+		state=$(setup_dns__service_state "${service}" "${action_timeout}") || {
+			printf 'ready-status-error service=%s address=%s:%s elapsed=%s\n' \
+				"${service}" "${host}" "${port}" "${elapsed}" >>"${log}"
+			return 1
+		}
+		if [ "${state}" = running ]; then
+			elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+			remaining=$((MORS_SETUP_DNS_READY_TIMEOUT - elapsed))
+			probe_timeout=$(setup_dns__bounded_timeout "${MORS_SETUP_DNS_PROBE_TIMEOUT}" "${remaining}") || break
+		else
+			probe_timeout=0
+		fi
+		if [ "${state}" = running ] && setup_dns__query "${host}" "${port}" "${probe_timeout}"; then
+			elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+			if [ "${elapsed}" -le "${MORS_SETUP_DNS_READY_TIMEOUT}" ]; then
+				printf 'ready service=%s address=%s:%s elapsed=%s\n' "${service}" "${host}" "${port}" "${elapsed}" >>"${log}"
+				return 0
+			fi
+			break
+		fi
+		elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+		[ "${elapsed}" -ge "${MORS_SETUP_DNS_READY_TIMEOUT}" ] && break
+		remaining=$((MORS_SETUP_DNS_READY_TIMEOUT - elapsed))
+		step=${MORS_SETUP_DNS_RETRY_INTERVAL}
+		[ "${step}" -le "${remaining}" ] || step=${remaining}
+		[ "${step}" -gt 0 ] || break
+		sleep "${step}"
+		logical=$((logical + step))
+	done
+	printf 'timeout service=%s address=%s:%s elapsed=%s\n' "${service}" "${host}" "${port}" "${elapsed}" >>"${log}"
+	return 1
+}
+
+setup_dns__wait_resolver() {
+	local host port elapsed=0 logical=0 log started probe_timeout step remaining
+	host=${1}
+	port=${2}
+	log=$(setup_dns__log_path) || return 1
+	started=$(setup_dns__now) || return 1
+	while :; do
+		elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+		remaining=$((MORS_SETUP_DNS_READY_TIMEOUT - elapsed))
+		probe_timeout=$(setup_dns__bounded_timeout "${MORS_SETUP_DNS_PROBE_TIMEOUT}" "${remaining}") || break
+		if setup_dns__query "${host}" "${port}" "${probe_timeout}"; then
+			elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+			if [ "${elapsed}" -le "${MORS_SETUP_DNS_READY_TIMEOUT}" ]; then
+				printf 'ready resolver=%s:%s elapsed=%s\n' "${host}" "${port}" "${elapsed}" >>"${log}"
+				return 0
+			fi
+			break
+		fi
+		elapsed=$(setup_dns__elapsed "${started}" "${logical}") || return 1
+		[ "${elapsed}" -ge "${MORS_SETUP_DNS_READY_TIMEOUT}" ] && break
+		remaining=$((MORS_SETUP_DNS_READY_TIMEOUT - elapsed))
+		step=${MORS_SETUP_DNS_RETRY_INTERVAL}
+		[ "${step}" -le "${remaining}" ] || step=${remaining}
+		[ "${step}" -gt 0 ] || break
+		sleep "${step}"
+		logical=$((logical + step))
+	done
+	printf 'timeout resolver=%s:%s elapsed=%s\n' "${host}" "${port}" "${elapsed}" >>"${log}"
+	return 1
+}
+
+setup_dns__validate_dnscrypt() {
+	local log
+	setup_dns__reset_log || return 1
+	log=$(setup_dns__log_path) || return 1
+	printf '%s\n' 'validate dnscrypt configuration' >>"${log}"
+	"${MORS_SETUP_DNS_TIMEOUT_CMD}" -k "${MORS_SETUP_DNS_SERVICE_KILL_AFTER}" "${MORS_SETUP_DNS_CHECK_TIMEOUT}" \
+		"${MORS_SETUP_DNSCRYPT_BIN}" -config "${MORS_SETUP_DNSCRYPT_CONFIG}" -check >>"${log}" 2>&1
+}
+
+setup_dns__activate_dnscrypt_stack() {
+	local log dnscrypt_port dnsmasq_port
+	setup_dns__prepare_log || return 1
+	log=$(setup_dns__log_path) || return 1
+	dnscrypt_port=$(get_config_value DNS_CRYPT_PORT) || return 1
+	dnsmasq_port=$(get_config_value DNSMASQ_PORT) || return 1
+	printf '%s\n' 'restart dnscrypt' >>"${log}"
+	setup_dns__service_action "${MORS_SETUP_DNSCRYPT_INIT}" restart >>"${log}" 2>&1 || return 1
+	setup_dns__wait_ready "${MORS_SETUP_DNSCRYPT_INIT}" 127.0.0.1 "${dnscrypt_port}" || return 1
+	printf '%s\n' 'restart dnsmasq' >>"${log}"
+	setup_dns__service_action "${MORS_SETUP_DNSMASQ_INIT}" restart >>"${log}" 2>&1 || return 1
+	setup_dns__wait_ready "${MORS_SETUP_DNSMASQ_INIT}" 127.0.0.1 "${dnsmasq_port}"
+}
+
+setup_dns__verify_stack() {
+	local dnscrypt_port dnsmasq_port
+	setup_dns__prepare_log || return 1
+	dnscrypt_port=$(get_config_value DNS_CRYPT_PORT) || return 1
+	dnsmasq_port=$(get_config_value DNSMASQ_PORT) || return 1
+	setup_dns__wait_ready "${MORS_SETUP_DNSCRYPT_INIT}" 127.0.0.1 "${dnscrypt_port}" || return 1
+	setup_dns__wait_ready "${MORS_SETUP_DNSMASQ_INIT}" 127.0.0.1 "${dnsmasq_port}"
+}

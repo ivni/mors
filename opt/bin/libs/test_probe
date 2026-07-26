@@ -8,6 +8,7 @@ MORS_TEST_IP=${MORS_TEST_IP:-/opt/sbin/ip}
 MORS_TEST_CONNTRACK=${MORS_TEST_CONNTRACK:-/opt/sbin/conntrack}
 MORS_TEST_TIMEOUT_CMD=${MORS_TEST_TIMEOUT_CMD:-/opt/bin/timeout}
 MORS_TEST_RCI_URL=${MORS_TEST_RCI_URL:-http://127.0.0.1:79/rci/show/interface}
+MORS_TEST_DNS_HOST=${MORS_TEST_DNS_HOST:-127.0.0.1}
 
 test_probe__set() {
 	MORS_PROBE_STATUS=${1}
@@ -43,6 +44,15 @@ test_probe__attempt_timeout() {
 	printf '%s\n' "${remaining}"
 }
 
+test_probe__normalize_rci_interfaces() {
+	jq -ce '
+		if type == "array" then .
+		elif type == "object" then [.[]]
+		else empty
+		end
+	'
+}
+
 test_probe__valid_ipv4() {
 	printf '%s\n' "${1}" | awk -F. '
 		BEGIN { valid = 1 }
@@ -68,14 +78,21 @@ test_probe__canonical_ipv4() {
 }
 
 test_probe__configuration() {
-	local setup_finished
-	if [ ! -r "${MORS_CONF_FILE}" ]; then
-		test_probe__set unconfigured setup_incomplete 'Файл конфигурации Mors не найден.'
+	local lifecycle_state
+	if ! command -v lifecycle_state__read >/dev/null 2>&1; then
+		test_probe__set error lifecycle_state_unavailable 'Библиотека lifecycle Mors недоступна.'
 		return 1
 	fi
-	setup_finished=$(grep '^SETUP_FINISHED=' "${MORS_CONF_FILE}" | head -n 1 | cut -d= -f2-)
-	if [ "${setup_finished}" != true ]; then
+	lifecycle_state=$(lifecycle_state__read 2>/dev/null) || {
+		test_probe__set error lifecycle_state_invalid 'Состояние lifecycle Mors повреждено.'
+		return 1
+	}
+	if [ "${lifecycle_state}" != ready ]; then
 		test_probe__set unconfigured setup_incomplete 'Начальная настройка Mors не завершена.'
+		return 1
+	fi
+	if [ ! -r "${MORS_CONF_FILE}" ]; then
+		test_probe__set unconfigured setup_incomplete 'Файл конфигурации Mors не найден.'
 		return 1
 	fi
 	if [ ! -r "${MORS_LIST_FILE}" ]; then
@@ -87,7 +104,7 @@ test_probe__configuration() {
 
 test_probe__dependencies() {
 	local missing='' command_name
-	for command_name in jq "${MORS_TEST_CURL}" "${MORS_TEST_IPSET}" \
+	for command_name in jq cksum "${MORS_TEST_CURL}" "${MORS_TEST_IPSET}" \
 		"${MORS_TEST_IPTABLES_SAVE}" "${MORS_TEST_IPTABLES}" "${MORS_TEST_IP}" "${MORS_TEST_CONNTRACK}" \
 		"${MORS_TEST_TIMEOUT_CMD}"; do
 		command -v "${command_name}" >/dev/null 2>&1 || missing="${missing} ${command_name}"
@@ -158,14 +175,33 @@ test_probe__target() {
 	return 1
 }
 
-test_probe__dns_command() {
-	local attempt_timeout
+test_probe__dns_port() {
+	case "${MORS_TEST_DNS_BACKEND:-}" in
+		dnsmasq) get_config_value DNSMASQ_PORT ;;
+		adguard) printf '%s\n' "${MAIN_DNS_PORT:-9753}" ;;
+		*) return 1 ;;
+	esac
+}
+
+test_probe__dns_query() {
+	local target="${1}" record_type="${2}" attempt_timeout dns_port
 	attempt_timeout=$(test_probe__attempt_timeout 5) || return 1
+	dns_port=$(test_probe__dns_port) || return 1
+	case "${dns_port}" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "${dns_port}" -ge 1 ] && [ "${dns_port}" -le 65535 ] || return 1
 	if command -v kdig >/dev/null 2>&1; then
-		"${MORS_TEST_TIMEOUT_CMD}" "${attempt_timeout}" kdig @127.0.0.1 "${1}" A +short 2>/dev/null
+		"${MORS_TEST_TIMEOUT_CMD}" "${attempt_timeout}" kdig "@${MORS_TEST_DNS_HOST}" -p "${dns_port}" \
+			"${target}" "${record_type}" +short 2>/dev/null
 	else
-		"${MORS_TEST_TIMEOUT_CMD}" "${attempt_timeout}" dig @127.0.0.1 "${1}" A +short 2>/dev/null
+		"${MORS_TEST_TIMEOUT_CMD}" "${attempt_timeout}" dig "@${MORS_TEST_DNS_HOST}" -p "${dns_port}" \
+			"${target}" "${record_type}" +short 2>/dev/null
 	fi
+}
+
+test_probe__dns_command() {
+	test_probe__dns_query "${1}" A
 }
 
 test_probe__dns_a() {
@@ -372,35 +408,23 @@ test_probe__fingerprint() {
 		if [ -n "${rci_timeout}" ]; then
 			"${MORS_TEST_CURL}" -fsS --noproxy '*' --max-time "${rci_timeout}" \
 				"${MORS_TEST_RCI_URL}" 2>/dev/null | \
-				jq -c 'sort_by(.id) | map({id,state,link,defaultgw,global})' 2>/dev/null
+				test_probe__normalize_rci_interfaces 2>/dev/null | \
+				jq -c 'sort_by(.id // "") | map({id,state,link,defaultgw,global})' 2>/dev/null
 		fi
 	} | cksum | awk '{print $1 ":" $2}'
 }
 
 test_probe__ipv6_risk() {
-	local aaaa=false default_route=false
-	if test_probe__dns_command_aaaa "${MORS_TEST_TARGET}" | grep -q ':'; then
-		aaaa=true
-	fi
-	if "${MORS_TEST_IP}" -6 route show default 2>/dev/null | grep -q .; then
-		default_route=true
-	fi
-	if [ "${aaaa}" = true ] && [ "${default_route}" = true ]; then
-		test_probe__set degraded ipv6_bypass_risk \
-			'Доступен IPv6-путь, который Mors не маршрутизирует.' \
-			'{"aaaa":true,"global_route":true,"mors_ipv6":false}'
+	MORS_IPV6_IP_COMMAND=${MORS_TEST_IP}
+	if ipv6_bypass__detect "${MORS_TEST_TARGET}" test_probe__dns_command_aaaa; then
+		test_probe__set degraded "${MORS_IPV6_BYPASS_REASON}" \
+			"${MORS_IPV6_BYPASS_MESSAGE}" "${MORS_IPV6_BYPASS_EVIDENCE}"
 		return 1
 	fi
-	test_probe__set working no_ipv6_bypass_evidence 'Явный риск обхода через IPv6 не обнаружен.' \
-		"{\"aaaa\":${aaaa},\"global_route\":${default_route},\"mors_ipv6\":false}"
+	test_probe__set working "${MORS_IPV6_BYPASS_REASON}" \
+		"${MORS_IPV6_BYPASS_MESSAGE}" "${MORS_IPV6_BYPASS_EVIDENCE}"
 }
 
 test_probe__dns_command_aaaa() {
-	local attempt_timeout
-	attempt_timeout=$(test_probe__attempt_timeout 5) || return 1
-	if command -v kdig >/dev/null 2>&1; then
-		"${MORS_TEST_TIMEOUT_CMD}" "${attempt_timeout}" kdig @127.0.0.1 "${1}" AAAA +short 2>/dev/null
-	else
-		"${MORS_TEST_TIMEOUT_CMD}" "${attempt_timeout}" dig @127.0.0.1 "${1}" AAAA +short 2>/dev/null
-	fi
+	test_probe__dns_query "${1}" AAAA
 }

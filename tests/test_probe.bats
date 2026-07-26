@@ -2,6 +2,17 @@
 
 setup() {
 	REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+	MORS_LIFECYCLE_ROOT=${BATS_TEST_TMPDIR}/lifecycle
+	MORS_LIFECYCLE_STATE_FILE=${MORS_LIFECYCLE_ROOT}/state.json
+	MORS_LIFECYCLE_TRANSACTION_ROOT=${MORS_LIFECYCLE_ROOT}/transactions
+	MORS_LIFECYCLE_ACTIVE_FILE=${MORS_LIFECYCLE_ROOT}/active
+	MORS_LIFECYCLE_CONF_FILE=${BATS_TEST_TMPDIR}/mors.conf
+	MORS_LIFECYCLE_LEGACY_START_FILE=${BATS_TEST_TMPDIR}/S96mors
+	export MORS_LIFECYCLE_ROOT MORS_LIFECYCLE_STATE_FILE
+	export MORS_LIFECYCLE_TRANSACTION_ROOT MORS_LIFECYCLE_ACTIVE_FILE
+	export MORS_LIFECYCLE_CONF_FILE MORS_LIFECYCLE_LEGACY_START_FILE
+	. "${REPO_ROOT}/opt/bin/libs/lifecycle_state"
+	. "${REPO_ROOT}/opt/bin/libs/ipv6_bypass"
 	. "${REPO_ROOT}/opt/bin/libs/test_probe"
 	MORS_CONF_FILE=${BATS_TEST_TMPDIR}/mors.conf
 	MORS_LIST_FILE=${BATS_TEST_TMPDIR}/mors.list
@@ -14,6 +25,15 @@ setup() {
 	! test_probe__valid_ipv4 '203.0.113.7 text'
 }
 
+@test "RCI interface inventory normalizes Keenetic object and array responses" {
+	object='{"Bridge0":{"id":"Bridge0"},"Wireguard0":{"id":"Wireguard0"}}'
+	array='[{"id":"Bridge0"},{"id":"Wireguard0"}]'
+	[ "$(printf '%s\n' "${object}" | test_probe__normalize_rci_interfaces)" = "${array}" ]
+	[ "$(printf '%s\n' "${array}" | test_probe__normalize_rci_interfaces)" = "${array}" ]
+	run test_probe__normalize_rci_interfaces <<<'"invalid"'
+	[ "${status}" -ne 0 ]
+}
+
 @test "configuration reports unconfigured without mutation" {
 	printf '%s\n' 'SETUP_FINISHED=' >"${MORS_CONF_FILE}"
 	printf '%s\n' ifconfig.me >"${MORS_LIST_FILE}"
@@ -22,12 +42,12 @@ setup() {
 	[ "$(cat "${MORS_CONF_FILE}")" = 'SETUP_FINISHED=' ]
 }
 
-@test "configuration accepts only the completed setup marker" {
-	printf '%s\n' 'SETUP_FINISHED=false' >"${MORS_CONF_FILE}"
+@test "configuration accepts only lifecycle ready" {
+	printf '%s\n' 'SETUP_FINISHED=true' >"${MORS_CONF_FILE}"
 	printf '%s\n' ifconfig.me >"${MORS_LIST_FILE}"
 	! test_probe__configuration
-	[ "${MORS_PROBE_STATUS}" = unconfigured ]
-	printf '%s\n' 'SETUP_FINISHED=true' >"${MORS_CONF_FILE}"
+	[ "${MORS_PROBE_STATUS}" = unconfigured ] || [ "${MORS_PROBE_STATUS}" = error ]
+	lifecycle_state__write ready test
 	test_probe__configuration
 }
 
@@ -38,6 +58,34 @@ setup() {
 	printf '%s\n' example.org >"${MORS_LIST_FILE}"
 	run test_probe__target
 	[ "${status}" -ne 0 ]
+}
+
+@test "DNS probe queries the active Mors backend port" {
+	local timeout_mock=${BATS_TEST_TMPDIR}/timeout
+	local calls=${BATS_TEST_TMPDIR}/calls
+	printf '%s\n' '#!/bin/sh' \
+		'printf "%s\n" "$@" >"${MORS_MOCK_CALLS}"' \
+		'printf "%s\n" 203.0.113.7' >"${timeout_mock}"
+	chmod +x "${timeout_mock}"
+	kdig() { :; }
+	get_config_value() { [ "${1}" = DNSMASQ_PORT ] && printf '%s\n' 9753; }
+	MORS_TEST_TIMEOUT_CMD=${timeout_mock}
+	MORS_MOCK_CALLS=${calls}; export MORS_MOCK_CALLS
+	MORS_TEST_DNS_BACKEND=dnsmasq
+	MORS_TEST_DEADLINE=$(( $(test_probe__now_seconds) + 10 ))
+
+	[ "$(test_probe__dns_command api.ipify.org)" = 203.0.113.7 ]
+	grep -Fxq '@127.0.0.1' "${calls}"
+	grep -Fxq -- '-p' "${calls}"
+	grep -Fxq 9753 "${calls}"
+	grep -Fxq api.ipify.org "${calls}"
+	grep -Fxq A "${calls}"
+}
+
+@test "AdGuard probe uses the managed main DNS port" {
+	MORS_TEST_DNS_BACKEND=adguard
+	MAIN_DNS_PORT=9753
+	[ "$(test_probe__dns_port)" = 9753 ]
 }
 
 @test "firewall probe requires the selected chain mark rule and active route" {

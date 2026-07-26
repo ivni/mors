@@ -1,0 +1,54 @@
+#!/bin/sh
+
+# Exact process identity checks for the shell-based VLESS supervisor. A PID is
+# never sufficient on its own because it can be reused after a stale PID file.
+
+VLESS_SUPERVISOR_PROGRAM=${VLESS_SUPERVISOR_PROGRAM:-/opt/apps/mors/bin/main/vless-supervisor}
+VLESS_SUPERVISOR_ARGUMENT=${VLESS_SUPERVISOR_ARGUMENT:-run}
+VLESS_SUPERVISOR_PROC_ROOT=${VLESS_SUPERVISOR_PROC_ROOT:-/proc}
+
+vless_process__valid_pid() {
+	case "${1:-}" in
+		''|*[!0-9]*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+vless_process__pid_has_argument() {
+	local pid=${1:-} argument=${2:-}
+	vless_process__valid_pid "${pid}" || return 1
+	[ -n "${argument}" ] || return 1
+	[ -r "${VLESS_SUPERVISOR_PROC_ROOT}/${pid}/cmdline" ] || return 1
+	kill -0 "${pid}" 2>/dev/null || return 1
+	tr '\000' '\n' 2>/dev/null <"${VLESS_SUPERVISOR_PROC_ROOT}/${pid}/cmdline" | \
+		grep -F -x "${argument}" >/dev/null 2>&1
+}
+
+vless_process__pid_is_program() {
+	vless_process__pid_has_argument "${1:-}" "${VLESS_SUPERVISOR_PROGRAM}"
+}
+
+vless_process__pid_is_service() {
+	local pid=${1:-}
+	vless_process__pid_is_program "${pid}" || return 1
+	vless_process__pid_has_argument "${pid}" "${VLESS_SUPERVISOR_ARGUMENT}"
+}
+
+vless_process__read_pid() {
+	local file=${1:-} pid=''
+	[ -n "${file}" ] && [ -s "${file}" ] || return 1
+	IFS= read -r pid <"${file}" || return 1
+	vless_process__valid_pid "${pid}" || return 1
+	printf '%s\n' "${pid}"
+}
+
+vless_process__pid_from_file() {
+	local file=${1:-} identity=${2:-service} pid
+	pid=$(vless_process__read_pid "${file}") || return 1
+	case "${identity}" in
+		program) vless_process__pid_is_program "${pid}" || return 1 ;;
+		service) vless_process__pid_is_service "${pid}" || return 1 ;;
+		*) return 1 ;;
+	esac
+	printf '%s\n' "${pid}"
+}

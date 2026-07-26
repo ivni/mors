@@ -21,6 +21,32 @@
 
 case ${1} in
 	start|restart)
+		. /opt/apps/mors/bin/libs/lifecycle_state
+		if lifecycle_state__active_id >/dev/null 2>&1; then
+			lifecycle_journal=$(lifecycle_transaction__journal_file)
+			lifecycle_operation=$(jq -er '.operation' "${lifecycle_journal}" 2>/dev/null || true)
+			lifecycle_phase=$(jq -er '.phase' "${lifecycle_journal}" 2>/dev/null || true)
+			case "${lifecycle_operation}:${lifecycle_phase}" in
+				*:completed)
+					# boot_gate replays the committed stable state idempotently.
+					:
+					;;
+				setup:awaiting_reboot)
+					# Explicit resume owns this boundary; boot remains passive.
+					exit 0
+					;;
+				setup:*|uninstall:*)
+					. /opt/apps/mors/bin/main/setup
+					cmd_setup_recover >/dev/null 2>&1 || exit 0
+					;;
+				upgrade:*|rollback:*)
+					sh /opt/apps/mors/bin/main/upgrade recover --yes >/dev/null 2>&1 || exit 0
+					;;
+			esac
+		fi
+		# Package installation is passive. Runtime starts only after a verified
+		# setup and never crosses an unfinished lifecycle transaction.
+		lifecycle_state__boot_gate || exit 0
 		start_vless=false
 		. /opt/apps/mors/bin/libs/vpn
 		. /opt/apps/mors/bin/libs/runtime_lock
@@ -30,16 +56,27 @@ case ${1} in
 		if [ -d "${MORS_COLD_JOURNAL_DIR}" ]; then
 			test_cold__recover || exit 1
 		fi
-		runtime_mutation_lock__acquire 'mors init service' || exit $?
+		# S25mors-vless is ordered before this service by Entware and may still
+		# own the runtime lock for its first health-cycle. Boot initialization
+		# must wait for that bounded operation instead of silently skipping the
+		# firewall and policy-route restore.
+		runtime_mutation_lock__acquire_wait 'mors init service' "${MORS_INIT_LOCK_WAIT:-60}" || exit $?
 		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
 		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
-		cmd_mors_init no
+		cmd_mors_init no || exit 1
 		if has_ssr_enable; then
-			while /opt/etc/init.d/S22shadowsocks status | grep -q dead
-			do
-				/opt/etc/init.d/S22shadowsocks restart
-				sleep 2
+			attempt=1
+			while [ "${attempt}" -le "${MORS_INIT_SSR_ATTEMPTS:-5}" ]; do
+				ssr_state=$(vpn__service_state /opt/etc/init.d/S22shadowsocks) || exit 1
+				[ "${ssr_state}" = running ] && break
+				[ "${ssr_state}" = stopped ] || exit 1
+				vpn__service_action /opt/etc/init.d/S22shadowsocks restart >/dev/null 2>&1 || exit 1
+				attempt=$((attempt + 1))
+				[ "${attempt}" -gt "${MORS_INIT_SSR_ATTEMPTS:-5}" ] || sleep "${MORS_INIT_SSR_RETRY_INTERVAL:-2}"
 			done
+			[ "${ssr_state}" = running ] || \
+				ssr_state=$(vpn__service_state /opt/etc/init.d/S22shadowsocks) || exit 1
+			[ "${ssr_state}" = running ] || exit 1
 		elif is_vless_over_proxy_enabled; then
 			if [ "$(vless_store__is_paused)" = false ] && [ "$(vless_store__enabled_count)" -gt 0 ]; then
 				start_vless=true

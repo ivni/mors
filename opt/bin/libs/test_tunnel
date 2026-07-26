@@ -22,8 +22,19 @@ test_tunnel__detect_active() {
 	export MORS_TEST_ACTIVE_KIND MORS_TEST_ACTIVE_ID MORS_TEST_ACTIVE_DEVICE
 }
 
+test_tunnel__vless_active_snapshot() {
+	local active_id state
+	active_id=$(vless_runtime__active_id 2>/dev/null)
+	[ -n "${active_id}" ] || active_id=$(jq -r '.active_id // empty' "${VLESS_STATE_FILE}" 2>/dev/null)
+	[ -n "${active_id}" ] || return 1
+	state=$(jq -r --arg id "${active_id}" '.connections[$id].status // empty' \
+		"${VLESS_STATE_FILE}" 2>/dev/null)
+	[ -n "${state}" ] || return 1
+	printf '%s|%s\n' "${active_id}" "${state}"
+}
+
 test_tunnel__active_status() {
-	local state active_id rci_timeout
+	local state active_id rci_timeout snapshot waited=0
 	case "${MORS_TEST_ACTIVE_KIND}" in
 		shadowsocks)
 			if [ -x /opt/etc/init.d/S22shadowsocks ] && \
@@ -33,15 +44,24 @@ test_tunnel__active_status() {
 			fi
 			;;
 		vless)
-			if [ -r "${VLESS_STATE_FILE}" ]; then
-				active_id=$(jq -r '.active_id // empty' "${VLESS_STATE_FILE}" 2>/dev/null)
-				state=$(jq -r --arg id "${active_id}" '.connections[$id].status // empty' \
-					"${VLESS_STATE_FILE}" 2>/dev/null)
-				if [ -n "${active_id}" ] && [ "${state}" = active ]; then
-					MORS_TEST_ACTIVE_ID=${active_id}; export MORS_TEST_ACTIVE_ID
-					test_probe__set working tunnel_active 'Активный VLESS runtime работает.'
-					return 0
-				fi
+			snapshot=$(test_tunnel__vless_active_snapshot 2>/dev/null || true)
+			active_id=${snapshot%%|*}
+			state=${snapshot#*|}
+			while [ -n "${snapshot}" ] && [ "${state}" != active ] && \
+				[ -d "${VLESS_DECISION_LOCK_DIR:-/nonexistent}" ] && \
+				[ "${waited}" -lt 30 ] && [ "$(test_probe__remaining)" -gt 0 ]; do
+				sleep 1
+				waited=$((waited + 1))
+				snapshot=$(test_tunnel__vless_active_snapshot 2>/dev/null || true)
+				active_id=${snapshot%%|*}
+				state=${snapshot#*|}
+			done
+			if [ -n "${active_id}" ]; then
+				MORS_TEST_ACTIVE_ID=${active_id}; export MORS_TEST_ACTIVE_ID
+			fi
+			if [ -n "${active_id}" ] && [ "${state}" = active ]; then
+				test_probe__set working tunnel_active 'Активный VLESS runtime работает.'
+				return 0
 			fi
 			;;
 		keenetic_vpn)
@@ -108,6 +128,17 @@ test_tunnel__ss_start() {
 	return 1
 }
 
+test_tunnel__shadowsocks_configured() {
+	[ -r "${SHADOWSOCKS_CONF}" ] || return 1
+	jq -e '
+		type == "object" and
+		(.server | type == "string" and length > 0 and . != "127.0.0.1" and . != "@SSR_SERVER_IP") and
+		(.server_port | type == "number" and . >= 1 and . <= 65535 and . == floor) and
+		(.password | type == "string" and length > 0 and . != "barfoo!" and . != "@SSR_SERVER_PASSWD") and
+		(.method | type == "string" and length > 0 and . != "@SSR_SERVER_CRYPT")
+	' "${SHADOWSOCKS_CONF}" >/dev/null 2>&1
+}
+
 test_tunnel__cleanup() {
 	if [ -n "${MORS_TEST_SS_PID:-}" ]; then
 		kill "${MORS_TEST_SS_PID}" 2>/dev/null || true
@@ -159,7 +190,7 @@ test_tunnel__wan_request() {
 }
 
 test_tunnel__inventory() {
-	local active_id=${MORS_TEST_ACTIVE_ID:-} rci_timeout rci_response
+	local active_id=${MORS_TEST_ACTIVE_ID:-} rci_timeout rci_response rci_interfaces
 	if [ -r "${VLESS_REGISTRY_FILE}" ]; then
 		jq -c --arg active "${active_id}" '
 			.connections[] | select(.enabled == true) |
@@ -167,7 +198,7 @@ test_tunnel__inventory() {
 			 desired:"enabled", probe_port}
 		' "${VLESS_REGISTRY_FILE}" 2>/dev/null
 	fi
-	if [ -r "${SHADOWSOCKS_CONF}" ] && jq -e . "${SHADOWSOCKS_CONF}" >/dev/null 2>&1; then
+	if test_tunnel__shadowsocks_configured; then
 		jq -nc --arg role "$([ "${MORS_TEST_ACTIVE_KIND}" = shadowsocks ] && printf active || printf other)" \
 			'{id:"shadowsocks",kind:"shadowsocks",role:$role,desired:"enabled"}'
 	fi
@@ -181,20 +212,26 @@ test_tunnel__inventory() {
 		printf '%s\n' '{"id":"keenetic_inventory","kind":"inventory_error","role":"meta","reason_code":"inventory_unavailable"}'
 		return 0
 	}
-	if ! printf '%s\n' "${rci_response}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+	rci_interfaces=$(printf '%s\n' "${rci_response}" | \
+		test_probe__normalize_rci_interfaces 2>/dev/null) || {
 		printf '%s\n' '{"id":"keenetic_inventory","kind":"inventory_error","role":"meta","reason_code":"inventory_invalid"}'
 		return 0
-	fi
-	printf '%s\n' "${rci_response}" | jq -c \
+	}
+	printf '%s\n' "${rci_interfaces}" | jq -c \
 		--arg active "${active_id}" '
 		.[] |
 		select((.id // "") != "") |
-		select((.vpn == true) or ((.type // "") | test("vpn|wireguard|openvpn|l2tp|pptp|sstp|ipsec"; "i"))) |
+		select(
+			(.vpn == true) or
+			.type == "OpenVPN" or .type == "Wireguard" or .type == "IKE" or
+			.type == "SSTP" or .type == "L2TP" or .type == "PPTP" or
+			.type == "OpenConnect" or .type == "IPsec"
+		) |
 		select((.role // "client") != "server") |
 		{id,kind:"keenetic_vpn",role:(if .id == $active then "active" else "other" end),
 		 desired:(if has("up") then .up elif has("enabled") then .enabled else "unknown" end),
 		 state:(.state // .link // "unknown"),
-		 device:(.interface // .ifname // .id)}
+		 device:(.interface // .ifname // .["interface-name"] // .id)}
 	' 2>/dev/null
 }
 

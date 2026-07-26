@@ -1,0 +1,165 @@
+#!/bin/sh
+
+case "${0}" in
+	/opt/apps/mors/bin/main/telemetry-sender)
+		. /opt/apps/mors/bin/libs/telemetry_runtime || exit 1
+		telemetry_runtime__pin_production
+		telemetry_runtime__pin_transport
+		;;
+esac
+
+PATH=${MORS_SERVICE_PATH:-/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}
+MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
+
+. "${MORS_LIB_DIR}/telemetry_store"
+. "${MORS_LIB_DIR}/telemetry_otlp"
+. "${MORS_LIB_DIR}/telemetry_process"
+
+TELEMETRY_SENDER_STOP=false
+
+telemetry_sender__request_stop() {
+	TELEMETRY_SENDER_STOP=true
+}
+
+telemetry_sender__sleep() {
+	local waited=0 interval
+	interval=$("${TELEMETRY_JQ}" -r '.interval_seconds // 60' "${TELEMETRY_CONFIG_FILE}" 2>/dev/null || printf 60)
+	case "${interval}" in
+		''|*[!0-9]*) interval=60 ;;
+	esac
+	while [ "${waited}" -lt "${interval}" ] && [ "${TELEMETRY_SENDER_STOP}" = false ]; do
+		sleep 1
+		waited=$((waited + 1))
+	done
+}
+
+telemetry_sender__record_state() {
+	local success=${1} error=${2:-} code=${3:-null} overflow=${4:-false}
+	telemetry_store__state_write "${success}" "${error}" "${code}" "${overflow}" >/dev/null 2>&1 || true
+}
+
+telemetry_sender__test() {
+	local payload status
+	payload="${TELEMETRY_STATE_ROOT}/test-payload.$$"
+	telemetry_otlp__build_payload "${payload}" test || {
+		telemetry_sender__record_state false invalid_payload null
+		return 1
+	}
+	telemetry_otlp__send "${payload}"
+	status=$?
+	rm -f "${payload}"
+	if [ "${status}" -eq 0 ]; then
+		telemetry_sender__record_state true '' "${TELEMETRY_DELIVERY_HTTP_CODE}"
+		return 0
+	fi
+	telemetry_sender__record_state false "${TELEMETRY_DELIVERY_ERROR:-transport}" "${TELEMETRY_DELIVERY_HTTP_CODE:-null}"
+	return 1
+}
+
+telemetry_sender__cycle() {
+	local events next_cursor payload queue_payload depth status count dropped=false
+	events="${TELEMETRY_STATE_ROOT}/events-pending.$$"
+	next_cursor="${TELEMETRY_STATE_ROOT}/cursor-next.$$"
+	payload="${TELEMETRY_STATE_ROOT}/payload.$$"
+	queue_payload="${TELEMETRY_STATE_ROOT}/queue-payload.$$"
+
+	telemetry_store__credentials_valid || {
+		telemetry_sender__record_state false invalid_config null
+		return 1
+	}
+	[ "$("${TELEMETRY_JQ}" -r '.enabled' "${TELEMETRY_CONFIG_FILE}")" = true ] || return 3
+	telemetry_store__queue_sanitize || {
+		telemetry_sender__record_state false queue_invalid null
+		return 1
+	}
+	telemetry_otlp__collect_events "${events}" "${next_cursor}" || return 1
+	telemetry_otlp__build_payload "${payload}" snapshot "${events}" || {
+		rm -f "${events}" "${next_cursor}" "${payload}"
+		telemetry_sender__record_state false invalid_payload null
+		return 1
+	}
+	depth=$(telemetry_store__queue_depth) || depth=0
+	if [ "${depth}" -eq 0 ]; then
+		if telemetry_otlp__send "${payload}"; then
+			telemetry_otlp__cursor_commit "${next_cursor}" || true
+			telemetry_sender__record_state true '' "${TELEMETRY_DELIVERY_HTTP_CODE}"
+			rm -f "${events}" "${next_cursor}" "${payload}"
+			return 0
+		fi
+		if telemetry_store__queue_enqueue "${payload}"; then
+			telemetry_otlp__cursor_commit "${next_cursor}" || true
+		fi
+		telemetry_sender__record_state false "${TELEMETRY_DELIVERY_ERROR:-transport}" "${TELEMETRY_DELIVERY_HTTP_CODE:-null}"
+		rm -f "${events}" "${next_cursor}" "${payload}"
+		return 1
+	fi
+
+	if ! telemetry_store__queue_enqueue "${payload}"; then
+		telemetry_sender__record_state false queue_write_failed null
+		rm -f "${events}" "${next_cursor}" "${payload}"
+		return 1
+	fi
+	dropped=${TELEMETRY_QUEUE_DROPPED:-false}
+	telemetry_otlp__cursor_commit "${next_cursor}" || true
+	if ! telemetry_store__queue_batch "${queue_payload}"; then
+		telemetry_sender__record_state false queue_invalid null "${dropped}"
+		rm -f "${events}" "${next_cursor}" "${payload}" "${queue_payload}"
+		return 1
+	fi
+	count=${TELEMETRY_QUEUE_BATCH_COUNT}
+	telemetry_otlp__send "${queue_payload}"
+	status=$?
+	if [ "${status}" -eq 0 ]; then
+		telemetry_store__queue_ack "${count}" || {
+			telemetry_sender__record_state false queue_ack_failed "${TELEMETRY_DELIVERY_HTTP_CODE}" "${dropped}"
+			rm -f "${events}" "${next_cursor}" "${payload}" "${queue_payload}"
+			return 1
+		}
+		if [ "${dropped}" = true ]; then
+			telemetry_sender__record_state true '' "${TELEMETRY_DELIVERY_HTTP_CODE}" true
+			status=1
+		else
+			telemetry_sender__record_state true '' "${TELEMETRY_DELIVERY_HTTP_CODE}"
+		fi
+	else
+		telemetry_sender__record_state false "${TELEMETRY_DELIVERY_ERROR:-transport}" "${TELEMETRY_DELIVERY_HTTP_CODE:-null}" "${dropped}"
+	fi
+	rm -f "${events}" "${next_cursor}" "${payload}" "${queue_payload}"
+	return "${status}"
+}
+
+telemetry_sender__cleanup() {
+	telemetry_process__release >/dev/null 2>&1 || true
+}
+
+telemetry_sender__run() {
+	local status
+	telemetry_process__acquire || return 1
+	trap 'telemetry_sender__cleanup' 0
+	trap 'telemetry_sender__request_stop' INT TERM
+	while [ "${TELEMETRY_SENDER_STOP}" = false ]; do
+		telemetry_sender__cycle
+		status=$?
+		[ "${status}" -ne 3 ] || break
+		telemetry_sender__sleep
+	done
+}
+
+telemetry_sender__once() {
+	local status
+	telemetry_process__acquire || return 1
+	trap 'telemetry_sender__cleanup' 0
+	trap 'telemetry_sender__cleanup; trap - 0 INT TERM; exit 130' INT TERM
+	telemetry_sender__cycle
+	status=$?
+	telemetry_sender__cleanup
+	trap - 0 INT TERM
+	return "${status}"
+}
+
+case "${1:-}" in
+	run) telemetry_sender__run ;;
+	once) telemetry_sender__once ;;
+	test) telemetry_sender__test ;;
+	*) printf 'Usage: %s {run|once|test}\n' "$0" >&2; exit 64 ;;
+esac

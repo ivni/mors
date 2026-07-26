@@ -5,6 +5,8 @@
 MORS_LIB_DIR=${MORS_LIB_DIR:-/opt/apps/mors/bin/libs}
 # shellcheck source=./vless_store
 . "${MORS_LIB_DIR}/vless_store"
+# shellcheck source=./vless_process
+. "${MORS_LIB_DIR}/vless_process"
 if [ -n "${VLESS_RUNTIME_ROOT:-}" ] && \
 	[ "${VLESS_RUNTIME_ROOT}" != /opt/var/run/mors/vless ] && \
 	[ -z "${MORS_LOCK_ROOT:-}" ]; then
@@ -33,26 +35,43 @@ VLESS_BALANCER_TAG=${VLESS_BALANCER_TAG:-mors-vless}
 VLESS_CURL=${VLESS_CURL:-curl}
 VLESS_XRAY=${VLESS_XRAY:-${XRAY:-/opt/sbin/xray}}
 
-vless_runtime__ensure() {
+vless_runtime__state_valid() {
+	[ -f "${VLESS_STATE_FILE}" ] && jq -e '
+		type == "object" and
+		.schema_version == 1 and
+		(.cycle | type == "number") and
+		(.overall_state | type == "string") and
+		(.upstream_state | type == "string") and
+		(.active_id == null or (.active_id | type == "string")) and
+		(.last_cycle_at == null or (.last_cycle_at | type == "string")) and
+		(.last_updated | type == "string") and
+		(.last_switch == null or (.last_switch | type == "object")) and
+		(.connections | type == "object")
+	' "${VLESS_STATE_FILE}" >/dev/null 2>&1
+}
+
+vless_runtime__write_default_state() {
 	local now
+	now=$(vless_store__now)
+	jq -n --arg now "${now}" '{
+		schema_version: 1,
+		cycle: 0,
+		last_cycle_at: null,
+		overall_state: "unconfigured",
+		upstream_state: "unknown",
+		active_id: null,
+		last_updated: $now,
+		last_switch: null,
+		connections: {}
+	}' | vless_store__write_json "${VLESS_STATE_FILE}"
+}
+
+vless_runtime__ensure() {
 	vless_store__ensure || return 1
 	mkdir -p "${VLESS_STATE_ROOT}" "${VLESS_RUNTIME_ROOT}" || return 1
 	chmod 700 "${VLESS_STATE_ROOT}" "${VLESS_RUNTIME_ROOT}" 2>/dev/null || return 1
 
-	if [ ! -f "${VLESS_STATE_FILE}" ]; then
-		now=$(vless_store__now)
-		jq -n --arg now "${now}" '{
-			schema_version: 1,
-			cycle: 0,
-			last_cycle_at: null,
-			overall_state: "unconfigured",
-			upstream_state: "unknown",
-			active_id: null,
-			last_updated: $now,
-			last_switch: null,
-			connections: {}
-		}' | vless_store__write_json "${VLESS_STATE_FILE}" || return 1
-	fi
+	vless_runtime__state_valid || vless_runtime__write_default_state || return 1
 	vless_runtime__reconcile
 }
 
@@ -248,9 +267,7 @@ vless_runtime__remove_override() {
 
 vless_runtime__wake_supervisor() {
 	local pid
-	[ -s "${VLESS_SUPERVISOR_PID_FILE}" ] || return 1
-	pid=$(tr -d '\r\n' <"${VLESS_SUPERVISOR_PID_FILE}")
-	[ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null || return 1
+	pid=$(vless_process__pid_from_file "${VLESS_SUPERVISOR_PID_FILE}" service) || return 1
 	kill -USR1 "${pid}" 2>/dev/null
 }
 

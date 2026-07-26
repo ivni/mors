@@ -12,6 +12,8 @@
 # ------------------------------------------------------------------------------------------
 
 if [ "${1}" = "hook" ] ; then
+	. /opt/apps/mors/bin/libs/lifecycle_state
+	lifecycle_state__runtime_allowed || exit 0
 
 	# Подключаем библиотеку ndm_d
 	. /opt/apps/mors/bin/libs/ndm_d

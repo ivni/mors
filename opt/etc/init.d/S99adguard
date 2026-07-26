@@ -40,7 +40,7 @@ case ${1} in
 		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true' 0
 		trap 'runtime_mutation_lock__release >/dev/null 2>&1 || true; trap - 0 HUP INT TERM; exit 130' HUP INT TERM
                 . /opt/apps/mors/bin/libs/vpn
-                cmd_mors_init initd
+		cmd_mors_init initd || exit 1
                 ready "Перезапускаем AdGuardHome"
                 . /opt/etc/init.d/rc.func &>/dev/null
                 sleep 1

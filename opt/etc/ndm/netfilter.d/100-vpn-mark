@@ -27,10 +27,14 @@ if [ "${type}" = 'iptables' ] ; then
 	# Роутинг данных VPN в mangle
 	# Роутинг DNS в nat
 	if [ "${table}" = 'mangle' ] || [ "${table}" = 'nat' ] ; then
+		. /opt/apps/mors/bin/libs/lifecycle_state
+		lifecycle_state__runtime_allowed || exit 0
 		. /opt/apps/mors/bin/libs/ndm
 		ndm_runtime__begin netfilter_vpn || exit $?
 
-		ip4_firewall_set_all_rules &>/dev/null
-		ndm_runtime__end
+		result=0
+		ip4_firewall_set_all_rules &>/dev/null || result=$?
+		ndm_runtime__finish "${result}"
+		exit $?
 	fi
 fi

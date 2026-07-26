@@ -19,9 +19,13 @@
 # IPv4
 # Роутинг DNS в nat
 if [ "${type}" = 'iptables' ] && [ "${table}" = 'nat' ] ; then
+	. /opt/apps/mors/bin/libs/lifecycle_state
+	lifecycle_state__runtime_allowed || exit 0
 	. /opt/apps/mors/bin/libs/ndm
 	ndm_runtime__begin netfilter_dns || exit $?
 
-	ip4__dns__add_routing_for_home &> /dev/null
-	ndm_runtime__end
+	result=0
+	ip4__dns__add_routing_for_home &> /dev/null || result=$?
+	ndm_runtime__finish "${result}"
+	exit $?
 fi
