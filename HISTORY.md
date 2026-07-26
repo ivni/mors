@@ -1,3 +1,8 @@
+## 1.3.0 beta 10 - 2026-07-26
+- GitHub package/release workflows переведены на immutable Entware builder image, адресуемый по проверенному digest и содержащий зафиксированные toolchain, buildroot и runtime-зависимости.
+- Перед сборкой fail-closed verifier подтверждает manifest builder, точные feed/dependency locks, host tools, target stamps и отсутствие исходников или готовых IPK Mors; текущий checkout передаётся через минимальный allowlist и собирается отдельным package submake.
+- Повторная сборка одного SHA использует тот же builder digest и компилирует только Mors вместо повторной подготовки Entware tools и зависимостей; публикация холодного builder защищена ограниченными повторами при временном сетевом сбое.
+
 ## 1.3.0 beta 9 - 2026-07-26
 - Чистый VLESS setup теперь ограниченно ждёт подтверждённый переход созданного `Proxy21` в `up` вместо фиксированной задержки, сохраняет точный failing substep в lifecycle journal и запускает supervisor в отдельной commit-фазе с безопасной передачей runtime-lock; долгоживущий worker не наследует временное setup-разрешение.
 - Update до lifecycle mutation проверяет `/bin/sh -n` runtime и maintainer scripts обоих IPK и запрещает data payload вне `/opt/apps/mors`; перед `opkg` создаётся автономный root-only rollback-stub с exact-version verification, а candidate runtime загружается только в дочернем shell и подтверждает успех attestation, которую commit-ит доверенный родитель, поэтому syntax error или ранний `exit 0` новой версии не может уничтожить исполняющий откат updater.
