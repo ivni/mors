@@ -222,7 +222,7 @@ snapshot "${remote_dir}/legacy-installed"
 require_passive_snapshot "${remote_dir}/legacy-installed"
 
 mors update apply "${CURRENT_PACKAGE}" --rollback-ipk "${LEGACY_PACKAGE}" --yes
-[ "$(opkg status mors | awk -F': ' '/^Version:/{print $2; exit}')" = '1.3.0~beta10-2' ]
+[ "$(opkg status mors | awk -F': ' '/^Version:/{print $2; exit}')" = '1.3.0~rc1-1' ]
 [ -f /opt/apps/mors/bin/libs/ndm ]
 [ ! -e /opt/apps/mors/etc/ndm/ndm ]
 [ -s /opt/etc/.mors/ownership/package-ndm.cksum ]

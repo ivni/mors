@@ -10,12 +10,38 @@ setup() {
 	release="$(sed -n 's/^PKG_RELEASE:=//p; /^PKG_RELEASE:=/q' "${REPO_ROOT}/Makefile")"
 	expected="${version}-${release}"
 
-	run bash "${REPO_ROOT}/scripts/qa/release-metadata.sh" "v${version//\~/-}"
+	run bash "${REPO_ROOT}/scripts/qa/release-metadata.sh" v1.3.0-rc.1
 	[ "${status}" -eq 0 ]
 	[ "${output}" = "${expected}" ]
 
 	run bash "${REPO_ROOT}/scripts/qa/release-metadata.sh" v9.9.9-beta1
 	[ "${status}" -ne 0 ]
+}
+
+@test "release metadata maps beta RC and stable package versions explicitly" {
+	local fixture=${BATS_TEST_TMPDIR}/metadata
+	mkdir -p "${fixture}/scripts/qa"
+	cp "${REPO_ROOT}/scripts/qa/release-metadata.sh" "${fixture}/scripts/qa/release-metadata.sh"
+
+	printf '%s\n' 'PKG_VERSION:=2.0.0~beta11' 'PKG_RELEASE:=1' >"${fixture}/Makefile"
+	printf '%s\n' '## 2.0.0 beta 11' >"${fixture}/HISTORY.md"
+	run bash "${fixture}/scripts/qa/release-metadata.sh" v2.0.0-beta.11
+	[ "${status}" -eq 0 ]
+	[ "${output}" = '2.0.0~beta11-1' ]
+	run bash "${fixture}/scripts/qa/release-metadata.sh" v2.0.0-beta11
+	[ "${status}" -ne 0 ]
+
+	printf '%s\n' 'PKG_VERSION:=2.0.0~rc2' 'PKG_RELEASE:=3' >"${fixture}/Makefile"
+	printf '%s\n' '## 2.0.0 rc 2' >"${fixture}/HISTORY.md"
+	run bash "${fixture}/scripts/qa/release-metadata.sh" v2.0.0-rc.2
+	[ "${status}" -eq 0 ]
+	[ "${output}" = '2.0.0~rc2-3' ]
+
+	printf '%s\n' 'PKG_VERSION:=2.0.0' 'PKG_RELEASE:=1' >"${fixture}/Makefile"
+	printf '%s\n' '## 2.0.0' >"${fixture}/HISTORY.md"
+	run bash "${fixture}/scripts/qa/release-metadata.sh" v2.0.0
+	[ "${status}" -eq 0 ]
+	[ "${output}" = '2.0.0-1' ]
 }
 
 @test "release artifact verifier validates metadata and normalizes the upload name" {

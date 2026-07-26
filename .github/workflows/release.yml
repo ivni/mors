@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag matching PKG_VERSION, for example v1.3.0-beta4.
+        description: SemVer tag explicitly mapped from PKG_VERSION, for example v1.3.0-rc.1.
         required: true
         type: string
       title:

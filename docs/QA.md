@@ -69,7 +69,7 @@ bash scripts/qa/entware-builder-id.sh --manifest
 
 `.github/workflows/release.yml` запускается только вручную на выбранном commit/branch и требует:
 
-- tag, точно соответствующий `PKG_VERSION` (`~` в версии преобразуется в `-` в tag);
+- SemVer tag, явно сопоставленный с `PKG_VERSION`: `X.Y.Z~betaN` → `vX.Y.Z-beta.N`, `X.Y.Z~rcN` → `vX.Y.Z-rc.N`, stable `X.Y.Z` → `vX.Y.Z`;
 - русский заголовок и release notes;
 - явное подтверждение `publish-mors`;
 - выбор prerelease/stable.

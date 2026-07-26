@@ -17,16 +17,27 @@ if [ -z "${package_version}" ] || [[ ! "${package_release}" =~ ^[1-9][0-9]*$ ]];
 	exit 1
 fi
 
-expected_tag="v${package_version//\~/-}"
+if [[ "${package_version}" =~ ^([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+	core_version=${BASH_REMATCH[1]}
+	expected_tag="v${core_version}"
+	history_version="${core_version}"
+elif [[ "${package_version}" =~ ^([0-9]+\.[0-9]+\.[0-9]+)~(beta|rc)([1-9][0-9]*)$ ]]; then
+	core_version=${BASH_REMATCH[1]}
+	prerelease_kind=${BASH_REMATCH[2]}
+	prerelease_number=${BASH_REMATCH[3]}
+	expected_tag="v${core_version}-${prerelease_kind}.${prerelease_number}"
+	history_version="${core_version} ${prerelease_kind} ${prerelease_number}"
+else
+	echo "Unsupported Entware package version: ${package_version}." >&2
+	exit 1
+fi
+
 if [ "${tag}" != "${expected_tag}" ]; then
 	echo "Release tag ${tag} does not match Makefile version ${package_version}." >&2
 	echo "Expected tag: ${expected_tag}" >&2
 	exit 1
 fi
 
-history_version="$(printf '%s\n' "${package_version}" | sed -E \
-	-e 's/~beta([0-9]+)/ beta \1/' \
-	-e 's/~rc([0-9]+)/ rc \1/')"
 first_history_heading="$(sed -n 's/^## //p; /^## /q' "${repo_root}/HISTORY.md")"
 case "${first_history_heading}" in
 	"${history_version}"|"${history_version} -"*) ;;

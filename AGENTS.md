@@ -83,8 +83,8 @@ Use the original Kvas repository and wiki only as historical/reference material 
 - Stable releases use the same core version in both places: package `1.4.0` and tag `v1.4.0`.
 - `PKG_RELEASE` identifies a rebuild of the same `PKG_VERSION`; increment it for another package build of that version and reset it to `1` when `PKG_VERSION` changes.
 - Existing `v1.3.0-beta4` through `v1.3.0-beta10` tags remain immutable historical tags. Do not rename, move, delete/recreate, or continue that line as `v1.3.0-beta.11`: changing prerelease identifier structure in the middle of the same core version gives misleading SemVer ordering relative to `beta9`.
-- The next prerelease for the current `1.3.0` line must be `v1.3.0-rc.1` with Entware package version `1.3.0~rc1`, or the line must advance directly to stable `v1.3.0`. Start every future beta line at `vX.Y.Z-beta.1` / `X.Y.Z~beta1`.
-- Before publishing the next prerelease, update `scripts/qa/release-metadata.sh`, its BATS coverage, workflow help, and release documentation to validate this explicit package-to-tag mapping. The current validator still reflects the historical `~betaN` to `-betaN` convention and must not be used to mint a future beta tag unchanged.
+- The beta line for `1.3.0` is closed. Prereleases continue as `v1.3.0-rc.N` / `1.3.0~rcN`, starting with `rc.1`, and may then advance to stable `v1.3.0`; do not return to beta identifiers for the same core version. Start every future beta line at `vX.Y.Z-beta.1` / `X.Y.Z~beta1`.
+- `scripts/qa/release-metadata.sh`, its BATS coverage, workflow help, and release documentation must enforce the explicit package-to-tag mapping for stable, beta, and RC versions. Never restore a blind `~` to `-` substitution.
 
 ## Runtime Assumptions
 
