@@ -94,9 +94,11 @@ setup() {
 		"${dockerfile}"
 	grep -q '^\*\*$' "${dockerfile}.dockerignore"
 	! grep -q 'TEST_INFRASTRUCTURE' "${dockerfile}.dockerignore"
-	[ "$(grep -c '^ENV FORCE_UNSAFE_CONFIGURE=1$' "${dockerfile}")" -eq 2 ]
-	grep -q 'COPY --from=prepare /opt/entware /opt/entware' "${dockerfile}"
-	! grep -q 'COPY --from=prepare /src' "${dockerfile}"
+	[ "$(grep -c '^ENV FORCE_UNSAFE_CONFIGURE=1$' "${dockerfile}")" -eq 1 ]
+	grep -q -- '--mount=type=bind,source=opt,target=/src/mors/opt,readonly' \
+		"${dockerfile}"
+	grep -q 'directly in the final stage' "${dockerfile}"
+	! grep -q '^COPY ' "${dockerfile}"
 	grep -q 'runtime-dependencies.mk' "${REPO_ROOT}/Makefile"
 	grep -q 'make package/mors/clean' "${REPO_ROOT}/scripts/qa/entware-build.sh"
 	grep -q 'rm -f package/mors' "${REPO_ROOT}/scripts/qa/entware-build.sh"

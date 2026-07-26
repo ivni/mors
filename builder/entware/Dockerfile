@@ -42,26 +42,29 @@ RUN apt-get update \
 		typing_extensions==4.16.0 \
 	&& rm -rf /var/lib/apt/lists/*
 
-FROM runtime-base AS prepare
+FROM runtime-base
 
 ARG BUILDER_ID
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-WORKDIR /src/mors
 
 # GNU host tools reject UID 0 by default. The build runs inside an isolated
 # image stage and never installs into the GitHub runner host.
+ENV ENTWARE_DIR=/opt/entware
 ENV FORCE_UNSAFE_CONFIGURE=1
+ENV MORS_ENTWARE_BUILDER_ID=${BUILDER_ID}
+ENV MORS_ENTWARE_BUILDER_MANIFEST=/opt/mors-builder/manifest.env
 
-COPY Makefile ./Makefile
-COPY opt ./opt
-COPY builder/entware ./builder/entware
-COPY scripts/qa/entware-build.sh ./scripts/qa/entware-build.sh
-COPY scripts/qa/entware-builder-id.sh ./scripts/qa/entware-builder-id.sh
-COPY scripts/qa/entware-feed-lock.sh ./scripts/qa/entware-feed-lock.sh
-COPY scripts/qa/entware.lock ./scripts/qa/entware.lock
-COPY scripts/qa/opkg-version-order.sh ./scripts/qa/opkg-version-order.sh
+RUN mkdir -p /src/mors
 
-RUN actual_builder_id="$(bash scripts/qa/entware-builder-id.sh)" \
+# BuildKit bind mounts expose only the allowlisted build inputs for this RUN.
+# They are never copied into an OCI layer; the reusable buildroot is created
+# directly in the final stage so Entware stamp and directory mtimes survive.
+RUN --mount=type=bind,source=Makefile,target=/src/mors/Makefile,readonly \
+	--mount=type=bind,source=opt,target=/src/mors/opt,readonly \
+	--mount=type=bind,source=builder/entware,target=/src/mors/builder/entware,readonly \
+	--mount=type=bind,source=scripts/qa,target=/src/mors/scripts/qa,readonly \
+	cd /src/mors \
+	&& actual_builder_id="$(bash scripts/qa/entware-builder-id.sh)" \
 	&& test -n "${BUILDER_ID}" \
 	&& test "${actual_builder_id}" = "${BUILDER_ID}" \
 	&& ENTWARE_DIR=/opt/entware bash scripts/qa/entware-build.sh \
@@ -70,22 +73,14 @@ RUN actual_builder_id="$(bash scripts/qa/entware-builder-id.sh)" \
 		-name 'mors_*_all.ipk' -print -quit)" \
 	&& mkdir -p /opt/mors-builder \
 	&& bash scripts/qa/entware-builder-id.sh --manifest \
-		>/opt/mors-builder/manifest.env
-
-FROM runtime-base
-
-ARG BUILDER_ID
+		>/opt/mors-builder/manifest.env \
+	&& rm -rf /src/mors/packages
 
 LABEL org.opencontainers.image.source="https://github.com/ivni/mors"
 LABEL org.opencontainers.image.description="Pinned Entware buildroot for Mors release packaging"
 LABEL org.opencontainers.image.version="${BUILDER_ID}"
 
-COPY --from=prepare /opt/entware /opt/entware
-COPY --from=prepare /opt/mors-builder /opt/mors-builder
-
-ENV ENTWARE_DIR=/opt/entware
-ENV FORCE_UNSAFE_CONFIGURE=1
-ENV MORS_ENTWARE_BUILDER_ID=${BUILDER_ID}
-ENV MORS_ENTWARE_BUILDER_MANIFEST=/opt/mors-builder/manifest.env
+RUN rm -rf /src/mors \
+	&& test ! -e /src/mors
 
 WORKDIR /github/workspace
