@@ -47,14 +47,28 @@ jobs:
 
           image_digest="$(resolve_digest || true)"
           if [ -z "${image_digest}" ]; then
-            docker buildx build \
-              --file builder/entware/Dockerfile \
-              --platform linux/amd64 \
-              --build-arg "BUILDER_ID=${builder_id}" \
-              --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-              --tag "${image_tag}" \
-              --push \
-              .
+            for attempt in 1 2 3; do
+              if docker buildx build \
+                --file builder/entware/Dockerfile \
+                --platform linux/amd64 \
+                --build-arg "BUILDER_ID=${builder_id}" \
+                --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+                --tag "${image_tag}" \
+                --push \
+                .
+              then
+                break
+              fi
+
+              image_digest="$(resolve_digest || true)"
+              [ -n "${image_digest}" ] && break
+              if [ "${attempt}" -eq 3 ]; then
+                echo "Unable to publish Entware builder after ${attempt} attempts." >&2
+                exit 1
+              fi
+              echo "Entware builder attempt ${attempt} failed; retrying." >&2
+              sleep $((attempt * 10))
+            done
             for attempt in 1 2 3 4 5; do
               image_digest="$(resolve_digest || true)"
               [ -n "${image_digest}" ] && break

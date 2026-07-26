@@ -85,6 +85,7 @@ setup() {
 	grep -q 'runs-on: ubuntu-24.04' "${workflow}"
 	grep -q 'docker buildx imagetools inspect' "${workflow}"
 	grep -q 'docker buildx build' "${workflow}"
+	grep -q 'Unable to publish Entware builder after' "${workflow}"
 	grep -q -- '--platform linux/amd64' "${workflow}"
 	grep -q 'image: ${{ needs.builder.outputs.image }}' "${workflow}"
 	grep -q 'bash scripts/qa/verify-entware-builder.sh' "${workflow}"
