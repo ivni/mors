@@ -31,10 +31,11 @@ Use the original Kvas repository and wiki only as historical/reference material 
 
 - `README.md`, `HISTORY.md`, `LICENCE.md` - user documentation, changelog, and license.
 - `Makefile` - Entware/OpenWrt package recipe. It declares package metadata/dependencies, installs selected NDM/init hooks, and copies `opt/.` into `/opt/apps/mors`.
-- `builder/` - legacy CI/build helpers:
-  - `Dockerfile` defines a Debian-based Entware build environment.
-  - `builder` prepares Entware feeds/toolchain and compiles the package.
-  - `Jenkinsfile` describes an older Jenkins pipeline; verify it before relying on it.
+- `builder/entware/` - inputs for the canonical immutable Entware builder image:
+  - `Dockerfile` builds the locked Entware buildroot, host tools, aarch64 toolchain, target staging tree, and all canonical Mors runtime dependencies.
+  - `Dockerfile.dockerignore` is the allowlist-only BuildKit context contract; do not broaden it to include the repository, `.git`, test infrastructure, or package artifacts.
+  - `runtime-dependencies.mk` is the single dependency list shared by the package recipe, builder, and verifier.
+- `builder/Dockerfile`, `builder/builder`, and `builder/Jenkinsfile` are legacy Docker/Jenkins helpers; they are not the release build path.
 - `opt/bin/mors` - main CLI entrypoint. It sources libraries from `/opt/apps/mors/bin/libs` and dispatches commands.
 - `opt/bin/libs/` - shared shell libraries:
   - `main` contains global paths, config helpers, output/log helpers, router API helpers, and low-level utilities.
@@ -73,6 +74,16 @@ Use the original Kvas repository and wiki only as historical/reference material 
 - Treat every pushed release tag as immutable. Never move, overwrite, or silently reuse a failed tag; prepare a new version candidate instead.
 - Use `package.yml` with `workflow_dispatch` when only a candidate `.ipk` is needed. A pushed tag is not a package-build trigger and is not a substitute for the release workflow.
 - Before reporting a release complete, verify the GitHub Release is not a draft, has the intended prerelease/latest state, points to the gated SHA, and exposes exactly one checked `.ipk` whose digest matches the workflow output.
+
+### Versioning Contract
+
+- Entware package versions and GitHub tags are different representations and must be mapped explicitly; never derive a release tag with a blind `~` to `-` substitution.
+- Entware prerelease packages use opkg ordering, for example `PKG_VERSION:=1.4.0~beta1`, while the matching SemVer GitHub tag is `v1.4.0-beta.1`. The dot makes the prerelease counter a numeric SemVer identifier, so `beta.10` sorts after `beta.9`.
+- Stable releases use the same core version in both places: package `1.4.0` and tag `v1.4.0`.
+- `PKG_RELEASE` identifies a rebuild of the same `PKG_VERSION`; increment it for another package build of that version and reset it to `1` when `PKG_VERSION` changes.
+- Existing `v1.3.0-beta4` through `v1.3.0-beta10` tags remain immutable historical tags. Do not rename, move, delete/recreate, or continue that line as `v1.3.0-beta.11`: changing prerelease identifier structure in the middle of the same core version gives misleading SemVer ordering relative to `beta9`.
+- The next prerelease for the current `1.3.0` line must be `v1.3.0-rc.1` with Entware package version `1.3.0~rc1`, or the line must advance directly to stable `v1.3.0`. Start every future beta line at `vX.Y.Z-beta.1` / `X.Y.Z~beta1`.
+- Before publishing the next prerelease, update `scripts/qa/release-metadata.sh`, its BATS coverage, workflow help, and release documentation to validate this explicit package-to-tag mapping. The current validator still reflects the historical `~betaN` to `-betaN` convention and must not be used to mint a future beta tag unchanged.
 
 ## Runtime Assumptions
 
@@ -139,19 +150,24 @@ bats tests
 ```
 
   `static.sh` checks package layout, secrets, line endings, shell syntax, ShellCheck, and actionlint when the optional local tools are installed. CI installs BATS/ShellCheck, verifies a pinned actionlint binary, and runs both commands.
-- Full package compilation requires an Entware buildroot. The canonical build helper is:
+- The canonical CI and release package path is `.github/workflows/package.yml`. It resolves or publishes `ghcr.io/ivni/mors-entware-builder:v1-<builder-id>`, resolves that tag to an OCI digest, and runs the package job only with `ghcr.io/...@sha256:<digest>`. The mutable lookup tag is never sufficient release evidence.
+- `scripts/qa/entware-builder-id.sh` hashes the builder schema, target config, Dockerfile/context allowlist, Entware/feed lock, builder scripts, and canonical runtime dependency file. Changing any builder input creates a new ID; ordinary Mors source or version changes reuse the existing toolchain image.
+- `scripts/qa/verify-entware-builder.sh` is a fail-closed attestation gate. It verifies the manifest and input digests, locked Entware HEAD, host tools, the unique aarch64 toolchain/target, every dependency stamp, and absence of stale `package/mors` source or Mors IPK.
+- After verification, `scripts/qa/entware-builder-package.sh` copies only `Makefile`, `opt`, and `runtime-dependencies.mk` into a temporary source tree and invokes the direct Mors package submake. Do not replace this with top-level `make package/mors/compile` inside the immutable image: the top-level target refreshes shared `.prepared` gates and rebuilds tools/dependencies.
+- Builder images must never contain Mors source or a ready Mors IPK. Every package is cleaned and compiled from the current checkout, and release notes must record both the exact builder image digest and IPK SHA-256.
+- A cold or local diagnostic build still requires an Entware buildroot. Use:
 
 ```sh
 bash scripts/qa/entware-build.sh
 ```
 
-  Inside an already prepared Entware tree, the equivalent package target is:
+  Inside a conventionally prepared non-image Entware tree, the equivalent top-level package target is:
 
 ```sh
 make package/feeds/packages/mors/compile V=sc
 ```
 
-- A release request requires both fast QA and a complete Entware package build for the same commit before any tag is created. Use the manually confirmed `.github/workflows/release.yml`; do not infer that a missing router test stand prevents these host-only gates.
+- A release request requires both fast QA and a complete immutable-builder package build for the same commit before any tag is created. Use the manually confirmed `.github/workflows/release.yml`; do not infer that a missing router test stand prevents these host-only gates.
 
 - The legacy Docker/Jenkins path uses `builder/Dockerfile` and `builder/builder`, but review it before trusting it for releases.
 - `.github/workflows/router-smoke.yml` performs remote installation and router mutations. Trigger it only when the user explicitly requests a smoke run, the required secrets target an authorized test router, and the workflow confirmation is intentionally supplied.
