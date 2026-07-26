@@ -1,7 +1,9 @@
-## 1.3.0 beta 8 - 2026-07-19
+## 1.3.0 beta 9 - 2026-07-26
 - Чистый VLESS setup теперь ограниченно ждёт подтверждённый переход созданного `Proxy21` в `up` вместо фиксированной задержки, сохраняет точный failing substep в lifecycle journal и запускает supervisor в отдельной commit-фазе с безопасной передачей runtime-lock; долгоживущий worker не наследует временное setup-разрешение.
 - Update до lifecycle mutation проверяет `/bin/sh -n` runtime и maintainer scripts обоих IPK и запрещает data payload вне `/opt/apps/mors`; перед `opkg` создаётся автономный root-only rollback-stub с exact-version verification, а candidate runtime загружается только в дочернем shell и подтверждает успех attestation, которую commit-ит доверенный родитель, поэтому syntax error или ранний `exit 0` новой версии не может уничтожить исполняющий откат updater.
 - Lifecycle service actions теперь оцениваются по подтверждённому desired state: повторная остановка `dead`/`stopped` Xray или Shadowsocks идемпотентна, а `running` принимается только после stability window. Setup сохраняет первый failing substep и exit code, а rollback завершает восстановление по проверенным конечным инвариантам.
+
+## 1.3.0 beta 8 - 2026-07-19
 - `mors update apply`, `mors rollback` и recovery ограниченно ожидают кратковременный runtime-lock VLESS supervisor, сохраняя немедленный отказ при незавершённом cold test и понятную диагностику после исчерпания бюджета.
 - Исправлены обнаруженные router-smoke дефекты uninstall, recovery, setup dataplane, lifecycle-статусов VLESS и диагностики IPv6.
 - Uninstall теперь отличает отсутствие необязательных файлов от реальной ошибки резервного копирования и останавливается при любой ошибке копирования существующей конфигурации.
