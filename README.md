@@ -129,6 +129,10 @@ supervisor; недоставленные записи попадают в огр
 Endpoint, transport и TLS trust store закреплены внутри telemetry sender и не
 переопределяются environment variables или пользовательским `.curlrc`; другие
 команды Mors сохраняют пользовательское proxy/custom-CA окружение.
+Telemetry работает с базовым Entware package `jq` без `jq-full`; GNU-проверки
+прав и lock-файлов предоставляет заявленная зависимость `coreutils-stat`.
+Если локальная зависимость отсутствует или несовместима, CLI называет пакет до
+сетевого запроса и не выдаёт эту ошибку за отказ Monium.
 Остановить передачу можно командой `mors telemetry disable --yes`, а удалить
 ключ, конфигурацию и очередь — `mors telemetry disable --purge --yes`.
 

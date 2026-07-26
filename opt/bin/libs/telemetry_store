@@ -19,6 +19,7 @@ TELEMETRY_MAX_AGE_SECONDS=${TELEMETRY_MAX_AGE_SECONDS:-72000}
 TELEMETRY_FUTURE_GRACE_SECONDS=${TELEMETRY_FUTURE_GRACE_SECONDS:-300}
 TELEMETRY_INTERVAL_SECONDS=${TELEMETRY_INTERVAL_SECONDS:-60}
 TELEMETRY_JQ=${TELEMETRY_JQ:-jq}
+TELEMETRY_STAT=${TELEMETRY_STAT:-stat}
 
 telemetry_store__now() {
 	date -u '+%Y-%m-%dT%H:%M:%SZ'
@@ -26,6 +27,61 @@ telemetry_store__now() {
 
 telemetry_store__now_seconds() {
 	date -u '+%s'
+}
+
+telemetry_store__command_available() {
+	case "${1}" in
+		*/*) [ -x "${1}" ] && [ ! -d "${1}" ] ;;
+		*) command -v "${1}" >/dev/null 2>&1 ;;
+	esac
+}
+
+telemetry_store__capability_reason() {
+	local stat_probe mode modified
+	if ! telemetry_store__command_available "${TELEMETRY_JQ}"; then
+		printf '%s\n' jq_unavailable
+		return 1
+	fi
+	"${TELEMETRY_JQ}" -n -e '
+		def exact_keys($expected): (keys | sort) == ($expected | sort);
+		def chars_allowed($alphabet):
+			type == "string" and
+			(($alphabet | explode) as $allowed |
+				(explode | all(.[]; . as $code | ($allowed | index($code)) != null)));
+		({"key": 1} | exact_keys(["key"])) and
+		("Aa09._:~+-" | chars_allowed("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:~+-")) and
+		([1, 1, 2] | unique == [1, 2]) and
+		([1, 2] | all(.[]; type == "number")) and
+		("prefix" | startswith("pre")) and
+		("suffix" | endswith("fix")) and
+		("abc"[1:] == "bc") and
+		(1.0 | floor == .)
+	' >/dev/null 2>&1 || {
+		printf '%s\n' jq_incompatible
+		return 1
+	}
+	if ! telemetry_store__command_available "${TELEMETRY_STAT}"; then
+		printf '%s\n' coreutils_stat_unavailable
+		return 1
+	fi
+	stat_probe=$("${TELEMETRY_STAT}" -c '%a:%Y' "${MORS_LIB_DIR}" 2>/dev/null) || {
+		printf '%s\n' coreutils_stat_incompatible
+		return 1
+	}
+	mode=${stat_probe%%:*}
+	modified=${stat_probe#*:}
+	case "${mode}" in
+		''|*[!0-7]*)
+			printf '%s\n' coreutils_stat_incompatible
+			return 1
+			;;
+	esac
+	case "${modified}" in
+		''|*[!0-9]*)
+			printf '%s\n' coreutils_stat_incompatible
+			return 1
+			;;
+	esac
 }
 
 telemetry_store__atomic_from_stdin() {
@@ -99,7 +155,7 @@ telemetry_store__ensure_directories() {
 telemetry_store__mode_is() {
 	local path=${1} expected=${2} actual
 	[ ! -L "${path}" ] || return 1
-	actual=$(stat -c '%a' "${path}" 2>/dev/null) || return 1
+	actual=$("${TELEMETRY_STAT}" -c '%a' "${path}" 2>/dev/null) || return 1
 	[ "${actual}" = "${expected}" ]
 }
 
@@ -279,18 +335,88 @@ telemetry_store__write_curl_config() {
 	return "${status}"
 }
 
-telemetry_store__payload_schema() {
+telemetry_store__jq_primitives() {
 	cat <<'JQ'
 def exact_keys($expected): (keys | sort) == ($expected | sort);
 def member($allowed): . as $value | ($allowed | index($value)) != null;
+def chars_allowed($alphabet):
+  type == "string" and
+  (($alphabet | explode) as $allowed |
+    (explode | all(.[]; . as $code | ($allowed | index($code)) != null)));
+def digits_string:
+  type == "string" and length > 0 and chars_allowed("0123456789");
+def digits_between($minimum; $maximum):
+  digits_string and length >= $minimum and length <= $maximum;
+def timestamp:
+  type == "string" and length == 20 and
+  (.[0:4] | digits_between(4; 4)) and .[4:5] == "-" and
+  (.[5:7] | digits_between(2; 2)) and .[7:8] == "-" and
+  (.[8:10] | digits_between(2; 2)) and .[10:11] == "T" and
+  (.[11:13] | digits_between(2; 2)) and .[13:14] == ":" and
+  (.[14:16] | digits_between(2; 2)) and .[16:17] == ":" and
+  (.[17:19] | digits_between(2; 2)) and .[19:20] == "Z";
 def safe_ascii($maximum):
   type == "string" and length > 0 and length <= $maximum and
-  test("^[A-Za-z0-9._:~+-]+$");
+  chars_allowed("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:~+-");
 def safe_id:
   type == "string" and
-  (test("^vless-[A-Za-z0-9]{1,48}$") or . == "mors-block" or . == "mors-direct");
-def safe_instance: type == "string" and (test("^[a-f0-9]{32}$") or test("^mors-[0-9]+$"));
-def decimal_int: type == "string" and test("^(0|[1-9][0-9]{0,19})$");
+  (. == "mors-block" or . == "mors-direct" or
+    (startswith("vless-") and
+      (.[6:] | length >= 1 and length <= 48 and
+        chars_allowed("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"))));
+def safe_instance:
+  type == "string" and
+  ((length == 32 and chars_allowed("abcdef0123456789")) or
+    (startswith("mors-") and (.[5:] | digits_string)));
+def decimal_int:
+  type == "string" and
+  (. == "0" or
+    (length >= 1 and length <= 20 and
+      (.[0:1] | chars_allowed("123456789")) and digits_string));
+def package_core:
+  split(".") as $parts |
+  ($parts | length) == 3 and all($parts[]; digits_string);
+def package_prerelease:
+  . as $value |
+  (($value | startswith("alpha")) and ($value[5:] | digits_string)) or
+  (($value | startswith("beta")) and ($value[4:] | digits_string)) or
+  (($value | startswith("rc")) and ($value[2:] | digits_string));
+def package_version_component:
+  split("~") as $parts |
+  (($parts | length) == 1 and ($parts[0] | package_core)) or
+  (($parts | length) == 2 and
+    ($parts[0] | package_core) and ($parts[1] | package_prerelease));
+def package_version:
+  type == "string" and
+  (split("-") as $parts |
+    ($parts | length) == 2 and
+    (($parts[0] == "unknown") or ($parts[0] | package_version_component)) and
+    (($parts[1] == "unknown") or ($parts[1] | digits_string)));
+def counter_pair:
+  split("-") as $parts |
+  ($parts | length) == 2 and all($parts[]; digits_string);
+def summary_event_id($instance; $kind):
+  split(":") as $parts |
+  ($parts | length) == 4 and
+  $parts[0] == $instance and ($parts[1] | digits_between(19; 19)) and
+  $parts[2] == $kind and $parts[3] == "summary";
+def connection_event_id($instance):
+  split(":") as $parts |
+  ($parts | length) == 4 and
+  $parts[0] == $instance and ($parts[1] | digits_between(19; 19)) and
+  $parts[2] == "connection" and ($parts[3] | counter_pair);
+def vless_event_id($instance):
+  split(":") as $parts |
+  ($parts | length) == 6 and $parts[0] == $instance and
+  (($parts[1] + ":" + $parts[2] + ":" + $parts[3]) | timestamp) and
+  ($parts[4] | member(["switch", "cycle", "all_unavailable", "pause", "resume"])) and
+  ($parts[5] | counter_pair);
+JQ
+}
+
+telemetry_store__payload_schema() {
+	telemetry_store__jq_primitives
+	cat <<'JQ'
 def string_value: (.value | type == "object" and exact_keys(["stringValue"]) and (.stringValue | type == "string"));
 def int_value: (.value | type == "object" and exact_keys(["intValue"]) and (.intValue | decimal_int));
 def bool_value: (.value | type == "object" and exact_keys(["boolValue"]) and (.boolValue | type == "boolean"));
@@ -326,7 +452,7 @@ def valid_attribute:
     ($attribute | string_value) and ($attribute.value.stringValue | member(["ok", "error", "aborted"]))
   elif $attribute.key == "mors.vless.event_at" then
     ($attribute | string_value) and
-    ($attribute.value.stringValue | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+    ($attribute.value.stringValue | timestamp)
   elif ($attribute.key | member([
       "mors.vless.cycle", "mors.vless.enabled_count", "mors.vless.standby_count",
       "mors.vless.unavailable_count", "mors.tunnel.rx_bytes", "mors.tunnel.tx_bytes",
@@ -348,8 +474,7 @@ def valid_resource_attribute($service; $instance):
     ($attribute | string_value) and $attribute.value.stringValue == $service
   elif $attribute.key == "service.version" then
     ($attribute | string_value) and
-    ($attribute.value.stringValue |
-      test("^(unknown|[0-9]+[.][0-9]+[.][0-9]+(~(alpha|beta|rc)[0-9]+)?)-(unknown|[0-9]+)$"))
+    ($attribute.value.stringValue | package_version)
   elif $attribute.key == "service.instance.id" then
     ($attribute | string_value) and ($attribute.value.stringValue | safe_instance) and
     $attribute.value.stringValue == $instance
@@ -359,7 +484,7 @@ def valid_resource_attribute($service; $instance):
 def valid_record($instance):
   type == "object" and
   exact_keys(["timeUnixNano", "observedTimeUnixNano", "severityNumber", "severityText", "body", "attributes"]) and
-  (.timeUnixNano | type == "string" and test("^[0-9]{19}$")) and
+  (.timeUnixNano | digits_between(19; 19)) and
   .observedTimeUnixNano == .timeUnixNano and
   ((.severityNumber == 9 and .severityText == "INFO") or (.severityNumber == 17 and .severityText == "ERROR")) and
   (.body | type == "object" and exact_keys(["stringValue"])) and
@@ -371,13 +496,13 @@ def valid_record($instance):
     ([.attributes[] | select(.key == "mors.event")][0].value.stringValue) as $event |
     ([.attributes[] | select(.key == "mors.event.id")][0].value.stringValue) as $event_id |
     (($body == "Проверка доставки телеметрии Mors" and $event == "telemetry_test" and
-      ($event_id | test("^" + $instance + ":[0-9]{19}:test:summary$"))) or
+      ($event_id | summary_event_id($instance; "test"))) or
      ($body == "Состояние Mors" and $event == "health_snapshot" and
-      ($event_id | test("^" + $instance + ":[0-9]{19}:snapshot:summary$"))) or
+      ($event_id | summary_event_id($instance; "snapshot"))) or
      ($body == "Состояние соединения Mors" and $event == "connection_health" and
-      ($event_id | test("^" + $instance + ":[0-9]{19}:connection:[0-9]+-[0-9]+$"))) or
+      ($event_id | connection_event_id($instance))) or
      ($body == "Событие VLESS" and $event == "vless_event" and
-      ($event_id | test("^" + $instance + ":[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z:(switch|cycle|all_unavailable|pause|resume):[0-9]+-[0-9]+$")))));
+      ($event_id | vless_event_id($instance)))));
 def valid_resource_log($service; $instance):
   type == "object" and exact_keys(["resource", "scopeLogs"]) and
   (.resource | type == "object" and exact_keys(["attributes"]) and
@@ -603,28 +728,36 @@ telemetry_store__queue_ack() {
 	[ -s "${TELEMETRY_QUEUE_FILE}" ] || rm -f "${TELEMETRY_QUEUE_FILE}"
 }
 
+telemetry_store__state_schema() {
+	telemetry_store__jq_primitives
+	cat <<'JQ'
+def allowed_error:
+  . == null or . == "dns" or . == "timeout" or . == "tls" or . == "transport" or
+  . == "http_4xx" or . == "http_5xx" or . == "partial_reject" or
+  . == "invalid_response" or . == "invalid_payload" or . == "invalid_config" or
+  . == "queue_invalid" or . == "queue_write_failed" or . == "queue_ack_failed";
+def state_valid($queue_limit):
+  type == "object" and
+  exact_keys(["schema_version", "last_attempt_at", "last_success_at", "last_error", "last_http_code", "queue_depth", "queue_overflow", "dropped_samples"]) and
+  .schema_version == 1 and
+  (.last_attempt_at | timestamp) and
+  (.last_success_at == null or (.last_success_at | timestamp)) and
+  (.last_error | allowed_error) and
+  (.last_http_code == null or
+    (.last_http_code | type == "number" and floor == . and . >= 100 and . <= 599)) and
+  (.queue_depth | type == "number" and floor == . and . >= 0 and . <= $queue_limit) and
+  (.queue_overflow | type == "boolean") and
+  (.dropped_samples | type == "number" and floor == . and . >= 0 and . <= 9007199254740991);
+JQ
+}
+
 telemetry_store__state_valid() {
+	local schema
 	[ -f "${TELEMETRY_STATE_FILE}" ] && [ ! -L "${TELEMETRY_STATE_FILE}" ] || return 1
-	"${TELEMETRY_JQ}" -e --argjson queue_limit "${TELEMETRY_QUEUE_LIMIT}" '
-		def exact_keys($expected): (keys | sort) == ($expected | sort);
-		def timestamp: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
-		def allowed_error:
-			. == null or . == "dns" or . == "timeout" or . == "tls" or . == "transport" or
-			. == "http_4xx" or . == "http_5xx" or . == "partial_reject" or
-			. == "invalid_response" or . == "invalid_payload" or . == "invalid_config" or
-			. == "queue_invalid" or . == "queue_write_failed" or . == "queue_ack_failed";
-		type == "object" and
-		exact_keys(["schema_version", "last_attempt_at", "last_success_at", "last_error", "last_http_code", "queue_depth", "queue_overflow", "dropped_samples"]) and
-		.schema_version == 1 and
-		(.last_attempt_at | timestamp) and
-		(.last_success_at == null or (.last_success_at | timestamp)) and
-		(.last_error | allowed_error) and
-		(.last_http_code == null or
-			(.last_http_code | type == "number" and floor == . and . >= 100 and . <= 599)) and
-		(.queue_depth | type == "number" and floor == . and . >= 0 and . <= $queue_limit) and
-		(.queue_overflow | type == "boolean") and
-		(.dropped_samples | type == "number" and floor == . and . >= 0 and . <= 9007199254740991)
-	' "${TELEMETRY_STATE_FILE}" >/dev/null 2>&1
+	schema=$(telemetry_store__state_schema) || return 1
+	"${TELEMETRY_JQ}" -e --argjson queue_limit "${TELEMETRY_QUEUE_LIMIT}" \
+		"${schema} state_valid(\$queue_limit)" \
+		"${TELEMETRY_STATE_FILE}" >/dev/null 2>&1
 }
 
 telemetry_store__state_write() {

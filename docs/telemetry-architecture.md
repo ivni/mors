@@ -41,7 +41,7 @@ Mors отправляет OTLP/HTTP JSON методом POST на фиксиро
 TLS-сертификат всегда проверяется. Пользовательский endpoint, отключение TLS
 verification и произвольные HTTP-заголовки не поддерживаются.
 Публичные entrypoint Mors принудительно закрепляют endpoint и системные пути
-sender/curl/jq/lifecycle: одноимённые environment variables игнорируются.
+sender/curl/jq/stat/lifecycle: одноимённые environment variables игнорируются.
 `curl` запускается с `-q`, поэтому пользовательский `.curlrc` также не может
 добавить proxy, header, trace или перенаправить запрос. Proxy environment также
 сбрасывается только внутри sender: он всегда использует обычную маршрутизацию
@@ -49,8 +49,12 @@ sender/curl/jq/lifecycle: одноимённые environment variables игно�
 других подсистем Mors.
 
 На роутер не устанавливаются OTel Collector или Fluent Bit. JSON строится через
-`jq`, а доставка выполняется существующим dependency `curl`. Payload следует
-стабильной OTLP JSON-схеме `ExportLogsServiceRequest`:
+базовый Entware package `jq`, а доставка выполняется существующим dependency
+`curl`. Закрытая схема не использует regex-функции `jq` и не требует
+`jq-full`/Oniguruma: это исключает конфликт файлов при обновлении установки,
+которая уже владеет обычным `jq`. Чтение Unix mode и времени lock-каталогов
+выполняет явно заявленный `coreutils-stat`. Payload следует стабильной OTLP
+JSON-схеме `ExportLogsServiceRequest`:
 
 ```text
 resourceLogs[] -> scopeLogs[] -> logRecords[]
@@ -153,6 +157,14 @@ lifecycle `ready`, атомарно готовит конфигурацию, с�
 sender после успешного test delivery. Если test не прошёл, конфигурация может
 быть сохранена, но сервис не объявляется включённым.
 
+До чтения telemetry state и до запуска sender команды `enable`, `test` и
+`status` проверяют базовые pure-jq операции и GNU-формы `stat -c`, реально
+используемые runtime. Ошибка локальной capability возвращает стабильный
+`reason_code`, называет `jq` или `coreutils-stat`, имеет exit code `3` и не
+записывается как `invalid_payload`/ошибка Monium. Поэтому upgrade с beta9 не
+заменяет `jq` на конфликтующий `jq-full`: новый пакет добавляет только
+неконфликтующий `coreutils-stat`.
+
 `disable` доступен даже при `recovery_required`, поскольку оператор всегда
 должен иметь возможность остановить внешнюю передачу. Uninstall сначала
 останавливает sender и удаляет только точную managed init symlink. Неожиданный
@@ -185,9 +197,11 @@ hook снимается, очередь и credentials сохраняются д
 ## 7. Проверки релиза
 
 - BATS для config validation, privacy whitelist, OTLP JSON, HTTP/partial
-  response, bounded queue, cursor и CLI exit codes;
+  response, bounded queue, cursor, CLI exit codes, базового `jq` без Oniguruma
+  и диагностики отсутствующего `coreutils-stat`;
 - shell syntax и ShellCheck;
-- package-layout проверяет sender, init и library;
+- package-layout проверяет sender, init, library и canonical runtime
+  dependencies;
 - lifecycle tests подтверждают missing/stopped/running snapshot+restore,
   ordinary/full teardown, protected credentials и неожиданный init hook;
 - fake transport проверяет headers и payload без реального API-ключа;

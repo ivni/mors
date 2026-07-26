@@ -224,12 +224,27 @@ mors telemetry test [--json]
   конфигурацию. Для замены Project ID или ключа оператор сначала явно выполняет
   `disable --purge --yes`, чтобы существующая настройка не перезаписывалась
   неявно.
+- `enable`, `test` и `status` до чтения telemetry state и до запуска sender
+  выполняют локальный capability preflight. Он отдельно проверяет доступность
+  совместимого базового `jq` и GNU `stat` из пакета `coreutils-stat`. Ошибка
+  preflight называет пакет и стабильный `reason_code`, не записывается как
+  `invalid_payload`, не описывается как отказ Monium и не доходит до HTTP.
+- Отсутствие Oniguruma не является ошибкой capability: закрытая payload/state
+  схема не использует regex-функции `jq` и должна работать с базовым Entware
+  package `jq`. Это сохраняет обычный upgrade с ранее установленного `jq` без
+  file clash с `jq-full`.
 
 JSON `status` содержит `schema_version`, `provider`, `configured`, `enabled`, `running`,
 `project`, `cluster`, `service`, `queue_depth`, `queue_overflow`,
 `dropped_samples`, `last_attempt_at`, `last_success_at`, `last_error` и
-`last_http_code`. `queue_overflow` и `dropped_samples` остаются видимыми после
-последующей сетевой ошибки или успешной доставки до перезапуска роутера.
+`last_http_code`, а также объект `local_runtime` с полями `ready`,
+`reason_code` и `message`. `queue_overflow` и `dropped_samples` остаются
+видимыми после последующей сетевой ошибки или успешной доставки до перезапуска
+роутера. Если capability preflight не пройден, `status --json` всё равно
+возвращает один JSON object: `local_runtime.ready=false`, operational-поля,
+которые нельзя безопасно прочитать, равны `null`, stderr пуст, exit code равен
+`3`. `test --json` использует тот же error object и добавляет
+`test_delivered=false`.
 API-ключ, HTTP-заголовок
 авторизации, внешний или клиентский IP и endpoint credentials в схеме
 отсутствуют.
@@ -239,7 +254,8 @@ Exit codes:
 - `0` — команда выполнена либо status успешно прочитан;
 - `1` — локальная операция запуска, остановки или удаления не завершена;
 - `2` — тестовая доставка не подтверждена приёмником;
-- `3` — телеметрия не настроена или lifecycle не допускает включение;
+- `3` — телеметрия не настроена, lifecycle не допускает включение или
+  отсутствует обязательная локальная capability;
 - `4` — конфигурация или runtime state повреждены;
 - `64` — ошибка аргументов.
 

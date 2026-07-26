@@ -120,4 +120,18 @@ if grep -Fq '/opt/etc/init.d/S98mors-telemetry' Makefile; then
 	missing=1
 fi
 
+runtime_dependencies=builder/entware/runtime-dependencies.mk
+if ! grep -Eq '(^|[[:space:]])\+jq([[:space:]]|$)' "${runtime_dependencies}"; then
+	echo "Telemetry requires the canonical base jq runtime dependency." >&2
+	missing=1
+fi
+if grep -Eq '(^|[[:space:]])\+jq-full([[:space:]]|$)' "${runtime_dependencies}"; then
+	echo "Telemetry must not replace base jq with the file-conflicting jq-full package." >&2
+	missing=1
+fi
+if ! grep -Eq '(^|[[:space:]])\+coreutils-stat([[:space:]]|$)' "${runtime_dependencies}"; then
+	echo "Telemetry requires the canonical coreutils-stat runtime dependency." >&2
+	missing=1
+fi
+
 exit "${missing}"

@@ -46,6 +46,19 @@ make_payload() {
 	}' >"${destination}"
 }
 
+write_jq_without_oniguruma() {
+	local wrapper="${BATS_TEST_TMPDIR}/jq-no-oniguruma"
+	cat >"${wrapper}" <<'SH'
+#!/bin/sh
+case "$*" in
+	*'test('*|*'match('*|*'sub('*|*'gsub('*|*'scan('*|*'splits('*|*'capture('*) exit 5 ;;
+esac
+exec "${REAL_JQ}" "$@"
+SH
+	chmod +x "${wrapper}"
+	printf '%s\n' "${wrapper}"
+}
+
 @test "config and Monium credentials are stored with protected modes" {
 	telemetry_store__write_config folder__test home mors false "${TELEMETRY_INSTANCE_ID}"
 	telemetry_store__write_key "${BATS_TEST_TMPDIR}/input/key"
@@ -62,6 +75,21 @@ make_payload() {
 	chmod 600 "${TELEMETRY_CURL_CONFIG}"
 	run telemetry_store__credentials_valid
 	[ "${status}" -ne 0 ]
+}
+
+@test "payload and state schemas work with jq compiled without Oniguruma" {
+	REAL_JQ=$(command -v jq)
+	export REAL_JQ
+	TELEMETRY_JQ=$(write_jq_without_oniguruma)
+	export TELEMETRY_JQ
+
+	telemetry_store__capability_reason
+	schema=$(telemetry_store__payload_schema)
+	"${TELEMETRY_JQ}" -n -e "${schema} true" >/dev/null
+	telemetry_store__ensure_directories
+	: >"${TELEMETRY_QUEUE_FILE}"
+	telemetry_store__state_write false timeout null
+	telemetry_store__state_valid
 }
 
 @test "header injection and malformed keys are rejected" {

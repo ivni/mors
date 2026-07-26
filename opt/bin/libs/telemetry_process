@@ -6,6 +6,7 @@ TELEMETRY_PROCESS_ROOT=${TELEMETRY_PROCESS_ROOT:-/proc}
 TELEMETRY_PID_FILE=${TELEMETRY_PID_FILE:-/opt/var/run/mors/telemetry/sender.pid}
 TELEMETRY_PROCESS_LOCK_DIR=${TELEMETRY_PROCESS_LOCK_DIR:-/opt/var/run/mors/telemetry/sender.lock}
 TELEMETRY_PROCESS_LOCK_GRACE=${TELEMETRY_PROCESS_LOCK_GRACE:-5}
+TELEMETRY_STAT=${TELEMETRY_STAT:-stat}
 
 telemetry_process__read_pid() {
 	local file=${TELEMETRY_PID_FILE} pid
@@ -62,7 +63,7 @@ telemetry_process__running_pid() {
 telemetry_process__lock_is_fresh() {
 	local modified now age
 	[ -d "${TELEMETRY_PROCESS_LOCK_DIR}" ] || return 1
-	modified=$(stat -c '%Y' "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null) || return 0
+	modified=$("${TELEMETRY_STAT}" -c '%Y' "${TELEMETRY_PROCESS_LOCK_DIR}" 2>/dev/null) || return 0
 	now=$(date -u '+%s') || return 0
 	age=$((now - modified))
 	[ "${age}" -lt "${TELEMETRY_PROCESS_LOCK_GRACE}" ]

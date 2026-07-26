@@ -3,7 +3,7 @@ include $(TOPDIR)/package/mors/builder/entware/runtime-dependencies.mk
 
 PKG_NAME:=mors
 PKG_VERSION:=1.3.0~rc1
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)-$(PKG_RELEASE)
 MOLOT_UNINSTALL:=mors uninstall full
 

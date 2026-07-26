@@ -53,7 +53,7 @@ telemetry_cli__admin_lock_acquire() {
 			[ -z "${current_start}" ] || [ "${current_start}" != "${stored_start}" ] || return 1
 		fi
 		if [ -z "${pid}" ] || [ -z "${stored_start}" ]; then
-			modified=$(stat -c '%Y' "${TELEMETRY_ADMIN_LOCK_DIR}" 2>/dev/null || printf 0)
+			modified=$("${TELEMETRY_STAT}" -c '%Y' "${TELEMETRY_ADMIN_LOCK_DIR}" 2>/dev/null || printf 0)
 			now=$(date -u '+%s')
 			[ $((now - modified)) -ge "${TELEMETRY_ADMIN_LOCK_GRACE}" ] || return 1
 		fi
@@ -117,6 +117,47 @@ telemetry_cli__require_ready() {
 	fi
 	. "${MORS_LIB_DIR}/lifecycle_state"
 	lifecycle_state__require_ready
+}
+
+telemetry_cli__capability_check() {
+	local reason
+	if reason=$(telemetry_store__capability_reason); then
+		TELEMETRY_CAPABILITY_REASON=''
+		TELEMETRY_CAPABILITY_MESSAGE=''
+		return 0
+	fi
+	case "${reason}" in
+		jq_unavailable)
+			TELEMETRY_CAPABILITY_MESSAGE='Локальная зависимость telemetry недоступна: установите пакет jq.'
+			;;
+		jq_incompatible)
+			TELEMETRY_CAPABILITY_MESSAGE='Локальная зависимость telemetry несовместима: переустановите пакет jq.'
+			;;
+		coreutils_stat_unavailable)
+			TELEMETRY_CAPABILITY_MESSAGE='Локальная зависимость telemetry недоступна: установите пакет coreutils-stat.'
+			;;
+		coreutils_stat_incompatible)
+			TELEMETRY_CAPABILITY_MESSAGE='Локальная зависимость telemetry несовместима: переустановите пакет coreutils-stat.'
+			;;
+		*)
+			reason=runtime_capability_unknown
+			TELEMETRY_CAPABILITY_MESSAGE='Не удалось подтвердить локальные runtime-возможности telemetry.'
+			;;
+	esac
+	TELEMETRY_CAPABILITY_REASON=${reason}
+	return 1
+}
+
+telemetry_cli__capability_error_human() {
+	printf '%s (reason_code: %s)\n' \
+		"${TELEMETRY_CAPABILITY_MESSAGE}" "${TELEMETRY_CAPABILITY_REASON}" >&2
+}
+
+telemetry_cli__capability_status_json() {
+	local suffix=''
+	[ "${1:-status}" != test ] || suffix=',"test_delivered":false'
+	printf '{"schema_version":1,"provider":null,"configured":null,"enabled":null,"running":null,"project":null,"cluster":null,"service":null,"queue_depth":null,"queue_overflow":null,"dropped_samples":null,"last_attempt_at":null,"last_success_at":null,"last_error":null,"last_http_code":null,"local_runtime":{"ready":false,"reason_code":"%s","message":"%s"}%s}\n' \
+		"${TELEMETRY_CAPABILITY_REASON}" "${TELEMETRY_CAPABILITY_MESSAGE}" "${suffix}"
 }
 
 telemetry_cli__confirm() {
@@ -206,7 +247,12 @@ telemetry_cli__status_json() {
 			last_attempt_at: $last_attempt,
 			last_success_at: $last_success,
 			last_error: $last_error,
-			last_http_code: $last_http
+			last_http_code: $last_http,
+			local_runtime: {
+				ready: true,
+				reason_code: null,
+				message: null
+			}
 		}'
 }
 
@@ -217,6 +263,14 @@ cmd_telemetry_status() {
 		1) [ "${1}" = --json ] || { printf '%s\n' 'Использование: mors telemetry status [--json]' >&2; return 64; }; json=true ;;
 		*) printf '%s\n' 'Использование: mors telemetry status [--json]' >&2; return 64 ;;
 	esac
+	if ! telemetry_cli__capability_check; then
+		if [ "${json}" = true ]; then
+			telemetry_cli__capability_status_json
+		else
+			telemetry_cli__capability_error_human
+		fi
+		return 3
+	fi
 	data=$(telemetry_cli__status_json) || {
 		printf '%s\n' 'Состояние telemetry повреждено или недоступно.' >&2
 		return 4
@@ -291,6 +345,11 @@ cmd_telemetry_enable() {
 		printf '%s\n' 'Другая lifecycle-операция Mors уже выполняется.' >&2
 		return 3
 	}
+	if ! telemetry_cli__capability_check; then
+		telemetry_cli__capability_error_human
+		telemetry_cli__lifecycle_lock_release >/dev/null 2>&1 || true
+		return 3
+	fi
 	telemetry_cli__admin_lock_acquire || {
 		printf '%s\n' 'Другая операция telemetry уже выполняется.' >&2
 		telemetry_cli__lifecycle_lock_release >/dev/null 2>&1 || true
@@ -347,14 +406,21 @@ cmd_telemetry_enable() {
 	TELEMETRY_TEMP_SECRET_FILE=''
 	if [ -z "${status:-}" ]; then
 		telemetry_process__running_pid >/dev/null 2>&1 && prior_running=true
-		if ! "${TELEMETRY_SENDER_PROGRAM}" test >/dev/null 2>&1; then
-			if [ "${prior_enabled}" = true ]; then
+		"${TELEMETRY_SENDER_PROGRAM}" test >/dev/null 2>&1
+		status=$?
+		if [ "${status}" -ne 0 ]; then
+			if [ "${status}" -eq 3 ] && ! telemetry_cli__capability_check; then
+				telemetry_cli__capability_error_human
+				status=3
+			elif [ "${prior_enabled}" = true ]; then
 				printf '%s\n' 'Monium не подтвердил тестовую запись. Существующая настройка не изменена.' >&2
+				status=2
 			else
 				printf '%s\n' 'Monium не подтвердил тестовую запись. Конфигурация сохранена выключенной.' >&2
+				status=2
 			fi
-			status=2
 		else
+			status=''
 			telemetry_store__set_enabled true || status=1
 		fi
 	fi
@@ -393,6 +459,15 @@ cmd_telemetry_test() {
 		*) return 64 ;;
 	esac
 	telemetry_cli__lifecycle_lock_acquire || return 3
+	if ! telemetry_cli__capability_check; then
+		if [ "${json}" = true ]; then
+			telemetry_cli__capability_status_json test
+		else
+			telemetry_cli__capability_error_human
+		fi
+		telemetry_cli__lifecycle_lock_release >/dev/null 2>&1 || true
+		return 3
+	fi
 	telemetry_cli__admin_lock_acquire || {
 		telemetry_cli__lifecycle_lock_release >/dev/null 2>&1 || true
 		return 3
@@ -404,6 +479,17 @@ cmd_telemetry_test() {
 		status=$?
 	else
 		status=3
+	fi
+	if [ "${status}" -eq 3 ] && ! telemetry_cli__capability_check; then
+		telemetry_cli__admin_lock_release
+		telemetry_cli__lifecycle_lock_release
+		trap - 0 HUP INT TERM
+		if [ "${json}" = true ]; then
+			telemetry_cli__capability_status_json test
+		else
+			telemetry_cli__capability_error_human
+		fi
+		return 3
 	fi
 	data=$(telemetry_cli__status_json 2>/dev/null || printf '{}')
 	telemetry_cli__admin_lock_release

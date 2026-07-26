@@ -40,10 +40,88 @@ setup() {
 	. "${MORS_LIB_DIR}/telemetry"
 }
 
+write_jq_without_oniguruma() {
+	local wrapper="${BATS_TEST_TMPDIR}/jq-no-oniguruma"
+	cat >"${wrapper}" <<'SH'
+#!/bin/sh
+case "$*" in
+	*'test('*|*'match('*|*'sub('*|*'gsub('*|*'scan('*|*'splits('*|*'capture('*) exit 5 ;;
+esac
+exec "${REAL_JQ}" "$@"
+SH
+	chmod +x "${wrapper}"
+	printf '%s\n' "${wrapper}"
+}
+
 @test "noninteractive enable requires explicit confirmation" {
 	run cmd_telemetry_enable monium --project folder__test --key-file "${BATS_TEST_TMPDIR}/key"
 	[ "${status}" -eq 64 ]
 	[ ! -e "${TELEMETRY_CONFIG_FILE}" ]
+}
+
+@test "enable accepts base jq without Oniguruma" {
+	REAL_JQ=$(command -v jq)
+	export REAL_JQ
+	TELEMETRY_JQ=$(write_jq_without_oniguruma)
+	export TELEMETRY_JQ
+
+	run cmd_telemetry_enable monium --project folder__test --key-file "${BATS_TEST_TMPDIR}/key" --yes
+	[ "${status}" -eq 0 ]
+	[ "$(jq -r '.enabled' "${TELEMETRY_CONFIG_FILE}")" = true ]
+}
+
+@test "missing coreutils-stat is reported before sender or HTTP" {
+	export TELEMETRY_STAT="${BATS_TEST_TMPDIR}/missing-stat"
+	cat >"${TELEMETRY_SENDER_PROGRAM}" <<EOF
+#!/bin/sh
+touch '${BATS_TEST_TMPDIR}/sender-invoked'
+exit 1
+EOF
+	chmod +x "${TELEMETRY_SENDER_PROGRAM}"
+
+	run cmd_telemetry_enable monium --project folder__test --key-file "${BATS_TEST_TMPDIR}/key" --yes
+	[ "${status}" -eq 3 ]
+	[[ "${output}" == *'coreutils-stat'* ]]
+	[[ "${output}" == *'coreutils_stat_unavailable'* ]]
+	[ ! -e "${TELEMETRY_CONFIG_FILE}" ]
+	[ ! -e "${BATS_TEST_TMPDIR}/sender-invoked" ]
+
+	run cmd_telemetry_status --json
+	[ "${status}" -eq 3 ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.local_runtime.ready')" = false ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.local_runtime.reason_code')" = coreutils_stat_unavailable ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.configured')" = null ]
+
+	run cmd_telemetry_test --json
+	[ "${status}" -eq 3 ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.test_delivered')" = false ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.local_runtime.reason_code')" = coreutils_stat_unavailable ]
+}
+
+@test "missing jq has a local reason instead of a Monium failure" {
+	export TELEMETRY_JQ="${BATS_TEST_TMPDIR}/missing-jq"
+
+	run cmd_telemetry_enable monium --project folder__test --key-file "${BATS_TEST_TMPDIR}/key" --yes
+	[ "${status}" -eq 3 ]
+	[[ "${output}" == *'установите пакет jq'* ]]
+	[[ "${output}" == *'jq_unavailable'* ]]
+	[[ "${output}" != *'Monium не подтвердил'* ]]
+	[ ! -e "${TELEMETRY_CONFIG_FILE}" ]
+}
+
+@test "BusyBox stat without GNU format has a distinct reason" {
+	export TELEMETRY_STAT="${BATS_TEST_TMPDIR}/busybox-stat"
+	cat >"${TELEMETRY_STAT}" <<'SH'
+#!/bin/sh
+printf '%s\n' 'stat: invalid option -- c' >&2
+exit 1
+SH
+	chmod +x "${TELEMETRY_STAT}"
+
+	run cmd_telemetry_status --json
+	[ "${status}" -eq 3 ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.local_runtime.reason_code')" = coreutils_stat_incompatible ]
+	[ "$(printf '%s\n' "${output}" | jq -r '.local_runtime.ready')" = false ]
 }
 
 @test "successful enable persists protected config and activates init service" {
@@ -55,6 +133,7 @@ setup() {
 	[ "$(printf '%s\n' "${data}" | jq -r '.project')" = folder__test ]
 	[ "$(printf '%s\n' "${data}" | jq -r '.queue_overflow')" = false ]
 	[ "$(printf '%s\n' "${data}" | jq -r '.dropped_samples')" -eq 0 ]
+	[ "$(printf '%s\n' "${data}" | jq -r '.local_runtime.ready')" = true ]
 	! printf '%s\n' "${data}" | grep -q AQVN
 	run cmd_telemetry_status
 	[ "${status}" -eq 0 ]

@@ -40,6 +40,7 @@ telemetry_sender__record_state() {
 
 telemetry_sender__test() {
 	local payload status
+	telemetry_store__capability_reason >/dev/null || return 3
 	payload="${TELEMETRY_STATE_ROOT}/test-payload.$$"
 	telemetry_otlp__build_payload "${payload}" test || {
 		telemetry_sender__record_state false invalid_payload null
@@ -58,6 +59,7 @@ telemetry_sender__test() {
 
 telemetry_sender__cycle() {
 	local events next_cursor payload queue_payload depth status count dropped=false
+	telemetry_store__capability_reason >/dev/null || return 3
 	events="${TELEMETRY_STATE_ROOT}/events-pending.$$"
 	next_cursor="${TELEMETRY_STATE_ROOT}/cursor-next.$$"
 	payload="${TELEMETRY_STATE_ROOT}/payload.$$"

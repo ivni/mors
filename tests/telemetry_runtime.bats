@@ -9,6 +9,7 @@ setup() {
 	MORS_LIB_DIR=/tmp/attacker
 	TELEMETRY_ENDPOINT=https://attacker.invalid/collect
 	TELEMETRY_CURL=/tmp/attacker-curl
+	TELEMETRY_STAT=/tmp/attacker-stat
 	TELEMETRY_SENDER_PROGRAM=/tmp/attacker-sender
 	TELEMETRY_CONFIG_ROOT=/tmp/attacker-config
 	MORS_TELEMETRY_INIT=/tmp/attacker-init
@@ -23,6 +24,7 @@ setup() {
 	[ "${MORS_LIB_DIR}" = /opt/apps/mors/bin/libs ]
 	[ "${TELEMETRY_ENDPOINT}" = https://ingest.monium.yandex.cloud/otlp/v1/logs ]
 	[ "${TELEMETRY_CURL}" = /opt/bin/curl ]
+	[ "${TELEMETRY_STAT}" = /opt/bin/stat ]
 	[ "${TELEMETRY_SENDER_PROGRAM}" = /opt/apps/mors/bin/main/telemetry-sender ]
 	[ "${TELEMETRY_CONFIG_ROOT}" = /opt/etc/mors/telemetry ]
 	[ "${MORS_TELEMETRY_INIT}" = /opt/etc/init.d/S98mors-telemetry ]

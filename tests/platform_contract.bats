@@ -31,8 +31,19 @@ setup() {
 	grep -q 'DEPENDS:=$(MORS_RUNTIME_DEPENDS)' "${REPO_ROOT}/Makefile"
 	grep -q '+conntrack' "${dependencies}"
 	grep -q '+coreutils-cksum' "${dependencies}"
+	grep -q '+coreutils-stat' "${dependencies}"
 	grep -q '+coreutils-timeout' "${dependencies}"
 	grep -q '+shadowsocks-libev-ss-local' "${dependencies}"
+}
+
+@test "telemetry keeps beta9 jq ownership and declares GNU stat explicitly" {
+	local dependencies=${REPO_ROOT}/builder/entware/runtime-dependencies.mk
+
+	grep -Eq '(^|[[:space:]])\+jq([[:space:]]|$)' "${dependencies}"
+	! grep -Eq '(^|[[:space:]])\+jq-full([[:space:]]|$)' "${dependencies}"
+	grep -Eq '(^|[[:space:]])\+coreutils-stat([[:space:]]|$)' "${dependencies}"
+	! grep -qE '(^|[^[:alnum:]_])(test|match|sub|gsub|scan|splits|capture)\(' \
+		"${REPO_ROOT}/opt/bin/libs/telemetry_store"
 }
 
 @test "package QA builds host opkg before the version gate" {

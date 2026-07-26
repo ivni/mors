@@ -103,7 +103,7 @@ telemetry enable monium - включает обезличенную эксплу
 telemetry enable monium --project PROJECT --key-file PATH --yes
                         - неинтерактивное включение без ключа в shell history.
 telemetry status [--json]
-                        - показывает sender, очередь и последнюю доставку.
+                        - проверяет зависимости и показывает sender, очередь и доставку.
 telemetry test [--json] - отправляет одну безопасную тестовую запись.
 telemetry disable --yes - останавливает доставку, сохраняя конфигурацию.
 telemetry disable --purge --yes
