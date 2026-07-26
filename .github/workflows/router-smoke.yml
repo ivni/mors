@@ -12,51 +12,35 @@ permissions:
   contents: read
 
 jobs:
+  package:
+    name: Build package
+    if: ${{ inputs.confirm == 'install-mors-passive' }}
+    uses: ./.github/workflows/package.yml
+    permissions:
+      contents: read
+      packages: write
+
   smoke:
-    name: Build and smoke on router
+    name: Smoke on router
+    needs: package
     runs-on: ubuntu-latest
-    timeout-minutes: 390
+    timeout-minutes: 90
     if: ${{ inputs.confirm == 'install-mors-passive' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Install build dependencies
+      - name: Download package artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: mors-ipk
+          path: packages
+
+      - name: Install SSH client
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            ccache \
-            curl \
-            file \
-            gawk \
-            g++-multilib \
-            gcc-multilib \
-            genisoimage \
-            git \
-            jq \
-            libdw-dev \
-            libelf-dev \
-            libncurses5-dev \
-            libssl-dev \
-            locales \
-            openssh-client \
-            python-is-python3 \
-            python3 \
-            python3-pip \
-            qemu-utils \
-            rsync \
-            signify-openbsd \
-            subversion \
-            swig \
-            unzip \
-            wget \
-            zstd
-          python3 -m pip install --user pyelftools pyOpenSSL service_identity
-
-      - name: Build package
-        run: bash scripts/qa/entware-build.sh
+          sudo apt-get install -y openssh-client
 
       - name: Configure SSH key
         env:

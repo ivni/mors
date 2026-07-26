@@ -78,14 +78,25 @@ setup() {
 		"${REPO_ROOT}/scripts/qa/entware-build.sh"
 }
 
-@test "package workflow reuses only locked Entware state" {
+@test "package workflow resolves and verifies an immutable Entware builder" {
 	local workflow=${REPO_ROOT}/.github/workflows/package.yml
+	local dockerfile=${REPO_ROOT}/builder/entware/Dockerfile
 
-	grep -q 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0' "${workflow}"
 	grep -q 'runs-on: ubuntu-24.04' "${workflow}"
-	grep -q 'entware-v2-ubuntu-24.04-${{ runner.arch }}-aarch64-3.10-' "${workflow}"
-	grep -q "hashFiles('scripts/qa/entware.lock')" "${workflow}"
-	grep -q 'ENTWARE_CACHE_HIT:' "${workflow}"
+	grep -q 'docker buildx imagetools inspect' "${workflow}"
+	grep -q 'docker buildx build' "${workflow}"
+	grep -q -- '--platform linux/amd64' "${workflow}"
+	grep -q 'image: ${{ needs.builder.outputs.image }}' "${workflow}"
+	grep -q 'bash scripts/qa/verify-entware-builder.sh' "${workflow}"
+	grep -q 'builder_image:' "${workflow}"
+	! grep -q 'actions/cache@' "${workflow}"
+	grep -Eq '^FROM ubuntu:24\.04@sha256:[0-9a-f]{64} AS runtime-base$' \
+		"${dockerfile}"
+	grep -q '^\*\*$' "${dockerfile}.dockerignore"
+	! grep -q 'TEST_INFRASTRUCTURE' "${dockerfile}.dockerignore"
+	grep -q 'COPY --from=prepare /opt/entware /opt/entware' "${dockerfile}"
+	! grep -q 'COPY --from=prepare /src' "${dockerfile}"
+	grep -q 'runtime-dependencies.mk' "${REPO_ROOT}/Makefile"
 	grep -q 'make package/mors/clean' "${REPO_ROOT}/scripts/qa/entware-build.sh"
 	grep -q 'rm -f package/mors' "${REPO_ROOT}/scripts/qa/entware-build.sh"
 }
@@ -98,6 +109,7 @@ setup() {
 	grep -q 'uses: ./\.github/workflows/qa.yml' "${workflow}"
 	grep -q 'uses: ./\.github/workflows/package.yml' "${workflow}"
 	grep -q 'verify-release-artifact.sh' "${workflow}"
+	grep -q 'needs.package.outputs.builder_image' "${workflow}"
 	grep -q 'git tag -a' "${workflow}"
 	grep -q -- '--verify-tag' "${workflow}"
 

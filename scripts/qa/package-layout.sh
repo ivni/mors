@@ -70,7 +70,13 @@ required_paths=(
 	tests/telemetry_upgrade.bats
 	tests/upgrade_artifact.bats
 	tests/upgrade_safety.bats
+	tests/entware_builder.bats
 	scripts/qa/opkg-version-order.sh
+	scripts/qa/entware-builder-id.sh
+	scripts/qa/verify-entware-builder.sh
+	builder/entware/Dockerfile
+	builder/entware/Dockerfile.dockerignore
+	builder/entware/runtime-dependencies.mk
 )
 
 missing=0

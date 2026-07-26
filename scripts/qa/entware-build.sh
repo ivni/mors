@@ -119,7 +119,7 @@ cd "${entware_dir}"
 cp "${locked_feeds_file}" feeds.conf
 
 printf 'Entware revision: %s\n' "${entware_revision}"
-printf 'Entware cache hit: %s\n' "${ENTWARE_CACHE_HIT:-false}"
+printf 'Entware builder: %s\n' "${MORS_ENTWARE_BUILDER_ID:-local}"
 
 bash "${repo_root}/scripts/qa/entware-feed-lock.sh" \
 	sync-existing "${entware_lock}" "${entware_dir}"
@@ -169,9 +169,9 @@ find bin/targets -type f -name 'mors_*_all.ipk' -exec cp -f {} "${repo_root}/pac
 echo "Built packages:"
 find "${repo_root}/packages" -maxdepth 1 -type f -name 'mors_*_all.ipk' -print
 
-# Keep only reusable Entware state in the cache. The Mors package itself must
-# always be rebuilt from the checked-out repository SHA.
+# Keep only reusable Entware state in the buildroot. A builder image may retain
+# this state, but the Mors package must always be rebuilt from the checkout SHA.
 make package/mors/clean
 find bin/targets -type f -name 'mors_*_all.ipk' -exec rm -f {} +
 rm -f package/mors
-du -sh "${entware_dir}" | awk '{ print "Entware cache size: " $1 }'
+du -sh "${entware_dir}" | awk '{ print "Entware buildroot size: " $1 }'

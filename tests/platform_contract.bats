@@ -25,11 +25,14 @@ setup() {
 }
 
 @test "beta package declares E2E runtime dependencies" {
+	local dependencies=${REPO_ROOT}/builder/entware/runtime-dependencies.mk
+
 	grep -q 'PKG_VERSION:=1.3.0~beta9' "${REPO_ROOT}/Makefile"
-	grep -q '+conntrack' "${REPO_ROOT}/Makefile"
-	grep -q '+coreutils-cksum' "${REPO_ROOT}/Makefile"
-	grep -q '+coreutils-timeout' "${REPO_ROOT}/Makefile"
-	grep -q '+shadowsocks-libev-ss-local' "${REPO_ROOT}/Makefile"
+	grep -q 'DEPENDS:=$(MORS_RUNTIME_DEPENDS)' "${REPO_ROOT}/Makefile"
+	grep -q '+conntrack' "${dependencies}"
+	grep -q '+coreutils-cksum' "${dependencies}"
+	grep -q '+coreutils-timeout' "${dependencies}"
+	grep -q '+shadowsocks-libev-ss-local' "${dependencies}"
 }
 
 @test "package QA builds host opkg before the version gate" {

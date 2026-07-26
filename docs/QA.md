@@ -29,7 +29,13 @@ bats tests
 
 Workflow готовит Entware buildroot, подключает этот репозиторий как `package/mors`, явно собирает host `opkg`, с изолированной пустой host-конфигурацией проверяет, что prerelease-версия сортируется ниже соответствующей стабильной версии, собирает `.ipk` и публикует `packages/mors_*_all.ipk` как artifact. Ожидаемое имя вычисляется из `PKG_VERSION` и `PKG_RELEASE`; отдельной жёстко заданной копии версии в build-скрипте нет.
 
-Ревизии Entware buildroot и всех feeds закреплены в `scripts/qa/entware.lock`. Перед индексацией существующие feeds проверяются на отсутствие локальных изменений и переключаются на точные lock-ревизии, после индексации все HEAD проверяются повторно. GitHub Actions на закреплённом образе `ubuntu-24.04` кеширует buildroot по хешу lock-файла, архитектуре runner и версии схемы кеша: при cache miss выполняется полная холодная сборка, а при cache hit повторно используются tools, toolchain и собранные зависимости. Результат `package/mors` перед каждым запуском принудительно очищается и не сохраняется в кеше, поэтому `.ipk` всегда создаётся из текущего SHA Mors. При обновлении Entware измените ревизии в lock-файле; это автоматически создаст новый изолированный кеш.
+Ревизии Entware buildroot и всех feeds закреплены в `scripts/qa/entware.lock`. Перед индексацией существующие feeds проверяются на отсутствие локальных изменений и переключаются на точные lock-ревизии, после индексации все HEAD проверяются повторно.
+
+GitHub Actions использует builder image `ghcr.io/ivni/mors-entware-builder`. Его ID вычисляется из закреплённого `ubuntu:24.04`, Dockerfile и его allowlist-only build context, lock-файла, builder-скриптов и канонического списка runtime-зависимостей `builder/entware/runtime-dependencies.mk`. Локальные файлы, `.git`, готовые пакеты и test infrastructure не отправляются в Docker build context. Если image с таким ID отсутствует, доверенный package job собирает Entware tools, toolchain и зависимости, удаляет Mors source/artifacts и публикует image в GHCR. Последующий build job получает OCI digest этого image, проверяет manifest и только затем собирает пакет.
+
+Тег image служит лишь для поиска подготовленного builder. Package job всегда запускается с точной ссылкой `ghcr.io/...@sha256:...`, а release notes сохраняют этот digest вместе с SHA-256 IPK. Builder image не содержит готовый Mors IPK или подключённый `package/mors`: перед каждым запуском текущий checkout подключается заново, `package/mors` очищается и пакет создаётся из текущего SHA.
+
+Обновление `scripts/qa/entware.lock`, Dockerfile, builder-скриптов или runtime-зависимостей автоматически создаёт новый builder ID. Обычное изменение версии или runtime-кода Mors не перестраивает toolchain. GHCR image доступен release-веткам независимо от branch scope GitHub Actions cache.
 
 Локальный запуск на Linux:
 
@@ -46,6 +52,15 @@ bash scripts/qa/entware-build.sh
 - `ENTWARE_CONFIG` - целевой config, по умолчанию `configs/aarch64-3.10.config`;
 - `JOBS` - число параллельных make-задач.
 
+Для диагностики builder contract локально:
+
+```sh
+bash scripts/qa/entware-builder-id.sh
+bash scripts/qa/entware-builder-id.sh --manifest
+```
+
+`scripts/qa/verify-entware-builder.sh` предназначен для запуска внутри builder image. Проверка fail-closed сверяет ID, lock/dependency digests, Entware HEAD, host `opkg`, aarch64 toolchain и отсутствие старых Mors source/artifacts.
+
 ## Release Gate
 
 `.github/workflows/release.yml` запускается только вручную на выбранном commit/branch и требует:
@@ -59,11 +74,11 @@ Workflow на одном `github.sha` выполняет:
 
 1. Проверку соответствия tag, `Makefile` и первой записи `HISTORY.md`.
 2. Полный reusable `qa.yml` gate.
-3. Полный reusable `package.yml` gate.
+3. Полный reusable `package.yml` gate с проверенным builder image digest.
 4. Проверку единственного `.ipk`: имя, `debian-binary`, control metadata, обязательные runtime-файлы и SHA-256.
 5. Только после успеха всех gates — создание аннотированного неизменяемого tag и GitHub Release. Если публикация Release оборвалась уже после tag push, повторный workflow может использовать tag только при точном совпадении SHA; tag никогда не перемещается.
 
-Имя upload asset заранее нормализуется так же, как GitHub (`~` заменяется на `.`); внутренняя control-версия сохраняет `~`. Секция с именем файла, control version, размером и SHA-256 добавляется к release notes автоматически.
+Имя upload asset заранее нормализуется так же, как GitHub (`~` заменяется на `.`); внутренняя control-версия сохраняет `~`. Секция с именем файла, control version, размером, SHA-256 и точным builder image digest добавляется к release notes автоматически.
 
 Для проверки кандидата без tag/release запускайте `package.yml` вручную. Не создавайте tag вручную «для запуска сборки»: это нарушает связь между проверенным SHA и опубликованным релизом.
 
@@ -79,7 +94,7 @@ Workflow на одном `github.sha` выполняет:
 - опционально `MORS_ROUTER_USER`, по умолчанию `root`;
 - опционально `MORS_ROUTER_PORT`, по умолчанию `22`.
 
-Smoke job собирает пакет, загружает его в `/opt/tmp/mors-qa`, устанавливает через
+Smoke workflow получает пакет из reusable `package.yml`, загружает его в `/opt/tmp/mors-qa`, устанавливает через
 `opkg`, подтверждает отсутствие Mors hooks/dataplane, затем выполняет пассивный
 `mors uninstall --yes` и сравнивает DNS services/configs, firewall и ipset с
 состоянием непосредственно после установки. Используйте его только на

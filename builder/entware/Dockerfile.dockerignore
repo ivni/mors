@@ -1,0 +1,16 @@
+**
+!Makefile
+!opt/
+!opt/**
+!builder/
+!builder/entware/
+!builder/entware/Dockerfile
+!builder/entware/Dockerfile.dockerignore
+!builder/entware/runtime-dependencies.mk
+!scripts/
+!scripts/qa/
+!scripts/qa/entware-build.sh
+!scripts/qa/entware-builder-id.sh
+!scripts/qa/entware-feed-lock.sh
+!scripts/qa/entware.lock
+!scripts/qa/opkg-version-order.sh
