@@ -2,7 +2,7 @@
 
 setup() {
 	REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
-	NDM=${REPO_ROOT}/opt/etc/ndm/ndm
+	NDM=${REPO_ROOT}/opt/bin/libs/ndm
 	EVENTS=${BATS_TEST_TMPDIR}/events
 	: >"${EVENTS}"
 }

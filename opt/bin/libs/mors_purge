@@ -1,0 +1,128 @@
+#!/bin/sh
+
+# Purge only Mors-specific roots and ownership-proven files in shared trees.
+# Callers must stop telemetry and quiesce VLESS before invoking this library.
+
+MORS_ETC_DATA_ROOT=${MORS_ETC_DATA_ROOT:-/opt/etc/mors}
+MORS_VAR_DATA_ROOT=${MORS_VAR_DATA_ROOT:-/opt/var/lib/mors}
+MORS_VAR_RUN_ROOT=${MORS_VAR_RUN_ROOT:-/opt/var/run/mors}
+MORS_VLESS_STORE_ROOT=${MORS_VLESS_STORE_ROOT:-${VLESS_STORE_ROOT:-${MORS_ETC_DATA_ROOT}/vless}}
+MORS_VLESS_STATE_ROOT=${MORS_VLESS_STATE_ROOT:-${VLESS_STATE_ROOT:-${MORS_VAR_DATA_ROOT}/vless}}
+MORS_VLESS_RUNTIME_ROOT=${MORS_VLESS_RUNTIME_ROOT:-${VLESS_RUNTIME_ROOT:-${MORS_VAR_RUN_ROOT}/vless}}
+MORS_TELEMETRY_CONFIG_ROOT=${MORS_TELEMETRY_CONFIG_ROOT:-${TELEMETRY_CONFIG_ROOT:-${MORS_ETC_DATA_ROOT}/telemetry}}
+MORS_TELEMETRY_DATA_ROOT=${MORS_TELEMETRY_DATA_ROOT:-${TELEMETRY_DATA_ROOT:-${MORS_VAR_DATA_ROOT}/telemetry}}
+MORS_TELEMETRY_STATE_ROOT=${MORS_TELEMETRY_STATE_ROOT:-${TELEMETRY_STATE_ROOT:-/tmp/mors/telemetry}}
+MORS_TELEMETRY_RUNTIME_ROOT=${MORS_TELEMETRY_RUNTIME_ROOT:-/opt/var/run/mors/telemetry}
+MORS_TMP_DATA_ROOT=${MORS_TMP_DATA_ROOT:-/tmp/mors}
+MORS_XRAY_CONFIG_FILE=${MORS_XRAY_CONFIG_FILE:-${VLESS_CONFIG_FILE:-/opt/etc/xray/mors.json}}
+MORS_XRAY_LEGACY_CONFIG_FILE=${MORS_XRAY_LEGACY_CONFIG_FILE:-${MORS_XRAY_CONFIG_FILE}.legacy-1.1.9}
+MORS_ADBLOCK_HOSTS_FILE=${MORS_ADBLOCK_HOSTS_FILE:-${ADBLOCK_HOSTS_FILE:-/opt/etc/adblock/ads.mors.list}}
+MORS_ADBLOCK_SOURCES_FILE=${MORS_ADBLOCK_SOURCES_FILE:-${ADBLOCK_SOURCES_LIST:-/opt/etc/adblock/sources.list}}
+MORS_ADBLOCK_EXCEPTION_FILE=${MORS_ADBLOCK_EXCEPTION_FILE:-${ADBLOCK_LIST_EXCEPTION:-/opt/etc/adblock/exception.list}}
+
+mors_purge__pin_production() {
+	MORS_ETC_DATA_ROOT=/opt/etc/mors
+	MORS_VAR_DATA_ROOT=/opt/var/lib/mors
+	MORS_VAR_RUN_ROOT=/opt/var/run/mors
+	MORS_VLESS_STORE_ROOT=/opt/etc/mors/vless
+	MORS_VLESS_STATE_ROOT=/opt/var/lib/mors/vless
+	MORS_VLESS_RUNTIME_ROOT=/opt/var/run/mors/vless
+	MORS_TELEMETRY_CONFIG_ROOT=/opt/etc/mors/telemetry
+	MORS_TELEMETRY_DATA_ROOT=/opt/var/lib/mors/telemetry
+	MORS_TELEMETRY_STATE_ROOT=/tmp/mors/telemetry
+	MORS_TELEMETRY_RUNTIME_ROOT=/opt/var/run/mors/telemetry
+	MORS_TMP_DATA_ROOT=/tmp/mors
+	MORS_XRAY_CONFIG_FILE=/opt/etc/xray/mors.json
+	MORS_XRAY_LEGACY_CONFIG_FILE=/opt/etc/xray/mors.json.legacy-1.1.9
+	MORS_ADBLOCK_HOSTS_FILE=/opt/etc/adblock/ads.mors.list
+	MORS_ADBLOCK_SOURCES_FILE=/opt/etc/adblock/sources.list
+	MORS_ADBLOCK_EXCEPTION_FILE=/opt/etc/adblock/exception.list
+	export MORS_ETC_DATA_ROOT MORS_VAR_DATA_ROOT MORS_VAR_RUN_ROOT
+	export MORS_VLESS_STORE_ROOT MORS_VLESS_STATE_ROOT MORS_VLESS_RUNTIME_ROOT
+	export MORS_TELEMETRY_CONFIG_ROOT MORS_TELEMETRY_DATA_ROOT
+	export MORS_TELEMETRY_STATE_ROOT MORS_TELEMETRY_RUNTIME_ROOT
+	export MORS_TMP_DATA_ROOT MORS_XRAY_CONFIG_FILE MORS_XRAY_LEGACY_CONFIG_FILE
+	export MORS_ADBLOCK_HOSTS_FILE MORS_ADBLOCK_SOURCES_FILE MORS_ADBLOCK_EXCEPTION_FILE
+}
+
+mors_purge__missing() {
+	[ ! -e "${1}" ] && [ ! -L "${1}" ]
+}
+
+mors_purge__remove_file() {
+	local path=${1:-}
+	[ -n "${path}" ] || return 64
+	mors_purge__missing "${path}" && return 0
+	[ -f "${path}" ] && [ ! -L "${path}" ] || return 1
+	rm -f "${path}" || return 1
+	mors_purge__missing "${path}"
+}
+
+mors_purge__remove_tree() {
+	local path=${1:-}
+	[ -n "${path}" ] || return 64
+	mors_purge__missing "${path}" && return 0
+	[ -d "${path}" ] && [ ! -L "${path}" ] || return 1
+	rm -rf "${path}" || return 1
+	mors_purge__missing "${path}"
+}
+
+mors_purge__remove_claimed_file() {
+	ownership__remove_claimed_file "${1}" "${2}"
+	case $? in
+		0|2) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+mors_purge__prune_root() {
+	local path=${1:-}
+	[ -n "${path}" ] || return 64
+	mors_purge__missing "${path}" && return 0
+	[ -d "${path}" ] && [ ! -L "${path}" ] || return 1
+	rmdir "${path}" 2>/dev/null || true
+	mors_purge__missing "${path}"
+}
+
+mors_purge__remove_xray_artifacts() {
+	local directory basename path name suffix
+	directory=${MORS_XRAY_CONFIG_FILE%/*}
+	basename=${MORS_XRAY_CONFIG_FILE##*/}
+	[ "${directory}" != "${MORS_XRAY_CONFIG_FILE}" ] || return 1
+	mors_purge__missing "${directory}" && return 0
+	[ -d "${directory}" ] && [ ! -L "${directory}" ] || return 1
+	for path in \
+		"${MORS_XRAY_CONFIG_FILE}.candidate."*.json \
+		"${MORS_XRAY_CONFIG_FILE}.backup."* \
+		"${MORS_XRAY_CONFIG_FILE}.rollback."*.json; do
+		mors_purge__missing "${path}" && continue
+		name=${path##*/}
+		case "${name}" in
+			"${basename}."*) suffix=${name#"${basename}."} ;;
+			*) return 1 ;;
+		esac
+		printf '%s\n' "${suffix}" | \
+			grep -Eq '^(candidate|rollback)\.[0-9]+\.json$|^backup\.[0-9]+$' || return 1
+		mors_purge__remove_file "${path}" || return 1
+	done
+}
+
+mors_purge__user_data() {
+	mors_purge__missing "${MORS_TELEMETRY_CONFIG_ROOT}" || return 1
+	mors_purge__missing "${MORS_TELEMETRY_DATA_ROOT}" || return 1
+	mors_purge__remove_tree "${MORS_TELEMETRY_STATE_ROOT}" || return 1
+	mors_purge__remove_tree "${MORS_TELEMETRY_RUNTIME_ROOT}" || return 1
+	mors_purge__remove_tree "${MORS_VLESS_RUNTIME_ROOT}" || return 1
+	mors_purge__remove_tree "${MORS_VLESS_STATE_ROOT}" || return 1
+	mors_purge__remove_tree "${MORS_VLESS_STORE_ROOT}" || return 1
+	mors_purge__remove_file "${MORS_XRAY_CONFIG_FILE}" || return 1
+	mors_purge__remove_file "${MORS_XRAY_LEGACY_CONFIG_FILE}" || return 1
+	mors_purge__remove_xray_artifacts || return 1
+	mors_purge__remove_file "${MORS_ADBLOCK_HOSTS_FILE}" || return 1
+	mors_purge__remove_claimed_file "${MORS_ADBLOCK_SOURCES_FILE}" adblock-sources-list || return 1
+	mors_purge__remove_claimed_file "${MORS_ADBLOCK_EXCEPTION_FILE}" adblock-exception-list || return 1
+	mors_purge__prune_root "${MORS_ETC_DATA_ROOT}" || return 1
+	mors_purge__prune_root "${MORS_VAR_DATA_ROOT}" || return 1
+	mors_purge__prune_root "${MORS_VAR_RUN_ROOT}" || return 1
+	mors_purge__prune_root "${MORS_TMP_DATA_ROOT}" || return 1
+}

@@ -12,7 +12,40 @@
 # ------------------------------------------------------------------------------------------
 
 . /opt/apps/mors/bin/libs/main
+. /opt/apps/mors/bin/libs/ownership
+ownership__pin_production
 FLASHED_HOST_FILE=$(echo "${ADBLOCK_HOSTS_FILE}" | sed 's/\//\\\//g')
+
+adblock__install_default_sources() {
+	local parent
+	parent=${ADBLOCK_SOURCES_LIST%/*}
+	[ "${parent}" != "${ADBLOCK_SOURCES_LIST}" ] || return 1
+	[ ! -L "${parent}" ] && [ ! -L "${ADBLOCK_SOURCES_LIST}" ] || return 1
+	{ [ ! -e "${parent}" ] || [ -d "${parent}" ]; } || return 1
+	[ ! -e "${ADBLOCK_SOURCES_LIST}" ] || return 1
+	mkdir -p "${parent}" || return 1
+	cp -f /opt/apps/mors/etc/conf/adblock.sources "${ADBLOCK_SOURCES_LIST}" || return 1
+	ownership__claim_file "${ADBLOCK_SOURCES_LIST}" adblock-sources-list || {
+		rm -f "${ADBLOCK_SOURCES_LIST}"
+		return 1
+	}
+}
+
+adblock__ensure_exception_file() {
+	local parent
+	parent=${ADBLOCK_LIST_EXCEPTION%/*}
+	if [ -e "${ADBLOCK_LIST_EXCEPTION}" ] || [ -L "${ADBLOCK_LIST_EXCEPTION}" ]; then
+		[ -f "${ADBLOCK_LIST_EXCEPTION}" ] && [ ! -L "${ADBLOCK_LIST_EXCEPTION}" ]
+		return $?
+	fi
+	[ ! -L "${parent}" ] && { [ ! -e "${parent}" ] || [ -d "${parent}" ]; } || return 1
+	mkdir -p "${parent}" || return 1
+	touch "${ADBLOCK_LIST_EXCEPTION}" || return 1
+	ownership__claim_file "${ADBLOCK_LIST_EXCEPTION}" adblock-exception-list || {
+		rm -f "${ADBLOCK_LIST_EXCEPTION}"
+		return 1
+	}
+}
 # ------------------------------------------------------------------------------------------
 #
 #	 Редактируем файл источников блокировки рекламы и нежелательных сайтов
@@ -110,12 +143,7 @@ cmd_ads_status() {
 ads_request_to_upload() {
 
 	answer="${1}"
-	sources_name_file=adblock.sources
 	if ! [ -f "${ADBLOCK_SOURCES_LIST}" ]; then
-	# 	ready "Загрузка источников рекламы по умолчанию"
-	# 	cp -f "/opt/apps/mors/etc/conf/${sources_name_file}" "${ADBLOCK_SOURCES_LIST}"
-	# 	[ $? = 0 ] && when_ok "УДАЧНО" || when_bad "С ОШИБКОЙ"
-	# else
 		if [ -f "${ADBLOCK_SOURCES_LIST_BACKUP}" ]; then
 			warning "Обнаружен архивный файл с источниками обновления рекламы."
 			[ "${answer}" = ask ] && read_ynq_timer "Восстановить данный файл" answer Y 12
@@ -126,12 +154,11 @@ ads_request_to_upload() {
 				[ $? = 0 ] && when_ok "УДАЧНО" || when_bad "С ОШИБКОЙ"
 			else
 				ready "Загрузка источников рекламы по умолчанию"
-				cp -f "/opt/apps/mors/etc/conf/${sources_name_file}" "${ADBLOCK_SOURCES_LIST}"
+				adblock__install_default_sources
 				[ $? = 0 ] && when_ok "УДАЧНО" || when_bad "С ОШИБКОЙ"
 			fi
 		else
-			mkdir -p "$(echo "${ADBLOCK_SOURCES_LIST}" | sed 's/^\(.*\)\/.*.list/\1/')"
-			cp -f /opt/apps/mors/etc/conf/adblock.sources "${ADBLOCK_SOURCES_LIST}"
+			adblock__install_default_sources
 		fi
 	fi
 	if [ -f "${ADBLOCK_HOSTS_FILE}" ]; then
@@ -179,7 +206,10 @@ cmd_ads_add_host(){
 	exit_when_adguard_on status; [ "${status}" = 0 ] && {
 		host=${1//\*/}
 	#	Проверяем есть ли сам файл для исключений и есть ли в нем записи.
-		[ -f "${ADBLOCK_LIST_EXCEPTION}" ] || touch "${ADBLOCK_LIST_EXCEPTION}"
+		adblock__ensure_exception_file || {
+			error "Не удалось безопасно подготовить ${ADBLOCK_LIST_EXCEPTION}."
+			return 1
+		}
 	#	Проверяем есть ли уже в списке переданный домен
 		if cat < "${ADBLOCK_LIST_EXCEPTION}" | grep -q "${host}" ; then
 			warning "Данный домен уже был ранее удален из списка блокировки рекламы."

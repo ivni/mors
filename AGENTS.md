@@ -125,7 +125,7 @@ Use the original Kvas repository and wiki only as historical/reference material 
 - When changing default configuration, update templates in `opt/etc/conf/` and verify the install/setup paths that copy or transform them.
 - When changing VLESS/Xray behavior or `opt/etc/conf/mors.vless`, inspect `opt/bin/libs/xray` and keep the compatibility policy, README, CLI help, changelog, and CI matrix synchronized. Update `XRAY_TESTED_VERSION` only after the compatibility CI validates that version.
 - Changes to managed VLESS connections must preserve the component boundaries and release gates in `docs/vless-architecture.md`. Do not add a separate Xray process or Keenetic Proxy interface per connection.
-- When changing NDM hooks, inspect `opt/etc/ndm/ndm`, `opt/bin/libs/ndm_d`, and all matching hook directories because similar logic is duplicated across interface and netfilter events.
+- When changing NDM hooks, inspect `opt/bin/libs/ndm`, `opt/bin/libs/ndm_d`, and all matching hook directories because similar logic is duplicated across interface and netfilter events.
 - When editing install, uninstall, update, or rollback behavior, inspect `opt/bin/main/setup`, `opt/bin/main/upgrade`, and `Makefile` post-install logic together.
 - Do not rewrite large legacy shell sections just for style. Prefer targeted fixes with clear behavior.
 - Preserve executable intent. Most runtime scripts are installed with `chmod -R +x` during post-install, but new build helper scripts may need Git executable mode if they are run directly from the repo.
@@ -196,4 +196,4 @@ make package/feeds/packages/mors/compile V=sc
 - `opt/bin/main/upgrade` uses GitHub release URLs from `ivni/mors` and expects release artifacts named like `mors_*_all.ipk`. Treat release-source changes as user-facing install/update behavior.
 - `opt/bin/libs/main` is the central source of runtime path constants. Check it before introducing new paths.
 - `opt/bin/libs/vpn` is the largest and most coupled library. Be extra careful with changes there and inspect callers from `opt/bin/mors`, `setup`, NDM hooks, and helper scripts.
-- NDM hook behavior differs across KeeneticOS versions; `opt/etc/ndm/ndm` contains compatibility helpers such as firmware-version checks and PPE handling.
+- NDM hook behavior differs across KeeneticOS versions; `opt/bin/libs/ndm` contains compatibility helpers such as firmware-version checks and PPE handling.

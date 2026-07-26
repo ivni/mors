@@ -4,6 +4,10 @@ telemetry_runtime__pin_production
 . /opt/apps/mors/bin/libs/main
 . /opt/apps/mors/bin/libs/vpn
 . /opt/apps/mors/bin/libs/vless
+. /opt/apps/mors/bin/libs/ownership
+ownership__pin_production
+. /opt/apps/mors/bin/libs/mors_purge
+mors_purge__pin_production
 . /opt/apps/mors/bin/libs/lifecycle
 . /opt/apps/mors/bin/libs/lifecycle_state
 . /opt/apps/mors/bin/libs/lifecycle_snapshot
@@ -889,6 +893,9 @@ setup__cmd_uninstall_unlocked() {
 				error 'Удаление остановлено: unconfigured-установка содержит активный runtime или hooks.'
 				return 1
 			}
+			if [ "${rm_type}" = full ]; then
+				setup__deactivate_telemetry_for_uninstall "${rm_type}" || return 1
+			fi
 			setup__remove_package "${rm_type}" || return 1
 			print_line
 			echo 'Пассивная установка Mors удалена.'
@@ -911,15 +918,7 @@ setup__cmd_uninstall_unlocked() {
 		echo "${mess}"
 
 		list__backup
-		telemetry_lifecycle__deactivate "$([ "${rm_type}" = full ] && printf true || printf false)"
-		telemetry_status=$?
-		if [ "${telemetry_status}" -ne 0 ]; then
-			case "${telemetry_status}" in
-				4) error 'Удаление остановлено: путь S98mors-telemetry не принадлежит Mors. Переместите его вручную и повторите удаление.' ;;
-				*) error 'Удаление остановлено: telemetry sender не завершился или его состояние повреждено.' ;;
-			esac
-			return 1
-		fi
+		setup__deactivate_telemetry_for_uninstall "${rm_type}" || return 1
 
 		if has_ssr_enable ; then
 			ready 'Останавливаем службу Shadowsocks '
@@ -2028,6 +2027,14 @@ setup__rollback_transaction() {
 setup__remove_package() {
 	local rm_type
 	rm_type=${1:-}
+	if [ "${rm_type}" = full ]; then
+		ready 'Удаляем пользовательские данные Mors...'
+		mors_purge__user_data && when_ok 'УСПЕШНО' || {
+			when_bad 'ОШИБКА'
+			error 'Purge остановлен: Mors-owned данные не удалены полностью или обнаружен внешний объект.'
+			return 1
+		}
+	fi
 	lifecycle_transaction__phase package_remove_ready || return 1
 	if [ "${rm_type}" = full ]; then
 		: >"${MORS_LIFECYCLE_ROOT}/purge-requested" || return 1
@@ -2039,6 +2046,20 @@ setup__remove_package() {
 	else
 		when_bad 'ОШИБКА'
 		error 'opkg не подтвердил удаление пакета. Lifecycle journal сохранён.'
+		return 1
+	fi
+}
+
+setup__deactivate_telemetry_for_uninstall() {
+	local rm_type=${1:-} purge=false telemetry_status
+	[ "${rm_type}" = full ] && purge=true
+	telemetry_lifecycle__deactivate "${purge}"
+	telemetry_status=$?
+	if [ "${telemetry_status}" -ne 0 ]; then
+		case "${telemetry_status}" in
+			4) error 'Удаление остановлено: путь S98mors-telemetry не принадлежит Mors. Переместите его вручную и повторите удаление.' ;;
+			*) error 'Удаление остановлено: telemetry sender не завершился или его состояние повреждено.' ;;
+		esac
 		return 1
 	fi
 }

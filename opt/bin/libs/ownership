@@ -1,0 +1,92 @@
+#!/bin/sh
+
+# Durable ownership records for files in shared Entware configuration trees.
+# A missing record always means "preserve": equality of content is not proof
+# that Mors created a generic path.
+
+MORS_OWNERSHIP_ROOT=${MORS_OWNERSHIP_ROOT:-/opt/etc/.mors/ownership}
+
+ownership__pin_production() {
+	MORS_OWNERSHIP_ROOT=/opt/etc/.mors/ownership
+	export MORS_OWNERSHIP_ROOT
+}
+
+ownership__valid_name() {
+	case "${1:-}" in
+		''|*[!a-z0-9._-]*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+ownership__marker_path() {
+	ownership__valid_name "${1:-}" || return 1
+	printf '%s/%s\n' "${MORS_OWNERSHIP_ROOT}" "${1}"
+}
+
+ownership__ensure_root() {
+	local parent
+	parent=${MORS_OWNERSHIP_ROOT%/*}
+	[ "${parent}" != "${MORS_OWNERSHIP_ROOT}" ] || return 1
+	[ ! -L "${parent}" ] && [ ! -L "${MORS_OWNERSHIP_ROOT}" ] || return 1
+	{ [ ! -e "${parent}" ] || [ -d "${parent}" ]; } || return 1
+	{ [ ! -e "${MORS_OWNERSHIP_ROOT}" ] || [ -d "${MORS_OWNERSHIP_ROOT}" ]; } || return 1
+	umask 077
+	mkdir -p "${MORS_OWNERSHIP_ROOT}" || return 1
+	chmod 700 "${parent}" "${MORS_OWNERSHIP_ROOT}" || return 1
+}
+
+ownership__write_marker() {
+	local name=${1:-} value=${2:-} marker temporary
+	marker=$(ownership__marker_path "${name}") || return 1
+	ownership__ensure_root || return 1
+	temporary="${marker}.tmp.$$"
+	if [ -e "${marker}" ] || [ -L "${marker}" ]; then
+		[ -f "${marker}" ] && [ ! -L "${marker}" ] || return 1
+	fi
+	[ ! -e "${temporary}" ] && [ ! -L "${temporary}" ] || return 1
+	umask 077
+	printf '%s\n' "${value}" >"${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	chmod 600 "${temporary}" || {
+		rm -f "${temporary}"
+		return 1
+	}
+	mv -f "${temporary}" "${marker}" || return 1
+	[ -f "${marker}" ] && [ ! -L "${marker}" ]
+}
+
+ownership__claim_file() {
+	local path=${1:-} name=${2:-}
+	[ -n "${path}" ] && [ -f "${path}" ] && [ ! -L "${path}" ] || return 1
+	ownership__write_marker "${name}" "${path}"
+}
+
+ownership__record_checksum() {
+	local path=${1:-} name=${2:-} checksum
+	[ -n "${path}" ] && [ -f "${path}" ] && [ ! -L "${path}" ] || return 1
+	checksum=$(cksum "${path}") || return 1
+	set -- ${checksum}
+	[ "$#" -ge 2 ] || return 1
+	ownership__write_marker "${name}" "${1} ${2}"
+}
+
+ownership__remove_claimed_file() {
+	local path=${1:-} name=${2:-} marker claimed
+	[ -n "${path}" ] || return 64
+	marker=$(ownership__marker_path "${name}") || return 64
+	if [ ! -e "${marker}" ] && [ ! -L "${marker}" ]; then
+		return 2
+	fi
+	[ -f "${marker}" ] && [ ! -L "${marker}" ] || return 1
+	IFS= read -r claimed <"${marker}" || return 1
+	[ "${claimed}" = "${path}" ] || return 1
+	if [ -e "${path}" ] || [ -L "${path}" ]; then
+		[ -f "${path}" ] && [ ! -L "${path}" ] || return 1
+		rm -f "${path}" || return 1
+		[ ! -e "${path}" ] && [ ! -L "${path}" ] || return 1
+	fi
+	rm -f "${marker}" || return 1
+	[ ! -e "${marker}" ] && [ ! -L "${marker}" ]
+}

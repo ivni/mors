@@ -34,11 +34,99 @@ setup() {
 	printf '%s\n' "${install_body}" | grep -q '/opt/apps/mors'
 }
 
+@test "ndm library is finalized in the package and never rewritten at runtime" {
+	local install_body postinst vpn
+	install_body=$(sed -n '/^define Package\/mors\/install/,/^endef/p' "${REPO_ROOT}/Makefile" | tr -d '\r')
+	postinst=$(sed -n '/^define Package\/mors\/postinst/,/^endef/p' "${REPO_ROOT}/Makefile" | tr -d '\r')
+	vpn=${REPO_ROOT}/opt/bin/libs/vpn
+
+	[ -f "${REPO_ROOT}/opt/bin/libs/ndm" ]
+	[ ! -e "${REPO_ROOT}/opt/etc/ndm/ndm" ]
+	grep -Fq 'chmod -R 0755 $(1)/opt/apps/mors/bin/*' <<<"${install_body}"
+	! grep -Fq 'cp -f /opt/apps/mors/etc/ndm/ndm /opt/apps/mors/bin/libs/ndm' <<<"${postinst}"
+	grep -Fq 'ownership__record_checksum /opt/apps/mors/bin/libs/ndm package-ndm.cksum' <<<"${postinst}"
+	! grep -Eq '^[[:space:]]*(cp|mv|chmod|sed -i).*bin/libs/ndm' "${vpn}"
+}
+
+@test "postrm removes only the known legacy ndm residue and empty package tree" {
+	local cleanup fake_root marker outside checksum
+	cleanup=$(sed -n '/^mors_postrm__cleanup_package_tree()/,/^}/p' \
+		"${REPO_ROOT}/Makefile" | tr -d '\r' | sed 's/\$\$/\$/g')
+	[ -n "${cleanup}" ]
+
+	fake_root=${BATS_TEST_TMPDIR}/legacy
+	marker=${BATS_TEST_TMPDIR}/legacy-marker
+	mkdir -p "${fake_root}/opt/apps/mors/bin/libs"
+	printf '%s\n' legacy >"${fake_root}/opt/apps/mors/bin/libs/ndm"
+	checksum=$(cksum "${fake_root}/opt/apps/mors/bin/libs/ndm")
+	set -- ${checksum}
+	printf '%s %s\n' "${1}" "${2}" >"${marker}"
+	run sh -c "${cleanup}
+		mors_postrm__cleanup_package_tree \"\$1\" \"\$2\"" sh \
+		"${fake_root}/opt/apps/mors" "${marker}"
+	[ "${status}" -eq 0 ]
+	[ ! -e "${fake_root}/opt/apps/mors" ]
+	[ ! -e "${marker}" ]
+
+	fake_root=${BATS_TEST_TMPDIR}/operator-file
+	marker=${BATS_TEST_TMPDIR}/operator-marker
+	mkdir -p "${fake_root}/opt/apps/mors/bin/libs"
+	printf '%s\n' legacy >"${fake_root}/opt/apps/mors/bin/libs/ndm"
+	printf '%s\n' operator >"${fake_root}/opt/apps/mors/bin/libs/custom"
+	checksum=$(cksum "${fake_root}/opt/apps/mors/bin/libs/ndm")
+	set -- ${checksum}
+	printf '%s %s\n' "${1}" "${2}" >"${marker}"
+	run sh -c "${cleanup}
+		mors_postrm__cleanup_package_tree \"\$1\" \"\$2\"" sh \
+		"${fake_root}/opt/apps/mors" "${marker}"
+	[ "${status}" -ne 0 ]
+	[ ! -e "${fake_root}/opt/apps/mors/bin/libs/ndm" ]
+	[ -f "${fake_root}/opt/apps/mors/bin/libs/custom" ]
+
+	fake_root=${BATS_TEST_TMPDIR}/symlink
+	marker=${BATS_TEST_TMPDIR}/symlink-marker
+	outside=${BATS_TEST_TMPDIR}/outside
+	mkdir -p "${fake_root}/opt/apps/mors" "${outside}/libs"
+	printf '%s\n' external >"${outside}/libs/ndm"
+	ln -s "${outside}" "${fake_root}/opt/apps/mors/bin"
+	run sh -c "${cleanup}
+		mors_postrm__cleanup_package_tree \"\$1\" \"\$2\"" sh \
+		"${fake_root}/opt/apps/mors" "${marker}"
+	[ "${status}" -ne 0 ]
+	[ -f "${outside}/libs/ndm" ]
+}
+
+@test "postrm preserves lifecycle evidence when package-tree cleanup fails" {
+	local postrm cleanup_line lifecycle_line
+	postrm=$(sed -n '/^define Package\/mors\/postrm/,/^endef/p' \
+		"${REPO_ROOT}/Makefile" | tr -d '\r')
+	cleanup_line=$(printf '%s\n' "${postrm}" | \
+		grep -n '^mors_postrm__cleanup_package_tree \\$' | cut -d: -f1)
+	lifecycle_line=$(printf '%s\n' "${postrm}" | \
+		grep -n 'rm -rf /opt/etc/.mors' | cut -d: -f1)
+	[ -n "${cleanup_line}" ]
+	[ -n "${lifecycle_line}" ]
+	[ "${cleanup_line}" -lt "${lifecycle_line}" ]
+	printf '%s\n' "${postrm}" | \
+		grep -A4 '^mors_postrm__cleanup_package_tree \\$' | grep -q 'exit 1'
+}
+
 @test "postinst preserves existing user configuration" {
 	local postinst
 	postinst=$(sed -n '/^define Package\/mors\/postinst/,/^endef/p' "${REPO_ROOT}/Makefile" | tr -d '\r')
 	grep -Fq '[ -f /opt/etc/mors.conf ] || cp -f' <<<"${postinst}"
 	! grep -q '^cp -f /opt/apps/mors/etc/conf/mors.conf /opt/etc/mors.conf' <<<"${postinst}"
+}
+
+@test "router smoke upgrades the legacy package and proves full purge" {
+	local smoke=${REPO_ROOT}/scripts/qa/router-smoke.sh workflow=${REPO_ROOT}/.github/workflows/router-smoke.yml
+	grep -Fq ': "${LEGACY_IPK_PATH:?LEGACY_IPK_PATH is required}"' "${smoke}"
+	grep -Fq 'mors update apply "${CURRENT_PACKAGE}" --rollback-ipk "${LEGACY_PACKAGE}" --yes' "${smoke}"
+	grep -Fq "[ ! -e /opt/apps/mors/etc/ndm/ndm ]" "${smoke}"
+	grep -Fq 'require_passive_snapshot "${remote_dir}/removed"' "${smoke}"
+	grep -Fq 'verify_shared_fixture adblock-sources' "${smoke}"
+	grep -Fq 'verify_shared_fixture adblock-exception' "${smoke}"
+	grep -Fq 'gh release download v1.3.0-beta10' "${workflow}"
 }
 
 @test "all active hooks enforce lifecycle readiness" {
@@ -152,7 +240,20 @@ setup() {
 	local setup=${REPO_ROOT}/opt/bin/main/setup
 	grep -q 'MORS_UNINSTALL_PREVIOUS_STATE.*unconfigured' "${setup}"
 	grep -q 'Проверяем пассивное состояние Mors' "${setup}"
+	grep -A15 'MORS_UNINSTALL_PREVIOUS_STATE.*unconfigured' "${setup}" |
+		grep -q 'setup__deactivate_telemetry_for_uninstall'
 	grep -q 'setup__remove_package' "${setup}"
+}
+
+@test "full purge removes owned data before publishing package_remove_ready" {
+	local body
+	body=$(sed -n '/^setup__remove_package()/,/^}/p' \
+		"${REPO_ROOT}/opt/bin/main/setup" | tr -d '\r')
+	grep -q 'mors_purge__user_data' <<<"${body}"
+	[ "$(grep -n 'mors_purge__user_data' <<<"${body}" | cut -d: -f1)" -lt \
+		"$(grep -n 'lifecycle_transaction__phase package_remove_ready' <<<"${body}" | cut -d: -f1)" ]
+	[ "$(grep -n 'lifecycle_transaction__phase package_remove_ready' <<<"${body}" | cut -d: -f1)" -lt \
+		"$(grep -n 'opkg remove mors' <<<"${body}" | cut -d: -f1)" ]
 }
 
 @test "legacy setup and uninstall bodies cannot exit past rollback wrappers" {

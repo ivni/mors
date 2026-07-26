@@ -157,9 +157,11 @@ sender после успешного test delivery. Если test не прош�
 должен иметь возможность остановить внешнюю передачу. Uninstall сначала
 останавливает sender и удаляет только точную managed init symlink. Неожиданный
 operator-owned path никогда не выполняется и не удаляется: valid Mors config
-всё равно выключается, а команда возвращает recovery-ошибку. Full purge удаляет credentials,
-cursor и queue; обычное удаление пакета сохраняет закрытую конфигурацию вместе
-с остальными данными Mors, но не оставляет запущенного процесса или hook.
+всё равно выключается, а команда возвращает recovery-ошибку. `telemetry disable
+--purge` и полный `mors uninstall --purge --yes` в том числе для пассивной
+`unconfigured` установки удаляют credentials, cursor, queue и временное
+состояние; обычное удаление пакета сохраняет закрытую конфигурацию вместе с
+остальными данными Mors, но не оставляет запущенного процесса или hook.
 
 `enable`, `disable`, `test`, upgrade, rollback и uninstall используют общий
 внешний lifecycle lock. `enable` повторно проверяет `ready` уже под lock, поэтому

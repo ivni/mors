@@ -232,7 +232,7 @@ assert_no_direct_init_action() {
 }
 
 @test "route creation failures propagate through VPN activation" {
-	local ndm=${REPO_ROOT}/opt/etc/ndm/ndm
+	local ndm=${REPO_ROOT}/opt/bin/libs/ndm
 	local vpn=${REPO_ROOT}/opt/bin/libs/vpn
 	grep -Eq 'ip4__route__add_table \|\| (return|exit) 1' "${ndm}"
 	grep -A2 'Ошибка при добавлении ${submessage}' "${ndm}" | grep -q 'return 1'

@@ -150,7 +150,7 @@ teardown() {
 		opt/etc/ndm/netfilter.d/100-vpn-mark; do
 		grep -q 'ndm_runtime__begin' "${REPO_ROOT}/${hook}"
 	done
-	grep -q 'runtime_lock__request_cold_cancel' "${REPO_ROOT}/opt/etc/ndm/ndm"
+	grep -q 'runtime_lock__request_cold_cancel' "${REPO_ROOT}/opt/bin/libs/ndm"
 }
 
 @test "startup paths attempt cold recovery before normal initialization" {

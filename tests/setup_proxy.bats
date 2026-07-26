@@ -8,6 +8,8 @@ setup() {
 	: >"${EVENTS}"
 	: >"${LOOKUPS}"
 	telemetry_runtime__pin_production() { :; }
+	ownership__pin_production() { :; }
+	mors_purge__pin_production() { :; }
 	source <(sed '/^\. \/opt\/apps\/mors\/bin\/libs\//d' "${REPO_ROOT}/opt/bin/main/setup")
 
 	PROXY_VLESS_NAME=Proxy21

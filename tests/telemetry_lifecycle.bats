@@ -72,7 +72,7 @@ begin_snapshot() {
 
 @test "uninstall deactivates telemetry before stopping data-plane services" {
 	uninstall_body=$(sed -n '/^setup__cmd_uninstall_unlocked()/,/^}/p' "${REPO_ROOT}/opt/bin/main/setup")
-	telemetry_line=$(printf '%s\n' "${uninstall_body}" | grep -n 'telemetry_lifecycle__deactivate' | head -n 1 | cut -d: -f1)
+	telemetry_line=$(printf '%s\n' "${uninstall_body}" | grep -n 'setup__deactivate_telemetry_for_uninstall' | head -n 1 | cut -d: -f1)
 	vless_line=$(printf '%s\n' "${uninstall_body}" | grep -n 'setup__quiesce_managed_vless_runtime' | head -n 1 | cut -d: -f1)
 	[ "${telemetry_line}" -lt "${vless_line}" ]
 }

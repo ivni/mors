@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: Type install-mors-passive to verify a passive package installation on the configured test router.
+        description: Type install-mors-passive to verify passive install and full purge on the configured test router.
         required: true
         default: ''
 
@@ -37,6 +37,17 @@ jobs:
           name: mors-ipk
           path: packages
 
+      - name: Download legacy package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p legacy
+          gh release download v1.3.0-beta10 \
+            --repo ivni/mors \
+            --pattern 'mors_1.3.0.beta10-1_all.ipk' \
+            --dir legacy
+          test "$(find legacy -maxdepth 1 -type f -name 'mors_1.3.0.beta10-1_all.ipk' | wc -l)" -eq 1
+
       - name: Install SSH client
         run: |
           sudo apt-get update
@@ -60,5 +71,7 @@ jobs:
         run: |
           export ROUTER_USER="${ROUTER_USER:-root}"
           export ROUTER_PORT="${ROUTER_PORT:-22}"
-          export IPK_PATH="$(find packages -maxdepth 1 -type f -name 'mors_*_all.ipk' | head -n 1)"
+          test "$(find packages -maxdepth 1 -type f -name 'mors_*_all.ipk' | wc -l)" -eq 1
+          export IPK_PATH="$(find packages -maxdepth 1 -type f -name 'mors_*_all.ipk')"
+          export LEGACY_IPK_PATH="$(find legacy -maxdepth 1 -type f -name 'mors_1.3.0.beta10-1_all.ipk')"
           bash scripts/qa/router-smoke.sh

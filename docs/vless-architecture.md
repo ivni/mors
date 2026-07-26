@@ -130,6 +130,11 @@ disabled -> checking -> standby -> unstable -> unavailable
 - `/opt/var/lib/mors/vless` содержит последнее выбранное VLESS-соединение для восстановления и ограниченную историю событий; это сохранённое предпочтение не считается текущим `active_id`, пока data-plane переведён в `direct_fallback` или fail-closed;
 - `/opt/var/run/mors/vless` содержит только runtime-файлы.
 
+Обычный uninstall сохраняет конфигурацию и историю. Успешный
+`mors uninstall --purge --yes` после остановки supervisor и Xray удаляет все три
+Mors-specific дерева и сгенерированные `/opt/etc/xray/mors.json*`, не затрагивая
+системный init `/opt/etc/init.d/S24xray`.
+
 `mors vless status|list` дополнительно ограничивает оперативное состояние
 lifecycle-пакета: роли `active` и `standby` являются текущими только в `ready`
 без active lifecycle marker. Незавершённая транзакция публикуется отдельно как

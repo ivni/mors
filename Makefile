@@ -3,7 +3,7 @@ include $(TOPDIR)/package/mors/builder/entware/runtime-dependencies.mk
 
 PKG_NAME:=mors
 PKG_VERSION:=1.3.0~beta10
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)-$(PKG_RELEASE)
 MOLOT_UNINSTALL:=mors uninstall full
 
@@ -38,6 +38,9 @@ define Package/mors/install
 	$(INSTALL_DIR) $(1)/opt/apps/mors
 
 	$(CP) ./opt/. $(1)/opt/apps/mors
+	chmod -R 0755 $(1)/opt/apps/mors/bin/*
+	chmod -R 0755 $(1)/opt/apps/mors/etc/init.d/*
+	chmod -R 0755 $(1)/opt/apps/mors/etc/ndm/*
 endef
 
 # Legacy bootstrap is intentionally self-contained: during an upgrade the new
@@ -88,18 +91,25 @@ NOCL="\033[m";
 
 print_line()(printf "%83s\n" | tr " " "=")
 
-chmod -R +x /opt/apps/mors/bin/*
-# chmod -R +x /opt/apps/mors/sbin/dnsmasq/*
-chmod -R +x /opt/apps/mors/etc/init.d/*
-chmod -R +x /opt/apps/mors/etc/ndm/*
-
 ln -sf /opt/apps/mors/bin/mors /opt/bin/mors
 
 [ -f /opt/etc/mors.conf ] || cp -f /opt/apps/mors/etc/conf/mors.conf /opt/etc/mors.conf
 [ -f /opt/etc/mors.list ] || cp -f /opt/apps/mors/etc/conf/mors.list /opt/etc/mors.list
-mkdir -p /opt/etc/adblock /opt/etc/dnsmasq.d
-[ -f /opt/etc/adblock/sources.list ] || cp -f /opt/apps/mors/etc/conf/adblock.sources /opt/etc/adblock/sources.list
-cp -f /opt/apps/mors/etc/ndm/ndm /opt/apps/mors/bin/libs/ndm
+mkdir -p /opt/etc/dnsmasq.d
+. /opt/apps/mors/bin/libs/ownership
+ownership__pin_production
+if [ ! -e /opt/etc/adblock ] && [ ! -L /opt/etc/adblock ]; then
+	mkdir -p /opt/etc/adblock || exit 1
+fi
+if [ -d /opt/etc/adblock ] && [ ! -L /opt/etc/adblock ] && \
+	[ ! -e /opt/etc/adblock/sources.list ] && [ ! -L /opt/etc/adblock/sources.list ]; then
+	cp -f /opt/apps/mors/etc/conf/adblock.sources /opt/etc/adblock/sources.list || exit 1
+	ownership__claim_file /opt/etc/adblock/sources.list adblock-sources-list || {
+		rm -f /opt/etc/adblock/sources.list
+		exit 1
+	}
+fi
+ownership__record_checksum /opt/apps/mors/bin/libs/ndm package-ndm.cksum || exit 1
 
 sed -i "s/\(APP_VERSION=\).*/\1$(PKG_VERSION)/; s/^,//; s/\,/ /g;" "/opt/etc/mors.conf"
 sed -i "s/\(APP_RELEASE=\).*/\1$(PKG_RELEASE)/; s/^,//; s/\,/ /g;" "/opt/etc/mors.conf"
@@ -161,6 +171,50 @@ define Package/mors/postrm
 operation=$$1
 [ "$$operation" = remove ] || exit 0
 
+mors_postrm__cleanup_package_tree() {
+	# The checksum marker is recorded after every successful fixed-version
+	# install, including an upgrade that replaces the legacy unowned file.
+	root=$$1
+	marker=$$2
+	leaf=$$root/bin/libs/ndm
+	if [ -e "$$root" ] || [ -L "$$root" ]; then
+		[ -d "$$root" ] && [ ! -L "$$root" ] || return 1
+		for directory in "$$root/bin" "$$root/bin/libs"; do
+			if [ -e "$$directory" ] || [ -L "$$directory" ]; then
+				[ -d "$$directory" ] && [ ! -L "$$directory" ] || return 1
+			fi
+		done
+	fi
+	if [ -e "$$marker" ] || [ -L "$$marker" ]; then
+		[ -f "$$marker" ] && [ ! -L "$$marker" ] || return 1
+		IFS= read -r expected <"$$marker" || return 1
+		printf '%s\n' "$$expected" | grep -Eq '^[0-9]+ [0-9]+$$' || return 1
+	elif [ -e "$$leaf" ] || [ -L "$$leaf" ]; then
+		return 1
+	else
+		expected=
+	fi
+	if [ -e "$$leaf" ] || [ -L "$$leaf" ]; then
+		[ -f "$$leaf" ] && [ ! -L "$$leaf" ] && [ -n "$$expected" ] || return 1
+		checksum=$$(cksum "$$leaf") || return 1
+		set -- $$checksum
+		[ "$$1 $$2" = "$$expected" ] || return 1
+		rm -f "$$leaf" || return 1
+		[ ! -e "$$leaf" ] && [ ! -L "$$leaf" ] || return 1
+	fi
+	if [ -e "$$marker" ] || [ -L "$$marker" ]; then
+		rm -f "$$marker" || return 1
+		[ ! -e "$$marker" ] && [ ! -L "$$marker" ] || return 1
+	fi
+	rmdir "$$root/bin/libs" "$$root/bin" "$$root" 2>/dev/null || true
+	[ ! -e "$$root" ] && [ ! -L "$$root" ]
+}
+mors_postrm__cleanup_package_tree \
+	/opt/apps/mors /opt/etc/.mors/ownership/package-ndm.cksum || {
+	echo 'Package-tree Mors не удалено полностью: обнаружен неизвестный или изменённый объект.' >&2
+	exit 1
+}
+
 # Passive cleanup only: dataplane has already been removed and verified by
 # prerm/uninstall while all Mors code and dependencies were still available.
 rm -f /opt/bin/mors \
@@ -178,8 +232,6 @@ rm -f /opt/bin/mors \
 if [ -e /opt/etc/.mors/lifecycle/purge-requested ]; then
 	rm -f /opt/etc/mors.conf /opt/etc/mors.list \
 		/opt/etc/dnsmasq.d/mors.dnsmasq \
-		/opt/etc/adblock/sources.list \
-		/opt/etc/adblock/exception.list \
 		/opt/etc/adblock/ads.mors.list
 	rm -rf /opt/etc/.mors
 else

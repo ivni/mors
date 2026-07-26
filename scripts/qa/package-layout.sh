@@ -8,6 +8,9 @@ required_paths=(
 	Makefile
 	opt/bin/mors
 	opt/bin/libs/main
+	opt/bin/libs/mors_purge
+	opt/bin/libs/ndm
+	opt/bin/libs/ownership
 	opt/bin/libs/vpn
 	opt/bin/libs/xray
 	opt/bin/libs/vless_store
@@ -53,7 +56,6 @@ required_paths=(
 	opt/etc/ndm/fs.d/15-mors-start.sh
 	opt/etc/ndm/iflayerchanged.d/100-mors-vpn
 	opt/etc/ndm/netfilter.d/100-dns-local
-	opt/etc/ndm/ndm
 	docs/test-architecture.md
 	docs/lifecycle-architecture.md
 	docs/telemetry-architecture.md
@@ -62,6 +64,8 @@ required_paths=(
 	tests/setup_backup.bats
 	tests/setup_dataplane.bats
 	tests/ndm_failures.bats
+	tests/ownership.bats
+	tests/purge.bats
 	tests/vpn_failures.bats
 	tests/ipv6_bypass.bats
 	tests/setup_proxy.bats
