@@ -10,7 +10,7 @@ setup() {
 	release="$(sed -n 's/^PKG_RELEASE:=//p; /^PKG_RELEASE:=/q' "${REPO_ROOT}/Makefile")"
 	expected="${version}-${release}"
 
-	run bash "${REPO_ROOT}/scripts/qa/release-metadata.sh" v1.3.0-rc.1
+	run bash "${REPO_ROOT}/scripts/qa/release-metadata.sh" v1.3.0-rc.2
 	[ "${status}" -eq 0 ]
 	[ "${output}" = "${expected}" ]
 

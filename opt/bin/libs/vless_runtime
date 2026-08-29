@@ -29,6 +29,8 @@ VLESS_SUPERVISOR_PID_FILE=${VLESS_SUPERVISOR_PID_FILE:-${VLESS_RUNTIME_ROOT}/sup
 VLESS_SUPERVISOR_LOCK_DIR=${VLESS_SUPERVISOR_LOCK_DIR:-${VLESS_RUNTIME_ROOT}/supervisor.lock}
 VLESS_DECISION_LOCK_DIR=${VLESS_DECISION_LOCK_DIR:-${VLESS_RUNTIME_ROOT}/decision.lock}
 VLESS_DECISION_PID_FILE=${VLESS_DECISION_PID_FILE:-${VLESS_DECISION_LOCK_DIR}/pid}
+VLESS_DECISION_OWNER_START_FILE=${VLESS_DECISION_OWNER_START_FILE:-${VLESS_DECISION_LOCK_DIR}/owner_start}
+VLESS_DECISION_LOCK_PUBLISH_WAIT=${VLESS_DECISION_LOCK_PUBLISH_WAIT:-1}
 VLESS_EVENT_LIMIT=${VLESS_EVENT_LIMIT:-200}
 VLESS_API_ADDRESS=${VLESS_API_ADDRESS:-127.0.0.1:10085}
 VLESS_BALANCER_TAG=${VLESS_BALANCER_TAG:-mors-vless}
@@ -271,23 +273,61 @@ vless_runtime__wake_supervisor() {
 	kill -USR1 "${pid}" 2>/dev/null
 }
 
+vless_runtime__decision_lock_remove_stale() {
+	local owner owner_start cleanup_status
+	owner=$(runtime_lock__read "${VLESS_DECISION_PID_FILE}" 2>/dev/null || true)
+	owner_start=$(runtime_lock__read "${VLESS_DECISION_OWNER_START_FILE}" 2>/dev/null || true)
+	if runtime_lock__owner_alive "${owner}" "${owner_start}"; then
+		return 2
+	fi
+
+	cleanup_status=0
+	rm -f "${VLESS_DECISION_PID_FILE}" "${VLESS_DECISION_OWNER_START_FILE}" || cleanup_status=$?
+	if [ "${cleanup_status}" -eq 0 ]; then
+		rmdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null || cleanup_status=$?
+	fi
+	if [ "${cleanup_status}" -ne 0 ]; then
+		printf 'Повреждена блокировка VLESS: %s.\n' "${VLESS_DECISION_LOCK_DIR}" >&2
+		printf '%s\n' 'Действие: выполните /opt/etc/init.d/S25mors-vless stop, проверьте содержимое каталога и удалите только посторонние файлы.' >&2
+		return 1
+	fi
+}
+
 vless_runtime__acquire_decision_lock() {
-	local waited=0 owner=''
-	mkdir -p "${VLESS_RUNTIME_ROOT}" || return 1
-	while ! mkdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null; do
-		owner=''
-		[ -s "${VLESS_DECISION_PID_FILE}" ] && owner=$(tr -d '\r\n' <"${VLESS_DECISION_PID_FILE}")
+	local waited=0 owner='' owner_start='' publish_wait publish_waited cleanup_status owner_start_current
+	mkdir -p "${VLESS_RUNTIME_ROOT}" || {
+		printf 'Не удалось подготовить каталог VLESS runtime: %s.\n' "${VLESS_RUNTIME_ROOT}" >&2
+		printf '%s\n' 'Действие: проверьте доступность и права файловой системы /opt.' >&2
+		return 1
+	}
+	publish_wait=${VLESS_DECISION_LOCK_PUBLISH_WAIT:-1}
+	case "${publish_wait}" in
+		''|*[!0-9]*) publish_wait=1 ;;
+	esac
+	while ! (umask 077; mkdir "${VLESS_DECISION_LOCK_DIR}") 2>/dev/null; do
+		owner=$(runtime_lock__read "${VLESS_DECISION_PID_FILE}" 2>/dev/null || true)
 		if [ -z "${owner}" ]; then
-			sleep 1
-			waited=$((waited + 1))
-			[ -s "${VLESS_DECISION_PID_FILE}" ] && continue
-			rmdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null || return 1
-			continue
+			publish_waited=0
+			while [ "${publish_waited}" -lt "${publish_wait}" ] && [ -z "${owner}" ]; do
+				sleep 1
+				waited=$((waited + 1))
+				publish_waited=$((publish_waited + 1))
+				owner=$(runtime_lock__read "${VLESS_DECISION_PID_FILE}" 2>/dev/null || true)
+			done
+			[ -z "${owner}" ] || continue
+			vless_runtime__decision_lock_remove_stale
+			cleanup_status=$?
+			[ "${cleanup_status}" -eq 0 ] && continue
+			[ "${cleanup_status}" -eq 2 ] && continue
+			return "${cleanup_status}"
 		fi
-		if ! kill -0 "${owner}" 2>/dev/null; then
-			rm -f "${VLESS_DECISION_PID_FILE}"
-			rmdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null || return 1
-			continue
+		owner_start=$(runtime_lock__read "${VLESS_DECISION_OWNER_START_FILE}" 2>/dev/null || true)
+		if ! runtime_lock__owner_alive "${owner}" "${owner_start}"; then
+			vless_runtime__decision_lock_remove_stale
+			cleanup_status=$?
+			[ "${cleanup_status}" -eq 0 ] && continue
+			[ "${cleanup_status}" -eq 2 ] && continue
+			return "${cleanup_status}"
 		fi
 		[ "${waited}" -lt "${VLESS_DECISION_LOCK_WAIT:-120}" ] || {
 			printf '%s\n' 'Другая операция VLESS не завершилась вовремя.' >&2
@@ -296,31 +336,65 @@ vless_runtime__acquire_decision_lock() {
 		sleep 1
 		waited=$((waited + 1))
 	done
-	printf '%s\n' "$$" >"${VLESS_DECISION_PID_FILE}" || {
+	owner_start_current=$(runtime_lock__process_start "$$" 2>/dev/null || true)
+	if ! (umask 077
+		printf '%s\n' "${owner_start_current}" >"${VLESS_DECISION_OWNER_START_FILE}" &&
+		printf '%s\n' "$$" >"${VLESS_DECISION_PID_FILE}"); then
+		rm -f "${VLESS_DECISION_PID_FILE}" "${VLESS_DECISION_OWNER_START_FILE}"
 		rmdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null || true
+		printf 'Не удалось записать блокировку VLESS: %s.\n' "${VLESS_DECISION_LOCK_DIR}" >&2
 		return 1
-	}
+	fi
 }
 
 vless_runtime__release_decision_lock() {
-	local owner=''
-	[ -s "${VLESS_DECISION_PID_FILE}" ] && owner=$(tr -d '\r\n' <"${VLESS_DECISION_PID_FILE}")
-	[ "${owner}" = "$$" ] || return 1
-	rm -f "${VLESS_DECISION_PID_FILE}"
-	rmdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null
+	local owner owner_start owner_start_current cleanup_status=0
+	owner=$(runtime_lock__read "${VLESS_DECISION_PID_FILE}" 2>/dev/null || true)
+	owner_start=$(runtime_lock__read "${VLESS_DECISION_OWNER_START_FILE}" 2>/dev/null || true)
+	[ "${owner}" = "$$" ] || {
+		printf 'Не удалось освободить чужую блокировку VLESS: %s.\n' "${VLESS_DECISION_LOCK_DIR}" >&2
+		return 1
+	}
+	if [ -n "${owner_start}" ]; then
+		owner_start_current=$(runtime_lock__process_start "$$" 2>/dev/null || true)
+		[ -n "${owner_start_current}" ] && [ "${owner_start}" = "${owner_start_current}" ] || {
+			printf 'Не удалось подтвердить владельца блокировки VLESS: %s.\n' "${VLESS_DECISION_LOCK_DIR}" >&2
+			return 1
+		}
+	fi
+	rm -f "${VLESS_DECISION_PID_FILE}" "${VLESS_DECISION_OWNER_START_FILE}" || cleanup_status=$?
+	if [ "${cleanup_status}" -eq 0 ]; then
+		rmdir "${VLESS_DECISION_LOCK_DIR}" 2>/dev/null || cleanup_status=$?
+	fi
+	if [ "${cleanup_status}" -ne 0 ]; then
+		printf 'Не удалось освободить блокировку VLESS: %s.\n' "${VLESS_DECISION_LOCK_DIR}" >&2
+		return 1
+	fi
 }
 
 vless_runtime__with_decision_lock() {
-	local result
-	runtime_mutation_lock__acquire 'vless decision' || return $?
-	if ! vless_runtime__acquire_decision_lock; then
+	local result decision_release_status runtime_release_status
+	runtime_mutation_lock__acquire 'vless decision' || {
+		result=$?
+		runtime_mutation_lock__explain_failure "${result}"
+		return "${result}"
+	}
+	vless_runtime__acquire_decision_lock
+	result=$?
+	if [ "${result}" -ne 0 ]; then
 		runtime_mutation_lock__release >/dev/null 2>&1 || true
-		return 1
+		return "${result}"
 	fi
 	"$@"
 	result=$?
-	vless_runtime__release_decision_lock || true
-	runtime_mutation_lock__release || [ "${result}" -ne 0 ] || result=1
+	vless_runtime__release_decision_lock
+	decision_release_status=$?
+	runtime_mutation_lock__release
+	runtime_release_status=$?
+	if [ "${result}" -eq 0 ] && { [ "${decision_release_status}" -ne 0 ] || [ "${runtime_release_status}" -ne 0 ]; }; then
+		printf '%s\n' 'Операция VLESS выполнена, но служебную блокировку освободить не удалось.' >&2
+		return 1
+	fi
 	return "${result}"
 }
 

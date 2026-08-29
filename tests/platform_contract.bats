@@ -27,7 +27,7 @@ setup() {
 @test "prerelease package declares E2E runtime dependencies" {
 	local dependencies=${REPO_ROOT}/builder/entware/runtime-dependencies.mk
 
-	grep -q 'PKG_VERSION:=1.3.0~rc1' "${REPO_ROOT}/Makefile"
+	grep -q 'PKG_VERSION:=1.3.0~rc2' "${REPO_ROOT}/Makefile"
 	grep -q 'DEPENDS:=$(MORS_RUNTIME_DEPENDS)' "${REPO_ROOT}/Makefile"
 	grep -q '+conntrack' "${dependencies}"
 	grep -q '+coreutils-cksum' "${dependencies}"

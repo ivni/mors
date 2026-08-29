@@ -250,3 +250,129 @@ setup() {
 	[ "${status}" -ne 0 ]
 	[ -d "${VLESS_DECISION_LOCK_DIR}" ]
 }
+
+@test "decision lock recovers a stale empty pid file" {
+	mkdir -p "${VLESS_DECISION_LOCK_DIR}"
+	: >"${VLESS_DECISION_PID_FILE}"
+	VLESS_DECISION_LOCK_PUBLISH_WAIT=0
+
+	run vless_runtime__acquire_decision_lock
+	[ "${status}" -eq 0 ]
+	[ -s "${VLESS_DECISION_PID_FILE}" ]
+	[ "$(cat "${VLESS_DECISION_PID_FILE}")" = "$$" ]
+}
+
+@test "supervisor resumes health cycles after an empty decision pid" {
+	mkdir -p "${VLESS_DECISION_LOCK_DIR}"
+	: >"${VLESS_DECISION_PID_FILE}"
+	VLESS_DECISION_LOCK_PUBLISH_WAIT=0
+	vless_runtime__probe_connection() {
+		VLESS_PROBE_ERROR=''
+		VLESS_PROBE_LATENCY_MS=20
+		return 0
+	}
+
+	run vless_supervisor__once
+	[ "${status}" -eq 0 ]
+	[ "$(jq -r '.cycle' "${VLESS_STATE_FILE}")" -eq 1 ]
+	[ ! -e "${VLESS_DECISION_LOCK_DIR}" ]
+}
+
+@test "decision lock recovers missing invalid and dead owners" {
+	local stale_pid
+	VLESS_DECISION_LOCK_PUBLISH_WAIT=0
+	for stale_pid in missing invalid 99999999; do
+		rm -rf "${VLESS_DECISION_LOCK_DIR}"
+		mkdir -p "${VLESS_DECISION_LOCK_DIR}"
+		case "${stale_pid}" in
+			missing) ;;
+			*) printf '%s\n' "${stale_pid}" >"${VLESS_DECISION_PID_FILE}" ;;
+		esac
+
+		vless_runtime__acquire_decision_lock
+		[ -s "${VLESS_DECISION_PID_FILE}" ]
+		[ "$(cat "${VLESS_DECISION_PID_FILE}")" = "$$" ]
+		vless_runtime__release_decision_lock
+	done
+}
+
+@test "decision lock keeps a live owner published during the grace period" {
+	mkdir -p "${VLESS_DECISION_LOCK_DIR}"
+	( sleep 0.2; printf '%s\n' "$$" >"${VLESS_DECISION_PID_FILE}" ) &
+	VLESS_DECISION_LOCK_PUBLISH_WAIT=1
+	VLESS_DECISION_LOCK_WAIT=0
+
+	run vless_runtime__acquire_decision_lock
+	[ "${status}" -ne 0 ]
+	[ "$(cat "${VLESS_DECISION_PID_FILE}")" = "$$" ]
+}
+
+@test "decision lock recovers a reused live PID with a mismatched start time" {
+	local unrelated_pid unrelated_start result owner process_alive
+	sleep 30 &
+	unrelated_pid=$!
+	unrelated_start=$(runtime_lock__process_start "${unrelated_pid}")
+	mkdir -p "${VLESS_DECISION_LOCK_DIR}"
+	printf '%s\n' "${unrelated_pid}" >"${VLESS_DECISION_PID_FILE}"
+	printf '%s\n' "$((unrelated_start + 1))" >"${VLESS_DECISION_OWNER_START_FILE}"
+	VLESS_DECISION_LOCK_PUBLISH_WAIT=0
+
+	run vless_runtime__acquire_decision_lock
+	result=${status}
+	owner=$(cat "${VLESS_DECISION_PID_FILE}" 2>/dev/null || true)
+	process_alive=1
+	kill -0 "${unrelated_pid}" 2>/dev/null && process_alive=0
+	[ "${result}" -ne 0 ] || vless_runtime__release_decision_lock
+	kill "${unrelated_pid}" 2>/dev/null || true
+	wait "${unrelated_pid}" 2>/dev/null || true
+
+	[ "${result}" -eq 0 ]
+	[ "${owner}" = "$$" ]
+	[ "${process_alive}" -eq 0 ]
+}
+
+@test "decision lock preserves a live PID with a matching start time" {
+	local unrelated_pid unrelated_start result owner process_alive
+	sleep 30 &
+	unrelated_pid=$!
+	unrelated_start=$(runtime_lock__process_start "${unrelated_pid}")
+	mkdir -p "${VLESS_DECISION_LOCK_DIR}"
+	printf '%s\n' "${unrelated_pid}" >"${VLESS_DECISION_PID_FILE}"
+	printf '%s\n' "${unrelated_start}" >"${VLESS_DECISION_OWNER_START_FILE}"
+	VLESS_DECISION_LOCK_WAIT=0
+
+	run vless_runtime__acquire_decision_lock
+	result=${status}
+	owner=$(cat "${VLESS_DECISION_PID_FILE}" 2>/dev/null || true)
+	process_alive=1
+	kill -0 "${unrelated_pid}" 2>/dev/null && process_alive=0
+	kill "${unrelated_pid}" 2>/dev/null || true
+	wait "${unrelated_pid}" 2>/dev/null || true
+
+	[ "${result}" -ne 0 ]
+	[ "${owner}" = "${unrelated_pid}" ]
+	[ "${process_alive}" -eq 0 ]
+}
+
+@test "decision lock reports unexpected stale contents" {
+	mkdir -p "${VLESS_DECISION_LOCK_DIR}"
+	: >"${VLESS_DECISION_PID_FILE}"
+	: >"${VLESS_DECISION_LOCK_DIR}/unexpected"
+	VLESS_DECISION_LOCK_PUBLISH_WAIT=0
+
+	run vless_runtime__acquire_decision_lock
+	[ "${status}" -ne 0 ]
+	[[ "${output}" == *"Повреждена блокировка VLESS"* ]]
+	[[ "${output}" != *"user_id"* ]]
+	[[ "${output}" != *"public_key"* ]]
+}
+
+@test "decision lock explains an unavailable runtime directory" {
+	VLESS_RUNTIME_ROOT=${BATS_TEST_TMPDIR}/runtime-file
+	printf '%s\n' occupied >"${VLESS_RUNTIME_ROOT}"
+
+	run vless_runtime__acquire_decision_lock
+	[ "${status}" -ne 0 ]
+	[[ "${output}" == *"Не удалось подготовить каталог VLESS runtime"* ]]
+	[[ "${output}" == *"проверьте доступность и права"* ]]
+}
