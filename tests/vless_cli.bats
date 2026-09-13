@@ -199,6 +199,25 @@ setup() {
 	[ "$(vless_store__connection_count)" -eq 1 ]
 }
 
+@test "confirmed removal deletes metadata and secret without exposing credentials" {
+	vless_store__add_metadata vless-a Austria false 11971
+	printf '%s\n' '{"user_id":"sensitive-user","public_key":"sensitive-key"}' |
+		vless_store__write_secret vless-a
+	vless_domain__apply_generated() { return 0; }
+	mkdir -p "${VLESS_DECISION_LOCK_DIR}"
+	: >"${VLESS_DECISION_PID_FILE}"
+	VLESS_DECISION_LOCK_PUBLISH_WAIT=0
+
+	run cmd_vless_remove Austria --yes
+	[ "${status}" -eq 0 ]
+	[[ "${output}" == *"Соединение удалено."* ]]
+	[[ "${output}" != *"sensitive-user"* ]]
+	[[ "${output}" != *"sensitive-key"* ]]
+	[ "$(vless_store__connection_count)" -eq 0 ]
+	[ ! -e "${VLESS_CONNECTIONS_DIR}/vless-a.json" ]
+	[ ! -e "${VLESS_DECISION_LOCK_DIR}" ]
+}
+
 @test "enabling direct fallback requires explicit confirmation" {
 	run cmd_vless_policy on false
 	[ "${status}" -eq 64 ]
