@@ -1,6 +1,7 @@
 # Матрица платформ и VPN-возможностей Keenetic
 
-Исследование для [#59](https://github.com/ivni/mors/issues/59), 13.09.2026.
+Исследование для [#59](https://github.com/ivni/mors/issues/59), 13.09.2026;
+актуализация NaiveProxy — 22.09.2026.
 Основание — [контракт #58](../connection-core-requirements.md), прежде всего
 REQ-CORE-002, 006–007, 010–011 и 014. Результат документальный: runtime,
 конфигурация роутеров и пакет не изменялись.
@@ -16,6 +17,22 @@ REQ-CORE-002, 006–007, 010–011 и 014. Результат документа
 до любых изменений рабочего состояния (#97/#98). GitHub issues не изменялись.
 
 ## Вывод и границы доказательства
+
+**Актуализация 22.09.2026:** Hysteria 2 заменён в плане на NaiveProxy по
+REQ-CORE-019–021. Проверены `HEAD = origin/main =
+bc046afbcc11c55feb753419524040b086f15a38` после `git fetch origin main`;
+исправление decision lock #57 и контракт #58 сохранены. Обновляется этот
+документ; при публикации добавлен исходный отчёт предварительного опыта [N6].
+Ниже исходные факты 13.09 помечены своей датой; они не являются
+повторными испытаниями 22.09. Новые источники — [N1]–[N6].
+
+Обнаружено **подтверждённое ограничение штатной поставки NaiveProxy для MIPS
+big endian**: upstream объясняет отсутствие поддержки ограничением Chromium
+[N4], а релиз [N1] не содержит MIPS BE asset. Это блокирует обещание одинаковой
+доступности NaiveProxy на всех сохраняемых платформах. Порт не исследован;
+невозможность любого собственного порта не доказана. MIPS как платформа Mors
+не исключается. Решение о неодинаковых capabilities либо отдельном порте
+требуется в #61/#62 до зависящей реализации, без скрытого сокращения охвата.
 
 Текущий охват Mors нужно сохранять по трём семействам: **mips, mipsel,
 aarch64**. В публичных индексах всех трёх Entware feed найдены все прямые
@@ -51,7 +68,8 @@ vpn, xray, help и builder inputs сверены с `origin/main` и совпа�
 | S | Прочитан исходный код на указанном SHA | Успех на оборудовании |
 | F | Прочитан публичный индекс пакетов 13.09.2026 | Установка и работоспособность |
 | L | Локальное описание стенда | Актуальное состояние стенда |
-| T | Непосредственное испытание конкретной операции на модели/OS | Другие модели и операции; в этой работе успешных T нет |
+| T | Непосредственное испытание конкретной операции на модели/OS | Другие модели и операции; в исходном #59 успешных T нет |
+| T-ref | Результат ранее выполненного опыта из указанного отчёта | Не новое испытание и не проверка всей платформы |
 | ? | Доказательства недостаточны; указана следующая проверка | Нельзя трактовать как «не поддерживается» или «готово» |
 
 ## Платформы, ABI и минимальные версии
@@ -118,6 +136,115 @@ Mors отдельно задаёт Xray минимум **1.8.24**, tested **26.2
 dependency contract не закреплена. Наличие нового Xray в feed не разрешает
 поднимать tested version без compatibility CI.
 
+## NaiveProxy: платформы, транспорт и поставка (22.09.2026)
+
+Кандидат исследования — **v150.0.7871.63-1**, tag разрешён GitHub API в commit
+`3ba967e2d36cc133a896e81a36257ad4c6ea20f4`. Это версия проверенного кандидата,
+не утверждение о latest. Chromium-линия — `150.0.7871.63` по версии релиза
+и `naive --version` в [предварительном опыте](naiveproxy-runtime-spike.md).
+Upstream рекомендует следовать выпускам Chrome и стабильным тегам, а не
+перебазируемому master [N2]. Обновление Chromium требует повторения gates;
+поддерживаемый диапазон версий Mors ещё не установлен (#61/#63).
+
+### ABI / ISA / loader
+
+Имена assets ниже имеют общий префикс `naiveproxy-v150.0.7871.63-1-`.
+Размер — сжатый архив в байтах из GitHub API [N1], **не** размер ELF,
+установленного пакета или требование RAM. `static` пока означает название
+upstream asset; полный ELF-аудит в этой актуализации не выполнялся.
+
+| Платформа Mors | Asset / размер | Уровень и результат | Необходимая проверка |
+| --- | --- | --- | --- |
+| MIPS BE, `mips-3.4`, soft-float | Нет MIPS BE asset в [N1] | O: [N4] явно указывает отсутствие big-endian в Chrome для `mips_24kc`, `mips_4kec`, `mips_mips32` | BLOCKED для штатного NaiveProxy: #61/#62 должны разрешить разницу capabilities либо обосновать отдельный порт; не исключать MIPS из Mors |
+| MIPSel, `mipsel-3.4`, NC-1913 | `openwrt-mipsel_24kc-static.tar.xz`, 3441408 | O + T-ref: бинарник запущен на NC-1913, три TCP HTTPS запроса дали HTTP 200; UDP ASSOCIATE отвергнут | #61/#63: ELF32 little-endian, ISA/float ABI, отсутствие PT_INTERP/DT_NEEDED у static, системные вызовы; полный dataplane, DNS, отказ и восстановление |
+| AArch64, `aarch64-3.10` | `openwrt-aarch64_cortex-a53-static.tar.xz`, 3443528 | O: asset существует; запуска в текущем исследовании нет | #61/#63: ELF64, ISA, loader, kernel/syscalls и запуск под эмуляцией; не объявлять аппаратный PASS |
+| Динамические альтернативы MIPSel / AArch64 | `linux-mipsel.tar.xz`, 3288328; `linux-arm64.tar.xz`, 3118860; OpenWrt варианты без `static` также есть | O: только метаданные assets | Не подменять Entware glibc случайным OpenWrt ABI. Проверить PT_INTERP, DT_NEEDED, GLIBC symbol versions, ISA и sysroot до запуска |
+
+SHA-256 выбранных архивов по метаданным [N1]:
+
+- MIPSel static: `741b26a2425244f66adf99d93ed3cd41697aa6ba81660157b1f8f7c8dbf8374f`;
+- AArch64 cortex-a53 static: `f5ae78ddeed9af8db8370b3ae544ef566fb786d8b7e03071767d2b2a1015246b`.
+
+В предварительном опыте digest MIPSel проверен по скачанному архиву;
+здесь архивы повторно не скачивались. [N4] описывает `mipsel_24kc` как общий
+mipsel без 24kc tuning; название не заменяет `readelf -h -A -l -d -V` и
+проверку на фактическом ядре. Доступный физический стенд — NC-1913;
+для MIPS BE/AArch64 допустима эмуляция с явной границей доказательства.
+
+Отдельно [Rust spike #60](rust-entware-spike.md) уже сообщает IPC для шести
+dynamic/static ELF трёх семейств под QEMU и обоих MIPSel ELF на NC-1913.
+Это T-ref для минимального Rust, не для Chromium/NaiveProxy и не для полного
+Mors. Исходная неудача SSH 13.09 в таблице выше остаётся историей #59,
+а не заявлением о текущей недоступности стенда.
+
+### TCP, UDP и операции
+
+O + S [N2]/[N3], версия кандидата: локальный SOCKS5 CONNECT передаёт TCP
+через HTTP/2 или HTTP/3 CONNECT streams. BIND и UDP ASSOCIATE получают
+command-not-supported (`0x07`). T-ref: в опыте ответ на UDP ASSOCIATE —
+`05 07 00 01 00 00 00 00 00 00`. Внешний QUIC/HTTP/3 не добавляет
+пользовательский UDP; отдельный QUIC путь в опыте не проверялся.
+
+Контракт #58 уже **определил** политику: неподдерживаемый защищаемый UDP
+блокируется, без скрытого direct bypass; отсутствие UDP не означает отказ
+TCP. Упоминание «незакрытого решения» в предварительном отчёте отражает
+момент до обновления #58 и не заменяет REQ-CORE-019–021. Capabilities VLESS,
+Shadowsocks и штатных VPN проверяются независимо. Health/selection — общее
+ядро; один active для новых сессий. Отдельный Naive health-selector не вводится.
+
+| Операция NaiveProxy | Источник / версия / уровень | Что остаётся BLOCKED |
+| --- | --- | --- |
+| discover | S: на базовом SHA нет адаптера NaiveProxy; O [N2] описывает отдельный клиент, не RCI-тип | Реестр и поиск принадлежащих Mors объектов #81; не принимать произвольный Proxy за NaiveProxy |
+| read | O [N2], кандидат: локальный JSON `listen`/`proxy` | Нормализованный readback, редактирование и секреты #81/#92/#93 |
+| create | O [N2]: конфигурация и запуск процесса; T-ref только временный SOCKS listener | Транзакционный create, владение процессом/файлами, Keenetic integration #81 |
+| update | O [N2]: конфигурационный формат; live reload этим не доказан | Apply/rollback и сохранность действующих сессий #81/#95 |
+| delete | T-ref: очистка временного опыта, не общий lifecycle | Удаление только принадлежащих Mors объектов, crash cleanup #81/#95 |
+| enable | T-ref: ручной запуск конкретного MIPSel клиента | Автозапуск, supervisor, атомарная активация и предупреждение TCP-only #81/#65/#78 |
+| probe | S + T-ref [N3]: TCP HTTP 200 и отрицательный UDP ASSOCIATE | Source-bound egress/nonce, DNS/no-loop, отсутствие direct при сбое и восстановлении #63/#75/#115 |
+
+Три запроса инициировал curl на ПК через SSH forward к SOCKS listener;
+**NaiveProxy исполнялся на роутере**. Это не LAN→Keenetic Proxy тест.
+Защищённый DNS и bootstrap сервера проверяются раздельно; прямой DNS как
+компенсация TCP-only запрещён. Настройка/наличие Proxy client [K15] не доказывает
+совместимость его UDP поведения с NaiveProxy. Активация до доказанного DNS,
+UDP fail-closed и no-loop пути остаётся BLOCKED (#63/#78).
+
+### CA trust, ресурсы, лицензии и доставка
+
+O [N2]: Linux-клиент читает `SSL_CERT_FILE`/`SSL_CERT_DIR` и стандартные
+системные CA пути. Наличие Entware в `/opt` не гарантирует найденный trust store.
+T-ref: в опыте использован временный CA bundle через `SSL_CERT_FILE`, TLS
+verification не отключалась. Production gate #61/#63: определить владельца
+и обновление CA, проверить корректный сертификат, неверный hostname, истёкший
+сертификат, неизвестный CA и пустой bundle; ошибки должны блокировать соединение.
+
+T-ref: RSS после трёх запросов 8024 kB, HWM 8040 kB, четыре потока.
+Это одиночный snapshot, не бюджет RAM под нагрузкой. Размер распакованного
+ELF, disk peak при обновлении/rollback, нагрузка совместно с Xray и DNS,
+число сессий и OOM recovery пока **?**, #61/#63.
+
+O [N5]: корневой LICENSE содержит BSD-условия сохранения copyright,
+условий и disclaimer при распространении. Он не является исчерпывающим
+реестром лицензий всех включённых Chromium/third-party компонентов.
+До поставки #61 должен собрать notices/SBOM для выбранного бинарника,
+проверить вложенные лицензии, CA bundle и требования к распространению;
+юридическая готовность готового пакета здесь не подтверждается.
+
+На проверенном main `runtime-dependencies.mk` не включает NaiveProxy.
+Архив upstream не равен Entware IPK, а `PKGARCH:=all` оболочки Mors не делает
+машинный ELF универсальным. #61/#67–#69 должны определить источник и способ
+доставки, mapping ABI→asset, immutable SHA/digest, CA/notices, обновление и
+rollback. Размеры/дайджесты выше — входные данные исследования, не изменение
+канонического builder и не разрешение скачивать latest во время установки.
+
+Воспроизводимая read-only проверка источника и списка поставки:
+
+```sh
+gh api repos/klzgrad/naiveproxy/git/ref/tags/v150.0.7871.63-1 --jq '.object'
+gh release view v150.0.7871.63-1 --repo klzgrad/naiveproxy --json assets,tagName,url
+git show origin/main:builder/entware/runtime-dependencies.mk
+```
+
 ## Инвентарь VPN и компонентов
 
 «Минимум ?» означает, что официальный источник описывает возможность, но
@@ -142,6 +269,7 @@ dependency contract не закреплена. Наличие нового Xray 
 | Shadowsocks | Entware `shadowsocks-libev-ss-redir`, `ss-local`, config; не штатный RCI VPN-тип | O: внешняя proxy-точка допускается [K15]; S+F: собственный ss-redir путь Mors; продуктовый минимум OS 5 | Отдельный legacy backend в vpn; это не VLESS/Proxy и не полный общий пул; #80/#97 |
 | VLESS Reality | Entware Xray + Proxy client + Netfilter + Netfilter Add-ons | O: Proxy с 3.9 [K15]; S: Xray ≥1.8.24, tested 26.2.6; 3.9 — необходимый порог компонента, не доказанный минимум всего Mors | Реестр VLESS, один Xray и управляемый Proxy21, отдельные health/probe; #79 |
 | HTTP/HTTPS/SOCKS5 Proxy | Proxy client; `Proxy` | O: с 3.9 [K15] | Legacy scan включает Proxy вообще, setup_plan принимает только управляемый Proxy21 с ожидаемым описанием. Произвольный Proxy ещё не равен управляемому VPN |
+| NaiveProxy | Внешний Chromium-клиент; собственного RCI VPN-типа не установлено | O + S [N1]–[N4], v150.0.7871.63-1; продуктовый минимум OS 5, полный путь не испытан | TCP-only; MIPSel T-ref, MIPS BE upstream не поддержан, AArch64 не испытан; операции раскрыты отдельно выше, адаптер #81 |
 
 ## Матрица операций и пути управления
 
@@ -166,8 +294,13 @@ dependency contract не закреплена. Наличие нового Xray 
 | Shadowsocks | SS | SS | SS | SS | SS; полное владение ? | SS | SS; общий P ? |
 | VLESS Reality | V | V | V | V | V | V | V; общий P ? |
 | Произвольный Proxy | R; setup ограничен | R | C + PX | U + PX | D | E | P; UDP зависит от режима |
+| NaiveProxy | N; реестр ? | N; readback ? | N; lifecycle ? | N; apply ? | N; владение ? | N; activation ? | N; TCP T-ref, UDP unsupported |
 
 Коды операций:
+
+- **N — O + S + T-ref**, [N1]–[N4], v150.0.7871.63-1: см. отдельную
+  таблицу операций NaiveProxy выше. Общего managed lifecycle пока нет;
+  ограничения TCP/UDP не наследуются от VLESS или произвольного Proxy.
 
 - **R — S + O:** Mors `setup_plan__inventory_json` читает
   `GET /rci/show/interface`; константы main и callers используют
@@ -341,14 +474,18 @@ curl -fsS http://127.0.0.1:79/rci/show/interface |
 | G5 | WAN/server/client классификация, судьба выбранного PPPOE/Proxy и безопасный отказ перехода с выбранным OpenVPN | #76/#92/#97/#98; блокирует миграцию таких установок без явного разрешения несовместимости |
 | G6 | Source-bound DNS/TCP/UDP probe, upstream outage, отсутствие direct fallback, graceful переключение | #75/#94/#115; блокирует общий health/failover для непроверенной пары backend |
 | G7 | Отсутствующий компонент → инструкция → ручная установка → продолжение мастера; безопасный отказ без изменения OS | #65/#107; блокирует завершённый UX для этой capability |
+| G8 | NaiveProxy на MIPS BE: upstream не поддерживает big endian; разрешить несовпадение capabilities без исключения платформы либо исследовать отдельный порт. Для MIPSel/AArch64 проверить ELF/ISA/loader/kernel и поставку | #61/#62/#67–#69; BLOCKED для обещания NaiveProxy на всех платформах; Rust QEMU gate не заменяет этот gate |
+| G9 | NaiveProxy: доказать защищённый DNS, UDP fail-closed, bootstrap/no-loop, ошибки CA/auth, egress/nonce, переключение и recovery; TCP-only предупреждение до допуска | #63/#65/#75/#78/#81/#115; BLOCKED для production-активации, несмотря на предварительный TCP успех |
+| G10 | Закреплённая Chromium-версия, архив/ELF/disk/RAM, CA, notices/SBOM, схема доставки и rollback | #61/#63/#67–#69; BLOCKED для поставки NaiveProxy; наличие upstream archive не является package gate |
 
 Итог #59 — инвентарь доказательств и gates, а не сертификат поддержки всех
-моделей. Исследование Hysteria 2 остаётся #61/#63. Новые adapters, Rust,
+моделей. Актуальные #61/#63 относятся к NaiveProxy; исследования Hysteria 2
+остаются историческими свидетельствами и не доказывают новый backend. Новые adapters, Rust,
 изменение scan, исправление миграции и испытания с мутациями здесь не реализованы.
 
 ## Реестр официальных источников
 
-Все веб-источники прочитаны 13.09.2026. Если статья не фиксирует минимальную
+Источники K/E/F прочитаны 13.09.2026, N — 22.09.2026. Если статья не фиксирует минимальную
 OS, использована дата редакции/чтения, а минимум помечен `?`. Release notes
 с каналом Alpha/Beta/Development не являются обещанием для stable другой модели.
 
@@ -376,3 +513,19 @@ OS, использована дата редакции/чтения, а мини
 - [F1 — MIPS index](https://bin.entware.net/mipssf-k3.4/Packages.gz).
 - [F2 — MIPSel index](https://bin.entware.net/mipselsf-k3.4/Packages.gz).
 - [F3 — AArch64 index](https://bin.entware.net/aarch64-k3.10/Packages.gz).
+- [N1 — NaiveProxy v150.0.7871.63-1, assets и digests](https://github.com/klzgrad/naiveproxy/releases/tag/v150.0.7871.63-1).
+- [N2 — README кандидата: CONNECT, CA trust, обновления Chromium](https://github.com/klzgrad/naiveproxy/blob/3ba967e2d36cc133a896e81a36257ad4c6ea20f4/README.md).
+- [N3 — SOCKS5 команды, закреплённый исходник](https://github.com/klzgrad/naiveproxy/blob/3ba967e2d36cc133a896e81a36257ad4c6ea20f4/src/net/tools/naive/socks5_server_socket.cc).
+- [N4 — Upstream OpenWrt Support, редакция 05.04.2025, прочитано 22.09.2026](https://github.com/klzgrad/naiveproxy/wiki/OpenWrt-Support).
+- [N5 — LICENSE кандидата](https://github.com/klzgrad/naiveproxy/blob/3ba967e2d36cc133a896e81a36257ad4c6ea20f4/LICENSE).
+- [N6 — Предварительный опыт на NC-1913, 22.09.2026](naiveproxy-runtime-spike.md) — отчёт T-ref, опубликован вместе с матрицей; не официальный upstream и не повторное испытание.
+
+## Проверка актуализации 22.09.2026
+
+Обновлена матрица и добавлен исходный отчёт [N6]; runtime и роутеры не менялись. Проверки
+локальных ссылок, кодов источников, структуры таблиц и `git diff --check`
+выполнены отдельно от runtime gates. Полный `bash scripts/qa/static.sh`
+запущен: package layout и secret scan пройдены, затем проверка остановилась
+на CRLF в существующих файлах checkout. Общий static QA — **BLOCKED**;
+массовая нормализация несвязанных файлов в #59 не выполняется. Это не
+аппаратный тест и не подтверждение готовности NaiveProxy.
