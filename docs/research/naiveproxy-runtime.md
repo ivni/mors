@@ -14,8 +14,8 @@ Production-активация и поставка пока BLOCKED. Для MIPS 
 
 Это результат новой редакции #61. Старый [отчёт Hysteria 2](hysteria2-runtime.md)
 сохраняет исторический смысл, но не задаёт runtime, API и процессы NaiveProxy.
-[ADR-0001](../adr/0001-connection-core-boundaries.md) ещё содержит Hysteria/Clash;
-его актуализация принадлежит #62. Этот отчёт передаёт решение в #62,
+[ADR-0001](../adr/0001-connection-core-boundaries.md) актуализирован в #62:
+§2.1–2.2 и §7 закрепляют process/config/CA, routing и поставку. Отчёт передаёт решение в #62,
 не реализует адаптер, routing, packaging или новую архитектуру ядра.
 Существующие VLESS decision lock #57 и один Xray остаются без изменений.
 

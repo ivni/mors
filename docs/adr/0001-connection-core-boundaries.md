@@ -1,16 +1,17 @@
 # ADR-0001: Единое Rust-ядро, адаптеры и источники состояния
 
 - Статус: принято как целевая архитектура; активация заблокирована gates ниже.
-- Дата: 13.09.2026.
+- Дата: 13.09.2026; актуализация NaiveProxy: 22.09.2026.
 - Задача: [#62](https://github.com/ivni/mors/issues/62).
-- База проверки: `origin/main`, `533a973` после `git fetch origin main`.
+- База проверки: `main`, `8d65d9a3ae4e4bd2e8c6692261b6331051edd947`;
+  совпадение с GitHub main проверено 22.09.2026.
 - Область: документация; runtime, пакет и роутер этим ADR не изменяются.
 
 ## Контекст
 
 [Контракт #58](../connection-core-requirements.md) требует общего пула,
 одного владельца решений, сохранения платформ и постепенного перехода на Rust.
-Применимые требования: REQ-CORE-001–018; PRINC-ID в AGENTS.md не заданы.
+Применимые требования: REQ-CORE-001–021; PRINC-ID в AGENTS.md не заданы.
 В актуальном контракте OpenVPN явно исключён: чужие и существующие OpenVPN
 не удаляются; миграция использующей его установки останавливается до изменения
 рабочего состояния, без автоматического direct fallback.
@@ -29,7 +30,9 @@
 Основание платформенных решений — уже зафиксированные исследования:
 [матрица #59](../research/connection-platform-matrix.md),
 [Rust spike #60](../research/rust-entware-spike.md),
-[Hysteria #61](../research/hysteria2-runtime.md).
+[NaiveProxy #61](../research/naiveproxy-runtime.md).
+Редакция от 22.09.2026 заменяет прежний выбор Hysteria/sing-box в этом ADR;
+историческое исследование Hysteria не является контрактом NaiveProxy.
 Закрытие исследовательского issue не означает прохождения runtime gates.
 Здесь эти эксперименты не повторялись.
 
@@ -47,7 +50,7 @@
 | Компонент | Владеет | Не имеет права |
 | --- | --- | --- |
 | Реестр и secret store | ID, тип, membership/enabled, policy, config revision, ownership, secret references, миграции и backup | Выбирать active, выполнять RCI или engine API |
-| Health и selection | Производное здоровье, подтверждение сбоя, upstream distinction, чистая функция выбора по snapshot и управляемым часам | Вызывать Xray/Clash/RCI, писать config или самостоятельно применять маршрут |
+| Health и selection | Производное здоровье, подтверждение сбоя, upstream distinction, чистая функция выбора по snapshot и управляемым часам | Вызывать engine API/RCI, писать config или самостоятельно применять маршрут |
 | Координатор | Очередь команд, transaction/operation ID, revisions, fencing, порядок prepare/apply/verify/commit/restore | Объявлять успех без observed poststate |
 | Адаптер протокола/движка | Типизированные validate, discover/read, prepare/apply/verify/restore, probe, drain; перевод в конкретный API | Собственную политику failover/failback, прямые durable записи реестра |
 | Платформенный routing apply | Mors policy routes, firewall/ipset, endpoint exclusions, привязку native egress или proxy endpoint | Выбирать победителя, менять чужие объекты или открывать direct без policy |
@@ -56,8 +59,9 @@
 
 Внутренние адаптеры имеют версионируемый типизированный контракт. Это не ABI
 динамических Rust-плагинов: сначала они собираются вместе с ядром; внешний
-движок остаётся отдельным процессом с собственным control API. Алгоритм
-selection заменяется через чистый интерфейс и общий набор сценариев #70/#74.
+движок остаётся отдельным процессом. Адаптер использует только доказанный
+control API либо запуск с конфигурацией и остановку; наличие API не требуется.
+Алгоритм selection заменяется через чистый интерфейс и общий набор сценариев #70/#74.
 
 ```text
 CLI / NDM / lifecycle -> запрос -> единственный координатор
@@ -75,7 +79,7 @@ latency, детерминированные равенства и отсутст
 ### 2. Общий пул и capabilities
 
 Запись пула обозначает логическое подключение, а не PID, SOCKS listener или
-интерфейс. Охват — VLESS, Shadowsocks, Hysteria 2, WireGuard с отдельно
+интерфейс. Охват — VLESS, Shadowsocks, NaiveProxy, WireGuard с отдельно
 проверяемыми ASC-вариантами, IKEv1/IKEv2, SSTP, PPTP, L2TP, L2TP/IPsec,
 OpenConnect. WAN, модем и VPN-server не становятся выходом по одному имени
 или `connected`; клиентская роль и egress проверяются отдельно.
@@ -100,17 +104,18 @@ read/update/restore и жизненного цикла, необходимого
 недопущенный к выбору, отдельно от рабочего выхода.
 
 В работающем пуле **один active для новых защищаемых сессий**. Одновременно
-могут жить несколько native-интерфейсов, один Xray для всех VLESS и отдельный
-движок Hysteria; standby probes и draining не являются вторым active.
+могут жить несколько native-интерфейсов, один Xray для всех VLESS и отдельные
+процессы NaiveProxy в пределах budget; standby probes и draining не являются
+вторым active.
 Native VPN использует свой подтверждённый интерфейс и не обязан проходить
 через Xray или глобальный Proxy.
 
 Для внешних SOCKS-движков платформенный адаптер предоставляет проверенную
-точку входа. Кандидат #61 — один sing-box на Hysteria-профили без автономного
-urltest-выбора; VLESS сохраняет один Xray. Общий routing apply выбирает
+точку входа. NaiveProxy использует отдельный процесс на живую generation
+профиля (§2.1); VLESS сохраняет один Xray. Общий routing apply выбирает
 native egress либо внешнюю точку. Число Proxy для mixed topology и способ
-сохранения старых сессий определяются #63/#78/#94; создавать Proxy или процесс
-на каждый профиль запрещено. Перенацеливание единственного Proxy на другой
+сохранения старых сессий определяются #63/#78/#94; пользовательский Proxy
+на каждый профиль не создаётся. Перенацеливание единственного Proxy на другой
 listener не считается доказанным graceful. До доказательства нет скрытого
 рестарта: действие, способное разорвать сессии, требует объяснения и явного
 подтверждения. Предел четырёх VLESS не переносится на общий пул.
@@ -119,6 +124,117 @@ listener не считается доказанным graceful. До доказ�
 маршрута; bootstrap DNS/upstream path проверяется отдельно. Новый exclusion
 добавляется до удаления старого; удаляются только Mors-owned записи.
 Непроверенная защита от routing loop блокирует активацию адаптера.
+
+### 2.1. NaiveProxy: процесс, конфигурация, CA и drain
+
+Принята модель #61: официальный Chromium-клиент, один loopback SOCKS5
+listener и один `https` endpoint на процесс. Кандидат версии/ABI закреплён
+в отчёте #61, не выбирается через latest. Rust не реализует TLS/протокол.
+Multi-profile process отклонён: исследованный auth store разделяется по
+endpoint, а не ID профиля; разные credentials одного endpoint конфликтуют.
+Массивы listeners/proxies не дают selector или drain API. Публичные reload,
+dry-run check и drain API не подтверждены; SIGHUP и TERM не заменяют их.
+`redir` с собственным fake-IP DNS не используется: DNS остаётся у Mors.
+
+Координатор допускает не более `L` живых профилей, включая active, probe и
+draining, плюс один candidate/reconfigure процесс; всего максимум `L + 1`.
+Одна reconfigure-транзакция за раз, один listener на процесс. Конечные
+платформенные L, RAM/FD/session/queue budgets обязательны по #63/#117;
+до измерений admission BLOCKED. Точки опыта L=1,2,4 не являются лимитом
+продукта. Записи вне resident-набора остаются в реестре; при нехватке слотов
+действие получает busy либо ограниченно ожидает, не убивает draining-процесс.
+
+Адаптер формирует JSON из закрытой typed schema: запрещены пустой proxy,
+direct, неподтверждённые chains/carriers, произвольные listen и опции,
+отключающие TLS verification. Candidate config хранится в owned каталоге
+0700, файл 0600, argv содержит только путь. Секреты берутся из secret store;
+NetLog, SSL key log и raw stderr не становятся пользовательским выводом.
+Readiness listener отдельно от source-bound TCP/TLS/auth probe и здоровья.
+Известное `UDP ASSOCIATE unsupported` не считается сбоем здорового TCP.
+Допуск к ручному/автоматическому выбору требует показанного и принятого
+предупреждения REQ-CORE-021, включая noninteractive путь (#65).
+
+Reconfigure: prepare config/CA/exclusions → новый процесс и фактический bind
+нового порта → readiness и probe → транзакция §2.2 → drain старой generation
+→ stop по PID/start identity и owned cleanup. Ошибка candidate до переключения
+сохраняет рабочую generation; после эффектов выполняется scoped rollback.
+PID/locks и текущие счётчики остаются volatile; durable intent хранит
+generation, ownership и необходимые config/CA revisions для recovery.
+После crash процессы перечитываются с проверкой identity, PID не считается
+вечным идентификатором и не восстанавливается как доказательство здоровья.
+
+Выбрана общая управляемая точка входа для внешних TCP-backend, которая
+закрепляет сессию за generation и учитывает открытие/закрытие. Она исполняет
+план координатора, не выбирает backend сама. Её конкретная реализация и
+интеграция с Keenetic — #63/#78; существование такой точки пока не доказано.
+Drain — запрет новых сессий на старую generation и ожидание её счётчика 0;
+health измеряет пригодность для новых сессий и не заменяет этот счётчик.
+Без доказанного учёта graceful BLOCKED. Deadline означает отложенное действие
+или запрос явного force, а не скрытый TERM. Клиентские tunnel/idle timeouts
+также проверяются: бессрочное сохранение сессий не обещается. Graceful native
+VPN и каждой пары переходов подтверждается отдельно в #94/#115.
+
+Владение CA: платформенный runtime package (§7) поставляет версионированный
+bundle с источником/digest/лицензией и owned пустой каталог CA. Адаптер задаёт
+обе переменные `SSL_CERT_FILE` и `SSL_CERT_DIR` только дочернему процессу;
+одна переменная или пустая строка не доказывает изоляции системных defaults.
+Custom CA принимается явно, без отключения hostname/chain verification.
+Общий trust store не меняется. Binary/config/CA revisions входят в backup
+и rollback; отсутствие trust bundle блокирует start/admission.
+
+### 2.2. Транзакция TCP routing, UDP и DNS
+
+Для NaiveProxy capability TCP CONNECT проверяется отдельно, пользовательский
+UDP unsupported; внешний HTTP/3 этого не меняет. Второго active для UDP нет.
+Защищаемый UDP, включая QUIC, блокируется без скрытого WAN fallback.
+Отдельная явная direct policy не включается предупреждением о TCP-only.
+Плановый drain сохраняет допустимые старые TCP-сессии; переход на TCP-only
+не оставляет старые защищаемые UDP flows как обход новой политики. Если
+это прерывает пользовательские сессии, до планового apply требуется
+предупреждение/подтверждение по REQ-CORE-013; ограничения автоматического
+перехода раскрываются при допуске по REQ-CORE-021, без обещания спасти
+произвольные сессии при аварии.
+
+Координатор применяет один план с revisions/write set для TCP ingress/route,
+UDP guard, DNS и endpoint exclusions; успех одного шага не является commit.
+Keenetic RCI, DNS и firewall не считаются общей атомарной БД. Атомарность
+означает отсутствие промежуточного разрешающего обхода: при невозможности
+единого переключения используется закрывающий guard с readback.
+
+1. Prepare: baseline/intent/rollback, проверка ownership/revisions и ресурсов;
+   разрешённый bootstrap получает адреса endpoint. Узкие WAN exclusions
+   устанавливаются до candidate; hostname сохраняется для SNI/verification.
+   DNS защищаемых целей не использует bootstrap как общий direct resolver.
+2. Stage: подготовить проверенный защищённый DNS через TCP-совместимый путь,
+   candidate и маршруты. До изменения действующего DNS/route установить и
+   прочитать guard новых защищаемых TCP и всего защищаемого UDP. Допустимые
+   старые TCP остаются привязаны к прежней generation; если платформа не
+   умеет сохранить их, плановый graceful apply BLOCKED. UDP deny действует и для
+   ранее установленных flows, без обхода ранним ESTABLISHED/fastpath правилом;
+   доказательство на конкретной платформе — gate #63/#78.
+3. Apply/verify: переключить новые TCP-сессии и DNS, сохранить привязку старых
+   допустимых TCP. Прочитать route/firewall/DNS/ingress generation, проверить
+   фактический egress и upstream DNS через ограниченный source-bound probe,
+   разрешённый guard только в candidate path без direct fallback.
+   LAN egress, отрицательные UDP/QUIC и WAN capture проверяются в runtime
+   gates #63/#115; packet capture не требуется при каждом health-cycle.
+   После проверки открыть только разрешённый TCP; UDP guard остаётся.
+   Только затем commit active/preference. При отказе verify guard не снимается.
+4. Restore: под guard вернуть только неизменённый Mors poststate (§5), включая
+   прежний DNS/route. Старые exclusions удалять лишь после drain и отсутствия
+   ссылок; новые внешние правки сохранять. UDP разрешается снова только после
+   readback восстановленного выхода с доказанной UDP capability. Неудача
+   restore оставляет защищаемый путь закрытым и `recovery_required`.
+
+Guard не должен ломать явно разрешённый control/endpoint путь, но нельзя
+разрешать весь исходящий трафик Naive-процесса. Смена IP/TTL проходит тот же
+revision-fenced update exclusions. Certificate/AIA fetches исследованного
+клиента имеют отдельный context; их фактический WAN/DNS путь неизвестен.
+Необходимый служебный доступ вне узкой утверждённой политики блокирует
+admission до #63/#78, а не расширяет исключения автоматически.
+IPv4 остаётся границей продукта; обход защиты через IPv6 не объявляется
+устранённым без проверки условий стенда. N2–N5/N8–N9 из #61 и межпротокольные
+испытания #115 проверяют apply, failure и restore; HTTPS 200 недостаточно.
 
 ### 3. Источники состояния и границы записи
 
@@ -237,7 +353,7 @@ tokens. Шлюз использует фиксированную операци�
 
 ### 7. Платформенная поставка и update/release
 
-Выбран целевой контракт: **один самодостаточный пакет `mors` на подтверждённый
+Выбран целевой контракт: **один основной пакет `mors` на подтверждённый
 Entware ABI**, содержащий общую shell-обвязку и соответствующий Rust ELF.
 Для нынешних трёх семейств планируются три IPK: MIPS BE, MIPSel, AArch64.
 Установка получает ровно один из них; реальные control Architecture и имена
@@ -248,6 +364,33 @@ Entware ABI**, содержащий общую shell-обвязку и соот�
 состояния несовместимых `mors` и `mors-core`, нет расхода места на чужие ELF.
 Протокольные движки остаются проверяемыми зависимостями, а не реализацией
 Rust-ядра. Их версии/ABI и rollback-совместимость входят в gate поставки.
+
+Для NaiveProxy выбран отдельный необязательный платформенный runtime package
+с binary, CA bundle и полными notices/SBOM. Основной `mors` не получает
+безусловную зависимость от него: MIPS BE сохраняет ядро и остальные доказанные
+backend. По #59/#61 у upstream нет BE asset; Naive capability там unsupported
+для выбранного поставщика, production admission BLOCKED, без подмены ABI
+или молчаливого исключения MIPS BE из Mors. Новый порт — самостоятельное
+исследование, не реализация #62/#81. Отсутствие runtime на поддержанном ABI
+также не мешает другим backend; CLI объясняет недоступность NaiveProxy.
+
+Для кандидата планируются три основных IPK и до двух runtime IPK
+(MIPSel/AArch64), только после соответствующих gates. Имена runtime package
+и точные control Architecture закрепляет #69. Один ELF на диске обслуживает
+несколько процессов. Runtime не скачивается при активации; установка пассивна.
+Цена отдельного пакета — явная совместимость и транзакция обновления
+core/runtime/config/CA: manifest задаёт совместимый набор, preflight проверяет
+staging/rollback место до opkg, предыдущий набор сохраняется до verify.
+Это осознанно отличается от отклонённого разделения `mors`/`mors-core`:
+опциональный транспорт не должен блокировать поставку всего ядра на BE.
+
+Сопровождающий runtime package отслеживает стабильные Chromium/upstream tags
+и уязвимости. Каждое обновление проходит ABI/ISA/kernel, TLS/CA, TCP,
+UDP-negative, lifecycle и resource gates; latest download и бессрочная
+фиксация уязвимого rollback запрещены. Политика допустимых rollback-версий,
+полный состав статических лицензий и место для старого/нового ELF, распаковки,
+CA/config закрепляются в #69/#116. Неполные notices или неподтверждённая
+совместимость блокируют runtime package, не считаются успешной поставкой.
 
 Кандидат toolchain — patched Rust 1.94.0 и Entware std/GCC/sysroot из #60;
 выбор dynamic/static production linkage завершается в #66/#67 после проверки
@@ -296,13 +439,13 @@ Opt-in и purge сохраняют [контракт телеметрии](../te
 
 | Документ / положение | Что меняется после gate | Что сохраняется |
 | --- | --- | --- |
-| VLESS §1–2, §11: глобальный VLESS список и одна Proxy-точка | Глобален межпротокольный пул; Proxy/Xray — граница VLESS-адаптера, не всех native VPN | Один Xray, отсутствие process/interface per profile |
+| VLESS §1–2, §11: глобальный VLESS список и одна Proxy-точка | Глобален межпротокольный пул; Proxy/Xray — граница VLESS-адаптера, Naive использует bounded процессы §2.1, native собственный egress | Один Xray, отсутствие Xray/пользовательского интерфейса на профиль |
 | VLESS §3.3, §4, §6: shell supervisor выбирает и вызывает Routing API | Health/selection общего ядра выдаёт план; engine API вызывает адаптер под координатором | Sticky, подтверждение сбоя, upstream distinction, no failback |
 | VLESS §3.1, §8–9: протокольный реестр и preference | Общий versioned registry, отдельные secrets, volatile health, миграция с backup | Права, сохранность, запрет перезаписи неизвестной схемы |
 | Lifecycle §1.7, §4: VLESS-specific orchestration | Компонентный контракт распространяется на адаптеры с capability gates | Пассивная установка, verify до ready, один владелец |
-| Lifecycle §3, §6: snapshot/restore | Добавляются observed revisions, write set и сохранение внешних правок | Durable intent, staged artifacts, автономный recovery, fail-closed |
+| Lifecycle §3, §6: snapshot/restore | Добавляются observed revisions, write set, config/CA generations, общая TCP/UDP/DNS транзакция §2.2 и сохранение внешних правок | Durable intent, staged artifacts, автономный recovery, fail-closed |
 | Lifecycle §7: shell lock hierarchy | На переходе сохраняется, затем заменяется единым координатором и проверенным ownership handoff | Взаимное исключение, boot recovery до runtime |
-| Lifecycle §6 и правила release: один all.ipk | После отдельного package gate — manifest и один подходящий platform IPK на установку | Same-SHA gates, digest, immutable tag, verified rollback |
+| Lifecycle §6 и правила release: один all.ipk | После отдельного package gate — manifest, основной platform IPK и необязательный Naive runtime package §7 | Same-SHA gates, digest, immutable tag, verified rollback |
 
 ## Последствия, альтернативы и оставшаяся работа
 
@@ -321,6 +464,12 @@ RCI или graceful: эти свойства требуют отдельных �
 - Health в durable JSON каждый cycle: ненужные записи и ложное восстановление
   свежего здоровья после reboot.
 - Полный restore старого RCI snapshot: потеря внешних изменений пользователя.
+- Общий Naive process на все профили: конфликт auth одного endpoint;
+  неограниченный process-per-profile: неконтролируемый расход RAM/FD.
+- Обязательный Naive ELF в каждом `mors`: нет подтверждённого BE asset;
+  исключение BE из продукта или установка LE ELF неприемлемы.
+- Переключить TCP, потом отдельно закрыть UDP/DNS: окно direct утечки;
+  успешный TCP probe не доказывает корректность всей транзакции.
 
 Следующие границы принадлежат исполнителю указанного issue. Незакрытый gate
 блокирует соответствующую **активацию**, но не проектирование и fake-тесты.
@@ -328,7 +477,7 @@ RCI или graceful: эти свойства требуют отдельных �
 | Gate / риск | Работа и критерий закрытия | Безопасное состояние до закрытия |
 | --- | --- | --- |
 | G1: платформы, ABI, ресурсы | #66–#69/#117: production core + зависимости, IPC/loader/kernel проверки в согласованной матрице, пределы нагрузки | Legacy остаётся рабочим, платформы молча не исключаются |
-| G2: mixed routing/transport | #63/#78/#94/#115: TCP/UDP, upstream exclusions, native↔external, drain, отказ во всех фазах | Нет обещания graceful или допуска непроверенного пути |
+| G2: mixed routing/transport | #63/#78/#81/#94/#115: N0–N9 из #61, TCP, UDP-negative, защищённый DNS, CA/AIA/exclusions, L+1 budgets, native↔external, счётчик drain, отказ во всех фазах §2.2 | Naive admission BLOCKED, нет обещания graceful или допуска непроверенного пути |
 | G3: внешние revisions | #76/#92/#93: fixtures и race tests read/write/restore, неизвестные поля и внешние delete/edit | Inventory read-only, опасная mutation unknown |
 | G4: ownership handoff | #73/#95/#99: CLI/NDM/boot/lifecycle гонки, worker старого epoch, crash и отсутствие двух владельцев | Только один режим с legacy selection |
 | G5: durability/privacy | #64/#71/#72/#109–#111/#119: power-loss boundaries, flash writes, journal overflow, secret-marker проверки | Нет ослабления сохранности и экспорта raw trace |
@@ -348,7 +497,8 @@ RCI или graceful: эти свойства требуют отдельных �
 | Внешние правки, fencing, шлюзы, rollback, native без глобального Proxy | §2, §5–6 |
 | Согласование VLESS/lifecycle, заменённые положения и rollout | Таблица замен и G1–G6 |
 | Платформенные артефакты и явный переход от all.ipk | §7 и G6 |
+| Naive process/config/CA, bounded listeners, drain, атомарные TCP/UDP/DNS, readback/rollback | §2.1–2.2, §7, G2/G6; REQ-CORE-019–021 |
 
-Проверка этого изменения — сверка с REQ-CORE-001–018, кодом на базовом SHA,
+Проверка этого изменения — сверка с REQ-CORE-001–021, кодом на базовом SHA,
 локальными ссылками и diff. Успешные runtime, power-loss, router и release
 испытания этой документальной проверкой не заявляются.
