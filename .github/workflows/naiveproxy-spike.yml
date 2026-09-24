@@ -1,0 +1,32 @@
+name: NaiveProxy issue 63 patched runtime
+on:
+  push:
+    branches: [codex/issue-63-naive-idle-fix]
+    paths:
+      - .github/workflows/naiveproxy-spike.yml
+      - scripts/qa/naiveproxy-spike-build.sh
+      - docs/research/naiveproxy-63/idle-handshake-created-at.patch
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install build tools in disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config ccache bubblewrap zstd unzip
+      - name: Build pinned patched MIPSel runtime
+        run: bash scripts/qa/naiveproxy-spike-build.sh
+      - name: Save test binary and provenance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: naiveproxy-issue63-mipsel-patched
+          path: ${{ runner.temp }}/naive63-artifact/
+          retention-days: 7
+          if-no-files-found: error

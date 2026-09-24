@@ -1,0 +1,13 @@
+--- a/src/net/tools/naive/naive_connection.cc
++++ b/src/net/tools/naive/naive_connection.cc
+@@ -501,6 +501,10 @@
+ }
+ 
+ base::TimeTicks NaiveConnection::GetLastWriteTime() const {
++  if (last_write_time_[kClient].is_null() &&
++      last_write_time_[kServer].is_null()) {
++    return created_at_;
++  }
+   if (last_write_time_[kClient] > last_write_time_[kServer]) {
+     return last_write_time_[kClient];
+   } else {
