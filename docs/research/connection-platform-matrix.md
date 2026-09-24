@@ -269,7 +269,7 @@ git show origin/main:builder/entware/runtime-dependencies.mk
 | Shadowsocks | Entware `shadowsocks-libev-ss-redir`, `ss-local`, config; не штатный RCI VPN-тип | O: внешняя proxy-точка допускается [K15]; S+F: собственный ss-redir путь Mors; продуктовый минимум OS 5 | Отдельный legacy backend в vpn; это не VLESS/Proxy и не полный общий пул; #80/#97 |
 | VLESS Reality | Entware Xray + Proxy client + Netfilter + Netfilter Add-ons | O: Proxy с 3.9 [K15]; S: Xray ≥1.8.24, tested 26.2.6; 3.9 — необходимый порог компонента, не доказанный минимум всего Mors | Реестр VLESS, один Xray и управляемый Proxy21, отдельные health/probe; #79 |
 | HTTP/HTTPS/SOCKS5 Proxy | Proxy client; `Proxy` | O: с 3.9 [K15] | Legacy scan включает Proxy вообще, setup_plan принимает только управляемый Proxy21 с ожидаемым описанием. Произвольный Proxy ещё не равен управляемому VPN |
-| NaiveProxy | Внешний Chromium-клиент; собственного RCI VPN-типа не установлено | O + S [N1]–[N4], v150.0.7871.63-1; продуктовый минимум OS 5, полный путь не испытан | TCP-only; MIPSel T-ref, MIPS BE upstream не поддержан, AArch64 не испытан; операции раскрыты отдельно выше, адаптер #81 |
+| NaiveProxy | Внешний Chromium-клиент; собственного RCI VPN-типа не установлено | O + S [N1]–[N4], v150.0.7871.63-1; OS 5. T: #63 на NC-1913 — controlled LAN/Proxy, DoH, UDP-negative, lifecycle и нагрузка | TCP-only; MIPS BE upstream не поддержан. AArch64 host без SHA получил SIGILL; Keenetic AArch64 не проверен. Production admission BLOCKED, адаптер #81 |
 
 ## Матрица операций и пути управления
 

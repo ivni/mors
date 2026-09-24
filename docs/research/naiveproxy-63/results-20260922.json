@@ -1,0 +1,2409 @@
+{
+  "schema": 1,
+  "date": "2026-09-22",
+  "path": "router Naive -> SSH reverse -> loopback unpadded HTTP2 CONNECT fixture -> loopback HTTPS origin",
+  "limitations": [
+    "Not WAN or Keenetic Proxy",
+    "PSS unavailable",
+    "Full benchmark initial driver recorded error counts but not curl exit codes"
+  ],
+  "tls": [
+    {
+      "case": "valid",
+      "curl_exit": 0,
+      "body_match": true,
+      "server_nonce": true,
+      "errors": [
+        "-109"
+      ],
+      "h2": true
+    },
+    {
+      "case": "empty",
+      "curl_exit": 35,
+      "body_match": false,
+      "server_nonce": false,
+      "errors": [
+        "-109",
+        "-136",
+        "-202"
+      ],
+      "h2": false
+    },
+    {
+      "case": "missing",
+      "curl_exit": 35,
+      "body_match": false,
+      "server_nonce": false,
+      "errors": [
+        "-109",
+        "-136",
+        "-202"
+      ],
+      "h2": false
+    },
+    {
+      "case": "wrong-name",
+      "curl_exit": 35,
+      "body_match": false,
+      "server_nonce": false,
+      "errors": [
+        "-109",
+        "-136",
+        "-200"
+      ],
+      "h2": false
+    },
+    {
+      "case": "expired",
+      "curl_exit": 35,
+      "body_match": false,
+      "server_nonce": false,
+      "errors": [
+        "-109",
+        "-136",
+        "-201"
+      ],
+      "h2": false
+    },
+    {
+      "case": "incomplete",
+      "curl_exit": 35,
+      "body_match": false,
+      "server_nonce": false,
+      "errors": [
+        "-109",
+        "-136",
+        "-202"
+      ],
+      "h2": false
+    },
+    {
+      "case": "full-chain",
+      "curl_exit": 0,
+      "body_match": true,
+      "server_nonce": true,
+      "errors": [
+        "-109"
+      ],
+      "h2": true
+    },
+    {
+      "case": "unknown",
+      "curl_exit": 35,
+      "body_match": false,
+      "server_nonce": false,
+      "errors": [
+        "-109",
+        "-136",
+        "-202"
+      ],
+      "h2": false
+    },
+    {
+      "case": "bad-auth",
+      "curl_exit": 35,
+      "body_match": false,
+      "server_nonce": false,
+      "errors": [
+        "-109",
+        "-115",
+        "-320"
+      ],
+      "h2": true
+    },
+    {
+      "case": "bad-dns",
+      "curl_exit": 35,
+      "body_match": false,
+      "server_nonce": false,
+      "errors": [
+        "-105",
+        "-109",
+        "-130"
+      ],
+      "h2": false
+    }
+  ],
+  "resources": {
+    "samples": [
+      {
+        "phase": "idle",
+        "elapsed": 0.03,
+        "VmHWM": 6364.0,
+        "VmRSS": 6364.0,
+        "Threads": 4.0,
+        "fd": 8.0,
+        "available_kb": 170672.0,
+        "process_ticks": 10.0,
+        "machine_ticks": 1546743053.0
+      },
+      {
+        "phase": "idle",
+        "elapsed": 30.88,
+        "VmHWM": 6364.0,
+        "VmRSS": 6364.0,
+        "Threads": 4.0,
+        "fd": 8.0,
+        "available_kb": 170604.0,
+        "process_ticks": 10.0,
+        "machine_ticks": 1546755420.0
+      },
+      {
+        "phase": "idle",
+        "elapsed": 61.78,
+        "VmHWM": 6364.0,
+        "VmRSS": 6364.0,
+        "Threads": 4.0,
+        "fd": 8.0,
+        "available_kb": 170444.0,
+        "process_ticks": 10.0,
+        "machine_ticks": 1546767780.0
+      },
+      {
+        "phase": "idle",
+        "elapsed": 92.69,
+        "VmHWM": 6364.0,
+        "VmRSS": 6364.0,
+        "Threads": 4.0,
+        "fd": 8.0,
+        "available_kb": 170312.0,
+        "process_ticks": 10.0,
+        "machine_ticks": 1546780157.0
+      },
+      {
+        "phase": "idle",
+        "elapsed": 123.64,
+        "VmHWM": 6364.0,
+        "VmRSS": 6364.0,
+        "Threads": 4.0,
+        "fd": 8.0,
+        "available_kb": 170488.0,
+        "process_ticks": 10.0,
+        "machine_ticks": 1546792517.0
+      },
+      {
+        "phase": "idle",
+        "elapsed": 154.53,
+        "VmHWM": 6364.0,
+        "VmRSS": 6364.0,
+        "Threads": 4.0,
+        "fd": 8.0,
+        "available_kb": 170596.0,
+        "process_ticks": 10.0,
+        "machine_ticks": 1546804900.0
+      },
+      {
+        "phase": "idle",
+        "elapsed": 185.48,
+        "VmHWM": 6364.0,
+        "VmRSS": 6364.0,
+        "Threads": 4.0,
+        "fd": 8.0,
+        "available_kb": 170612.0,
+        "process_ticks": 10.0,
+        "machine_ticks": 1546817264.0
+      },
+      {
+        "phase": "idle",
+        "elapsed": 216.41,
+        "VmHWM": 6364.0,
+        "VmRSS": 6364.0,
+        "Threads": 4.0,
+        "fd": 8.0,
+        "available_kb": 170588.0,
+        "process_ticks": 10.0,
+        "machine_ticks": 1546829619.0
+      },
+      {
+        "phase": "idle",
+        "elapsed": 247.3,
+        "VmHWM": 6364.0,
+        "VmRSS": 6364.0,
+        "Threads": 4.0,
+        "fd": 8.0,
+        "available_kb": 170716.0,
+        "process_ticks": 10.0,
+        "machine_ticks": 1546841982.0
+      },
+      {
+        "phase": "idle",
+        "elapsed": 278.2,
+        "VmHWM": 6364.0,
+        "VmRSS": 6364.0,
+        "Threads": 4.0,
+        "fd": 8.0,
+        "available_kb": 170648.0,
+        "process_ticks": 10.0,
+        "machine_ticks": 1546854311.0
+      },
+      {
+        "phase": "load1",
+        "elapsed": 0.0,
+        "VmHWM": 7584.0,
+        "VmRSS": 7576.0,
+        "Threads": 4.0,
+        "fd": 10.0,
+        "available_kb": 170288.0,
+        "process_ticks": 44.0,
+        "machine_ticks": 1546863137.0
+      },
+      {
+        "phase": "load1",
+        "elapsed": 31.06,
+        "VmHWM": 7784.0,
+        "VmRSS": 7680.0,
+        "Threads": 4.0,
+        "fd": 10.0,
+        "available_kb": 170252.0,
+        "process_ticks": 1088.0,
+        "machine_ticks": 1546875471.0
+      },
+      {
+        "phase": "load1",
+        "elapsed": 61.91,
+        "VmHWM": 7800.0,
+        "VmRSS": 7640.0,
+        "Threads": 4.0,
+        "fd": 9.0,
+        "available_kb": 170240.0,
+        "process_ticks": 2114.0,
+        "machine_ticks": 1546887845.0
+      },
+      {
+        "phase": "load1",
+        "elapsed": 92.83,
+        "VmHWM": 7816.0,
+        "VmRSS": 7676.0,
+        "Threads": 4.0,
+        "fd": 9.0,
+        "available_kb": 170192.0,
+        "process_ticks": 3154.0,
+        "machine_ticks": 1546900184.0
+      },
+      {
+        "phase": "load1",
+        "elapsed": 123.69,
+        "VmHWM": 7816.0,
+        "VmRSS": 7652.0,
+        "Threads": 4.0,
+        "fd": 10.0,
+        "available_kb": 170064.0,
+        "process_ticks": 4172.0,
+        "machine_ticks": 1546912525.0
+      },
+      {
+        "phase": "load1",
+        "elapsed": 154.53,
+        "VmHWM": 7816.0,
+        "VmRSS": 7692.0,
+        "Threads": 4.0,
+        "fd": 10.0,
+        "available_kb": 169960.0,
+        "process_ticks": 5165.0,
+        "machine_ticks": 1546924864.0
+      },
+      {
+        "phase": "load1",
+        "elapsed": 185.38,
+        "VmHWM": 7868.0,
+        "VmRSS": 7776.0,
+        "Threads": 4.0,
+        "fd": 10.0,
+        "available_kb": 170172.0,
+        "process_ticks": 6220.0,
+        "machine_ticks": 1546937230.0
+      },
+      {
+        "phase": "load1",
+        "elapsed": 216.3,
+        "VmHWM": 7880.0,
+        "VmRSS": 7776.0,
+        "Threads": 4.0,
+        "fd": 10.0,
+        "available_kb": 169832.0,
+        "process_ticks": 7265.0,
+        "machine_ticks": 1546949575.0
+      },
+      {
+        "phase": "load1",
+        "elapsed": 247.16,
+        "VmHWM": 7880.0,
+        "VmRSS": 7768.0,
+        "Threads": 4.0,
+        "fd": 9.0,
+        "available_kb": 169964.0,
+        "process_ticks": 8306.0,
+        "machine_ticks": 1546961932.0
+      },
+      {
+        "phase": "load1",
+        "elapsed": 278.05,
+        "VmHWM": 7888.0,
+        "VmRSS": 7820.0,
+        "Threads": 4.0,
+        "fd": 10.0,
+        "available_kb": 169808.0,
+        "process_ticks": 9346.0,
+        "machine_ticks": 1546974273.0
+      },
+      {
+        "phase": "load8",
+        "elapsed": 0.0,
+        "VmHWM": 8268.0,
+        "VmRSS": 8096.0,
+        "Threads": 4.0,
+        "fd": 15.0,
+        "available_kb": 168480.0,
+        "process_ticks": 10159.0,
+        "machine_ticks": 1546983202.0
+      },
+      {
+        "phase": "load8",
+        "elapsed": 31.16,
+        "VmHWM": 8268.0,
+        "VmRSS": 8196.0,
+        "Threads": 4.0,
+        "fd": 17.0,
+        "available_kb": 168820.0,
+        "process_ticks": 13249.0,
+        "machine_ticks": 1546995611.0
+      },
+      {
+        "phase": "load8",
+        "elapsed": 62.17,
+        "VmHWM": 8300.0,
+        "VmRSS": 8224.0,
+        "Threads": 4.0,
+        "fd": 17.0,
+        "available_kb": 168984.0,
+        "process_ticks": 16322.0,
+        "machine_ticks": 1547008028.0
+      },
+      {
+        "phase": "load8",
+        "elapsed": 93.22,
+        "VmHWM": 8336.0,
+        "VmRSS": 8244.0,
+        "Threads": 4.0,
+        "fd": 17.0,
+        "available_kb": 168140.0,
+        "process_ticks": 19386.0,
+        "machine_ticks": 1547020430.0
+      },
+      {
+        "phase": "load8",
+        "elapsed": 124.23,
+        "VmHWM": 8364.0,
+        "VmRSS": 8208.0,
+        "Threads": 4.0,
+        "fd": 15.0,
+        "available_kb": 168724.0,
+        "process_ticks": 22450.0,
+        "machine_ticks": 1547032814.0
+      },
+      {
+        "phase": "load8",
+        "elapsed": 155.17,
+        "VmHWM": 8364.0,
+        "VmRSS": 8172.0,
+        "Threads": 4.0,
+        "fd": 15.0,
+        "available_kb": 168256.0,
+        "process_ticks": 25354.0,
+        "machine_ticks": 1547045226.0
+      },
+      {
+        "phase": "load8",
+        "elapsed": 186.22,
+        "VmHWM": 8368.0,
+        "VmRSS": 8216.0,
+        "Threads": 4.0,
+        "fd": 16.0,
+        "available_kb": 168256.0,
+        "process_ticks": 28380.0,
+        "machine_ticks": 1547057592.0
+      },
+      {
+        "phase": "load8",
+        "elapsed": 217.12,
+        "VmHWM": 8392.0,
+        "VmRSS": 8240.0,
+        "Threads": 4.0,
+        "fd": 16.0,
+        "available_kb": 169240.0,
+        "process_ticks": 31434.0,
+        "machine_ticks": 1547069942.0
+      },
+      {
+        "phase": "load8",
+        "elapsed": 248.02,
+        "VmHWM": 8392.0,
+        "VmRSS": 8280.0,
+        "Threads": 4.0,
+        "fd": 17.0,
+        "available_kb": 168376.0,
+        "process_ticks": 34491.0,
+        "machine_ticks": 1547082326.0
+      },
+      {
+        "phase": "load8",
+        "elapsed": 278.97,
+        "VmHWM": 8392.0,
+        "VmRSS": 8332.0,
+        "Threads": 4.0,
+        "fd": 17.0,
+        "available_kb": 167892.0,
+        "process_ticks": 37544.0,
+        "machine_ticks": 1547094735.0
+      },
+      {
+        "phase": "load32",
+        "elapsed": 0.01,
+        "VmHWM": 10316.0,
+        "VmRSS": 10316.0,
+        "Threads": 4.0,
+        "fd": 41.0,
+        "available_kb": 164888.0,
+        "process_ticks": 39773.0,
+        "machine_ticks": 1547103895.0
+      },
+      {
+        "phase": "load32",
+        "elapsed": 31.38,
+        "VmHWM": 14052.0,
+        "VmRSS": 14052.0,
+        "Threads": 4.0,
+        "fd": 41.0,
+        "available_kb": 160112.0,
+        "process_ticks": 42849.0,
+        "machine_ticks": 1547116246.0
+      },
+      {
+        "phase": "load32",
+        "elapsed": 62.25,
+        "VmHWM": 15616.0,
+        "VmRSS": 15588.0,
+        "Threads": 4.0,
+        "fd": 41.0,
+        "available_kb": 157108.0,
+        "process_ticks": 45950.0,
+        "machine_ticks": 1547128677.0
+      },
+      {
+        "phase": "load32",
+        "elapsed": 93.33,
+        "VmHWM": 16072.0,
+        "VmRSS": 16012.0,
+        "Threads": 4.0,
+        "fd": 39.0,
+        "available_kb": 156424.0,
+        "process_ticks": 49027.0,
+        "machine_ticks": 1547141025.0
+      },
+      {
+        "phase": "load32",
+        "elapsed": 124.2,
+        "VmHWM": 16700.0,
+        "VmRSS": 16696.0,
+        "Threads": 4.0,
+        "fd": 40.0,
+        "available_kb": 155968.0,
+        "process_ticks": 52121.0,
+        "machine_ticks": 1547153428.0
+      },
+      {
+        "phase": "load32",
+        "elapsed": 155.2,
+        "VmHWM": 17032.0,
+        "VmRSS": 17008.0,
+        "Threads": 4.0,
+        "fd": 41.0,
+        "available_kb": 157488.0,
+        "process_ticks": 55213.0,
+        "machine_ticks": 1547165841.0
+      },
+      {
+        "phase": "load32",
+        "elapsed": 186.23,
+        "VmHWM": 17376.0,
+        "VmRSS": 17352.0,
+        "Threads": 4.0,
+        "fd": 41.0,
+        "available_kb": 155540.0,
+        "process_ticks": 58300.0,
+        "machine_ticks": 1547178239.0
+      },
+      {
+        "phase": "load32",
+        "elapsed": 217.22,
+        "VmHWM": 17544.0,
+        "VmRSS": 17544.0,
+        "Threads": 4.0,
+        "fd": 39.0,
+        "available_kb": 154264.0,
+        "process_ticks": 61392.0,
+        "machine_ticks": 1547190620.0
+      },
+      {
+        "phase": "load32",
+        "elapsed": 248.19,
+        "VmHWM": 17604.0,
+        "VmRSS": 17572.0,
+        "Threads": 4.0,
+        "fd": 38.0,
+        "available_kb": 154996.0,
+        "process_ticks": 64472.0,
+        "machine_ticks": 1547202972.0
+      },
+      {
+        "phase": "load32",
+        "elapsed": 279.06,
+        "VmHWM": 17636.0,
+        "VmRSS": 17636.0,
+        "Threads": 4.0,
+        "fd": 40.0,
+        "available_kb": 154324.0,
+        "process_ticks": 67570.0,
+        "machine_ticks": 1547215375.0
+      }
+    ],
+    "aggregates": {
+      "idle": {
+        "ok": 0,
+        "failed": 0,
+        "bytes": 0,
+        "latency_sum": 0.0,
+        "latency_max": 0.0,
+        "elapsed": 300.02
+      },
+      "load1": {
+        "ok": 412,
+        "failed": 2,
+        "bytes": 108003328,
+        "latency_sum": 185.75763700000007,
+        "latency_max": 1.348218,
+        "elapsed": 300.06
+      },
+      "load8": {
+        "ok": 1243,
+        "failed": 6,
+        "bytes": 325844992,
+        "latency_sum": 2060.729435000002,
+        "latency_max": 3.158249,
+        "elapsed": 301.52
+      },
+      "load32": {
+        "ok": 1323,
+        "failed": 16,
+        "bytes": 346816512,
+        "latency_sum": 9327.39915300001,
+        "latency_max": 10.104263,
+        "elapsed": 306.66
+      }
+    },
+    "guard_stop": false
+  },
+  "diagnostic": [
+    {
+      "route": "direct",
+      "index": 0,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.052341
+    },
+    {
+      "route": "direct",
+      "index": 1,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.059458
+    },
+    {
+      "route": "direct",
+      "index": 2,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.057294
+    },
+    {
+      "route": "direct",
+      "index": 3,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.062034
+    },
+    {
+      "route": "direct",
+      "index": 4,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.066929
+    },
+    {
+      "route": "direct",
+      "index": 5,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.07111
+    },
+    {
+      "route": "direct",
+      "index": 6,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.075351
+    },
+    {
+      "route": "direct",
+      "index": 7,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.074918
+    },
+    {
+      "route": "direct",
+      "index": 8,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.071237
+    },
+    {
+      "route": "direct",
+      "index": 9,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.082496
+    },
+    {
+      "route": "direct",
+      "index": 10,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.073733
+    },
+    {
+      "route": "direct",
+      "index": 11,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.100631
+    },
+    {
+      "route": "direct",
+      "index": 12,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.088289
+    },
+    {
+      "route": "direct",
+      "index": 13,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.100579
+    },
+    {
+      "route": "direct",
+      "index": 14,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.082514
+    },
+    {
+      "route": "direct",
+      "index": 15,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.090655
+    },
+    {
+      "route": "direct",
+      "index": 16,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.095276
+    },
+    {
+      "route": "direct",
+      "index": 17,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.146045
+    },
+    {
+      "route": "direct",
+      "index": 18,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.126818
+    },
+    {
+      "route": "direct",
+      "index": 19,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.098927
+    },
+    {
+      "route": "direct",
+      "index": 20,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.144596
+    },
+    {
+      "route": "direct",
+      "index": 21,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.10754
+    },
+    {
+      "route": "direct",
+      "index": 22,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.106067
+    },
+    {
+      "route": "direct",
+      "index": 23,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.100095
+    },
+    {
+      "route": "direct",
+      "index": 24,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.111653
+    },
+    {
+      "route": "direct",
+      "index": 25,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.100778
+    },
+    {
+      "route": "direct",
+      "index": 26,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.128973
+    },
+    {
+      "route": "direct",
+      "index": 27,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.09055
+    },
+    {
+      "route": "direct",
+      "index": 28,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.096379
+    },
+    {
+      "route": "direct",
+      "index": 29,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.090066
+    },
+    {
+      "route": "direct",
+      "index": 30,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.105074
+    },
+    {
+      "route": "direct",
+      "index": 31,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.089309
+    },
+    {
+      "route": "direct",
+      "index": 32,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.090416
+    },
+    {
+      "route": "direct",
+      "index": 33,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.085813
+    },
+    {
+      "route": "direct",
+      "index": 34,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.079464
+    },
+    {
+      "route": "direct",
+      "index": 35,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.082239
+    },
+    {
+      "route": "direct",
+      "index": 36,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.074212
+    },
+    {
+      "route": "direct",
+      "index": 37,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.079086
+    },
+    {
+      "route": "direct",
+      "index": 38,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.072476
+    },
+    {
+      "route": "direct",
+      "index": 39,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.075936
+    },
+    {
+      "route": "direct",
+      "index": 40,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.071249
+    },
+    {
+      "route": "direct",
+      "index": 41,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.071454
+    },
+    {
+      "route": "direct",
+      "index": 42,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.067044
+    },
+    {
+      "route": "direct",
+      "index": 43,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.063914
+    },
+    {
+      "route": "direct",
+      "index": 44,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.059769
+    },
+    {
+      "route": "direct",
+      "index": 45,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058553
+    },
+    {
+      "route": "direct",
+      "index": 46,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.05776
+    },
+    {
+      "route": "direct",
+      "index": 47,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.053943
+    },
+    {
+      "route": "direct",
+      "index": 48,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.055332
+    },
+    {
+      "route": "direct",
+      "index": 49,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058452
+    },
+    {
+      "route": "direct",
+      "index": 50,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058985
+    },
+    {
+      "route": "direct",
+      "index": 51,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058056
+    },
+    {
+      "route": "direct",
+      "index": 52,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.060367
+    },
+    {
+      "route": "direct",
+      "index": 53,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.05948
+    },
+    {
+      "route": "direct",
+      "index": 54,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.063033
+    },
+    {
+      "route": "direct",
+      "index": 55,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.060134
+    },
+    {
+      "route": "direct",
+      "index": 56,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.059614
+    },
+    {
+      "route": "direct",
+      "index": 57,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058073
+    },
+    {
+      "route": "direct",
+      "index": 58,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.06079
+    },
+    {
+      "route": "direct",
+      "index": 59,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.060781
+    },
+    {
+      "route": "direct",
+      "index": 60,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058488
+    },
+    {
+      "route": "direct",
+      "index": 61,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.057773
+    },
+    {
+      "route": "direct",
+      "index": 62,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058899
+    },
+    {
+      "route": "direct",
+      "index": 63,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.059693
+    },
+    {
+      "route": "direct",
+      "index": 64,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058745
+    },
+    {
+      "route": "direct",
+      "index": 65,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.059232
+    },
+    {
+      "route": "direct",
+      "index": 66,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.059503
+    },
+    {
+      "route": "direct",
+      "index": 67,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.05871
+    },
+    {
+      "route": "direct",
+      "index": 68,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058125
+    },
+    {
+      "route": "direct",
+      "index": 69,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.056432
+    },
+    {
+      "route": "direct",
+      "index": 70,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058374
+    },
+    {
+      "route": "direct",
+      "index": 71,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.056987
+    },
+    {
+      "route": "direct",
+      "index": 72,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.058662
+    },
+    {
+      "route": "direct",
+      "index": 73,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.056343
+    },
+    {
+      "route": "direct",
+      "index": 74,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.055838
+    },
+    {
+      "route": "direct",
+      "index": 75,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.057309
+    },
+    {
+      "route": "direct",
+      "index": 76,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.055571
+    },
+    {
+      "route": "direct",
+      "index": 77,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.054441
+    },
+    {
+      "route": "direct",
+      "index": 78,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.053934
+    },
+    {
+      "route": "direct",
+      "index": 79,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.054892
+    },
+    {
+      "route": "direct",
+      "index": 80,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.055762
+    },
+    {
+      "route": "direct",
+      "index": 81,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.053801
+    },
+    {
+      "route": "direct",
+      "index": 82,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.05387
+    },
+    {
+      "route": "direct",
+      "index": 83,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.054596
+    },
+    {
+      "route": "direct",
+      "index": 84,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.057085
+    },
+    {
+      "route": "direct",
+      "index": 85,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.05476
+    },
+    {
+      "route": "direct",
+      "index": 86,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.053993
+    },
+    {
+      "route": "direct",
+      "index": 87,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.054285
+    },
+    {
+      "route": "direct",
+      "index": 88,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.054113
+    },
+    {
+      "route": "direct",
+      "index": 89,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.053257
+    },
+    {
+      "route": "direct",
+      "index": 90,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.056377
+    },
+    {
+      "route": "direct",
+      "index": 91,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.054592
+    },
+    {
+      "route": "direct",
+      "index": 92,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.055551
+    },
+    {
+      "route": "direct",
+      "index": 93,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.052903
+    },
+    {
+      "route": "direct",
+      "index": 94,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.053047
+    },
+    {
+      "route": "direct",
+      "index": 95,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.052824
+    },
+    {
+      "route": "direct",
+      "index": 96,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.050392
+    },
+    {
+      "route": "direct",
+      "index": 97,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.047226
+    },
+    {
+      "route": "direct",
+      "index": 98,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.042792
+    },
+    {
+      "route": "direct",
+      "index": 99,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 0.040419
+    },
+    {
+      "route": "socks",
+      "index": 0,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.455378
+    },
+    {
+      "route": "socks",
+      "index": 1,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.443321
+    },
+    {
+      "route": "socks",
+      "index": 2,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.451076
+    },
+    {
+      "route": "socks",
+      "index": 3,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.441272
+    },
+    {
+      "route": "socks",
+      "index": 4,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.422675
+    },
+    {
+      "route": "socks",
+      "index": 5,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.428286
+    },
+    {
+      "route": "socks",
+      "index": 6,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.435934
+    },
+    {
+      "route": "socks",
+      "index": 7,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.4127
+    },
+    {
+      "route": "socks",
+      "index": 8,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.416696
+    },
+    {
+      "route": "socks",
+      "index": 9,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.407297
+    },
+    {
+      "route": "socks",
+      "index": 10,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.386111
+    },
+    {
+      "route": "socks",
+      "index": 11,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.380391
+    },
+    {
+      "route": "socks",
+      "index": 12,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.36922
+    },
+    {
+      "route": "socks",
+      "index": 13,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.374942
+    },
+    {
+      "route": "socks",
+      "index": 14,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.364862
+    },
+    {
+      "route": "socks",
+      "index": 15,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.342212
+    },
+    {
+      "route": "socks",
+      "index": 16,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.359094
+    },
+    {
+      "route": "socks",
+      "index": 17,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.349044
+    },
+    {
+      "route": "socks",
+      "index": 18,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.353951
+    },
+    {
+      "route": "socks",
+      "index": 19,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.339239
+    },
+    {
+      "route": "socks",
+      "index": 20,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.334026
+    },
+    {
+      "route": "socks",
+      "index": 21,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.57583
+    },
+    {
+      "route": "socks",
+      "index": 22,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.56492
+    },
+    {
+      "route": "socks",
+      "index": 23,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.559636
+    },
+    {
+      "route": "socks",
+      "index": 24,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.553071
+    },
+    {
+      "route": "socks",
+      "index": 25,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 2.166789
+    },
+    {
+      "route": "socks",
+      "index": 26,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.548997
+    },
+    {
+      "route": "socks",
+      "index": 27,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.543089
+    },
+    {
+      "route": "socks",
+      "index": 28,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 2.147474
+    },
+    {
+      "route": "socks",
+      "index": 29,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 2.142603
+    },
+    {
+      "route": "socks",
+      "index": 30,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 1.743095
+    },
+    {
+      "route": "socks",
+      "index": 31,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 1.739634
+    },
+    {
+      "route": "socks",
+      "index": 32,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.226283
+    },
+    {
+      "route": "socks",
+      "index": 33,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.959719
+    },
+    {
+      "route": "socks",
+      "index": 34,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 10.177084
+    },
+    {
+      "route": "socks",
+      "index": 35,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 10.17342
+    },
+    {
+      "route": "socks",
+      "index": 36,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.958724
+    },
+    {
+      "route": "socks",
+      "index": 37,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.484204
+    },
+    {
+      "route": "socks",
+      "index": 38,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.467098
+    },
+    {
+      "route": "socks",
+      "index": 39,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.471578
+    },
+    {
+      "route": "socks",
+      "index": 40,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.478474
+    },
+    {
+      "route": "socks",
+      "index": 41,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 3.644058
+    },
+    {
+      "route": "socks",
+      "index": 42,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.440124
+    },
+    {
+      "route": "socks",
+      "index": 43,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.532281
+    },
+    {
+      "route": "socks",
+      "index": 44,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.536805
+    },
+    {
+      "route": "socks",
+      "index": 45,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.540861
+    },
+    {
+      "route": "socks",
+      "index": 46,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.525834
+    },
+    {
+      "route": "socks",
+      "index": 47,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.515263
+    },
+    {
+      "route": "socks",
+      "index": 48,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.507648
+    },
+    {
+      "route": "socks",
+      "index": 49,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.500907
+    },
+    {
+      "route": "socks",
+      "index": 50,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.49552
+    },
+    {
+      "route": "socks",
+      "index": 51,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.491188
+    },
+    {
+      "route": "socks",
+      "index": 52,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.486138
+    },
+    {
+      "route": "socks",
+      "index": 53,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.261414
+    },
+    {
+      "route": "socks",
+      "index": 54,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.252407
+    },
+    {
+      "route": "socks",
+      "index": 55,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.24895
+    },
+    {
+      "route": "socks",
+      "index": 56,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.244087
+    },
+    {
+      "route": "socks",
+      "index": 57,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.239387
+    },
+    {
+      "route": "socks",
+      "index": 58,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.22904
+    },
+    {
+      "route": "socks",
+      "index": 59,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.223833
+    },
+    {
+      "route": "socks",
+      "index": 60,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.22076
+    },
+    {
+      "route": "socks",
+      "index": 61,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.21216
+    },
+    {
+      "route": "socks",
+      "index": 62,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.439643
+    },
+    {
+      "route": "socks",
+      "index": 63,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.435046
+    },
+    {
+      "route": "socks",
+      "index": 64,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.224101
+    },
+    {
+      "route": "socks",
+      "index": 65,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 9.482465
+    },
+    {
+      "route": "socks",
+      "index": 66,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.733784
+    },
+    {
+      "route": "socks",
+      "index": 67,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.802964
+    },
+    {
+      "route": "socks",
+      "index": 68,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.338928
+    },
+    {
+      "route": "socks",
+      "index": 69,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.603204
+    },
+    {
+      "route": "socks",
+      "index": 70,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.798952
+    },
+    {
+      "route": "socks",
+      "index": 71,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.777255
+    },
+    {
+      "route": "socks",
+      "index": 72,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.77266
+    },
+    {
+      "route": "socks",
+      "index": 73,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 7.981582
+    },
+    {
+      "route": "socks",
+      "index": 74,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 10.146005
+    },
+    {
+      "route": "socks",
+      "index": 75,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.958938
+    },
+    {
+      "route": "socks",
+      "index": 76,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.959171
+    },
+    {
+      "route": "socks",
+      "index": 77,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.138922
+    },
+    {
+      "route": "socks",
+      "index": 78,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.147843
+    },
+    {
+      "route": "socks",
+      "index": 79,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.127452
+    },
+    {
+      "route": "socks",
+      "index": 80,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.131637
+    },
+    {
+      "route": "socks",
+      "index": 81,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.123301
+    },
+    {
+      "route": "socks",
+      "index": 82,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.11817
+    },
+    {
+      "route": "socks",
+      "index": 83,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.070357
+    },
+    {
+      "route": "socks",
+      "index": 84,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.727452
+    },
+    {
+      "route": "socks",
+      "index": 85,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.525811
+    },
+    {
+      "route": "socks",
+      "index": 86,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.382941
+    },
+    {
+      "route": "socks",
+      "index": 87,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.7115
+    },
+    {
+      "route": "socks",
+      "index": 88,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.700509
+    },
+    {
+      "route": "socks",
+      "index": 89,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.695154
+    },
+    {
+      "route": "socks",
+      "index": 90,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.698567
+    },
+    {
+      "route": "socks",
+      "index": 91,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.668209
+    },
+    {
+      "route": "socks",
+      "index": 92,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.662771
+    },
+    {
+      "route": "socks",
+      "index": 93,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.651216
+    },
+    {
+      "route": "socks",
+      "index": 94,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.65525
+    },
+    {
+      "route": "socks",
+      "index": 95,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 6.726626
+    },
+    {
+      "route": "socks",
+      "index": 96,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.386762
+    },
+    {
+      "route": "socks",
+      "index": 97,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.823904
+    },
+    {
+      "route": "socks",
+      "index": 98,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.614699
+    },
+    {
+      "route": "socks",
+      "index": 99,
+      "exit": 0,
+      "labels": [],
+      "http": 200,
+      "size": 262144,
+      "seconds": 8.349268
+    }
+  ]
+}

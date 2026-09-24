@@ -144,6 +144,16 @@ draining, плюс один candidate/reconfigure процесс; всего м�
 продукта. Записи вне resident-набора остаются в реестре; при нехватке слотов
 действие получает busy либо ограниченно ожидает, не убивает draining-процесс.
 
+Итог #63: на NC-1913 измерен L=4+1 с рабочим VLESS/TLS и DoH, включая
+1/8/32 streams; ресурсный guard не сработал. При этом зарегистрированы
+два SOCKS/TLS отказа, а latency DoH при 32 streams достигла 7.782 s.
+Этот измеренный envelope не становится автоматически product budget;
+#81/#117 должны проверить исправленный runtime и пределы контрольного
+трафика до admission. Диагностика #63 воспроизвела upstream idle-cleanup race:
+нулевой last-write timestamp вызывает закрытие нового handshake минутным
+таймером. Source patch подготовлен в отчёте; исправленный бинарник ещё
+не квалифицирован. Завершение runtime-исследования не закрывает G2.
+
 Адаптер формирует JSON из закрытой typed schema: запрещены пустой proxy,
 direct, неподтверждённые chains/carriers, произвольные listen и опции,
 отключающие TLS verification. Candidate config хранится в owned каталоге
@@ -178,6 +188,11 @@ VPN и каждой пары переходов подтверждается о�
 bundle с источником/digest/лицензией и owned пустой каталог CA. Адаптер задаёт
 обе переменные `SSL_CERT_FILE` и `SSL_CERT_DIR` только дочернему процессу;
 одна переменная или пустая строка не доказывает изоляции системных defaults.
+Обе переменные ограничивают дополнительные Unix roots, но не встроенный
+Chrome Root Store: [runtime-проверка #63](../research/naiveproxy-runtime-spike.md)
+подтвердила его участие у выбранного ELF. Полный trust set включает roots
+binary revision; только file/directory не реализуют доверие исключительно
+к переданному bundle. Это учитывается в проверках и обновлении trust policy.
 Custom CA принимается явно, без отключения hostname/chain verification.
 Общий trust store не меняется. Binary/config/CA revisions входят в backup
 и rollback; отсутствие trust bundle блокирует start/admission.
@@ -200,6 +215,15 @@ UDP guard, DNS и endpoint exclusions; успех одного шага не я�
 Keenetic RCI, DNS и firewall не считаются общей атомарной БД. Атомарность
 означает отсутствие промежуточного разрешающего обхода: при невозможности
 единого переключения используется закрывающий guard с readback.
+
+Runtime-наблюдение [#63 от 24.09.2026](../research/naiveproxy-runtime-spike.md):
+создание Proxy через RCI на NC-1913 удалило временные guard chains при NDM
+rebuild. Поэтому guard в пересоздаваемом ruleset не считается независимым
+закрывающим механизмом. В bounded опыте source policy с unreachable route
+сохранила запрет во время rebuild; guard восстановлен и прочитан до открытия
+TCP route. #78 должен проверить эту последовательность для всех своих
+RCI/NDM событий и recovery; временный prototype не является реализацией
+общего координатора или доказательством graceful переходов.
 
 1. Prepare: baseline/intent/rollback, проверка ownership/revisions и ресурсов;
    разрешённый bootstrap получает адреса endpoint. Узкие WAN exclusions

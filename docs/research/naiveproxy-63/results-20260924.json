@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "date": "2026-09-24",
+  "scope": "isolated test-LAN client through Keenetic Proxy and Naive to an upstream-LAN HTTPS CONNECT fixture over physical WAN",
+  "external_server_control": "unavailable and accepted by user; not tested",
+  "external_profile_probe": {
+    "curl_exit": 28,
+    "http": 0,
+    "captured_syn_ack": 0,
+    "captured_tcp_syn": 26
+  },
+  "controlled_path": {
+    "route_withdrawal_curl_exit": 7,
+    "nonce_server_match": true,
+    "runtime_restore_http": 200,
+    "runtime_pause_http": 0,
+    "route_restore_http": 200,
+    "h2": true,
+    "https_status": 200,
+    "forward_udp_drop_packets": 10,
+    "doh_status": 200,
+    "router_input_udp_drop_packets": 1,
+    "runtime_pause_curl_exit": 28
+  },
+  "controlled_capture": {
+    "wan_udp": 0,
+    "wan_direct_target_tcp": 0,
+    "lan_testnet_udp": 12,
+    "wan_tcp": 316,
+    "wan_ipv4": 316,
+    "lan_udp": 14
+  },
+  "ndm_rebuild": {
+    "fixture_failure": "late DATA on closed upstream aborted shared h2 session; fixed within disposable fixture",
+    "safe_sequence": "quiesce source table to unreachable; recreate owned Proxy; restore guards; readback; commit source route",
+    "post_recreate_initial_fixture_probe_failed": true,
+    "during_recreate": {
+      "udp_sent": 90,
+      "udp_error": 0,
+      "tcp_connected": 0,
+      "tcp_blocked": 30
+    },
+    "final_doh_http": 200,
+    "final_positive_baseline": 200,
+    "final_server_nonce_match": true,
+    "guard_removed_by_proxy_create": true,
+    "naive_proxy_status_not_readiness": true
+  },
+  "transaction_capture": {
+    "wan_fixture_tcp_out": 75,
+    "wan_udp": 0,
+    "lan_ipv4": 212,
+    "wan_direct_target_tcp": 0,
+    "lan_udp": 90,
+    "wan_tcp": 139,
+    "wan_ipv4": 139,
+    "lan_testnet_udp": 90,
+    "wan_fixture_tcp_in": 64,
+    "lan_tcp": 120
+  },
+  "readback": {
+    "pi_host_routes_equal": true,
+    "proxy63_absent": true,
+    "running_config_commands_equal": true,
+    "running_config_comment_changed": true,
+    "proxy21_preserved": true,
+    "pi_ip_forward_equal": true,
+    "firewall_tables": {
+      "mangle": {
+        "chains": 27,
+        "rules": 34
+      },
+      "nat": {
+        "chains": 21,
+        "rules": 35
+      },
+      "filter": {
+        "chains": 34,
+        "rules": 111
+      }
+    },
+    "routes_equal": true,
+    "rules_equal": true,
+    "firewall_canonical_equal": true
+  },
+  "limits": [
+    "Controlled upstream-LAN fixture, not public internet server",
+    "Per-test-client DoH, not production DNS integration",
+    "No new resource benchmark; previous 24 failures remain unattributed",
+    "No full crash/reboot/NDM-event matrix",
+    "Prototype, not production coordinator implementation"
+  ],
+  "capture_scope": "Filtered physical WAN: fixture TCP, TEST-NET UDP, benchmark target; not all WAN traffic",
+  "capture_snaplen": 96,
+  "cleanup": {
+    "windows_network_settings_changed": false,
+    "docker_resources_created": false,
+    "pi_namespace_removed": true,
+    "router_files_removed": true,
+    "pi_fixture_listeners_removed": true,
+    "pi_files_removed": true
+  }
+}
