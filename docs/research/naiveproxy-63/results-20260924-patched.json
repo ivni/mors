@@ -1,0 +1,5299 @@
+{
+  "schema": 1,
+  "date": "2026-09-24",
+  "build": {
+    "upstream_commit": "3ba967e2d36cc133a896e81a36257ad4c6ea20f4",
+    "mors_commit": "d0074127e3aac4e1c89945a03041d6720ff50739",
+    "run_id": "36016911546",
+    "target": "openwrt-mipsel_24kc-static",
+    "openwrt": "24.10.0",
+    "gcc": "13.3.0",
+    "parallel_jobs": 2,
+    "sha256": {
+      "LICENSE": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308",
+      "naive": "06b41b41473d24bcd0716e6c37dd39e6b765fa3389de8646e910f7e92b0725d9",
+      "args.gn": "5693b757321ec1d23fda5ca6eed55a518e2061d0fd13d6b2889b5eaac017a08c",
+      "clang-revision.txt": "38992a784aa4df47f4d55cf1175316642e2ba39aed39ac01caa6a552fea818ea",
+      "idle-handshake-created-at.patch": "01b7d7d4356ce8d6b9d5367c1322d919f96201a8fd99d96b9a896a943d0c935f",
+      "elf.txt": "3426e0f8588cf8d7ed48830d6cecd048ca60b1a258321580cb821f8827db328e"
+    }
+  },
+  "build_url": "https://github.com/ivni/mors/actions/runs/36016911546",
+  "qa_url": "https://github.com/ivni/mors/actions/runs/36018042214",
+  "baseline_elf_sha256": "25531478648e9b586af7f85f5188e20151cc0a0f77940a2926d86658d5eaef95",
+  "handshake": [
+    {
+      "index": 0,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265174.601603,
+      "outcome": "authenticated",
+      "elapsed": 10.00617456343025
+    },
+    {
+      "index": 0,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265174.6025264,
+      "outcome": "authenticated",
+      "elapsed": 10.004605663008988
+    },
+    {
+      "index": 1,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265179.6029792,
+      "outcome": "authenticated",
+      "elapsed": 10.00448729749769
+    },
+    {
+      "index": 1,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265179.6037953,
+      "outcome": "authenticated",
+      "elapsed": 10.004216153174639
+    },
+    {
+      "index": 2,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265184.6047528,
+      "outcome": "authenticated",
+      "elapsed": 10.00613090209663
+    },
+    {
+      "index": 2,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265184.605428,
+      "outcome": "authenticated",
+      "elapsed": 10.00368601642549
+    },
+    {
+      "index": 3,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265189.606077,
+      "outcome": "authenticated",
+      "elapsed": 10.005984984338284
+    },
+    {
+      "index": 3,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265189.6065278,
+      "outcome": "authenticated",
+      "elapsed": 10.004949416033924
+    },
+    {
+      "index": 4,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265194.6072233,
+      "outcome": "authenticated",
+      "elapsed": 10.00440959353
+    },
+    {
+      "index": 4,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265194.6078436,
+      "outcome": "authenticated",
+      "elapsed": 10.003567045554519
+    },
+    {
+      "index": 5,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265199.6082144,
+      "outcome": "authenticated",
+      "elapsed": 10.004417008720338
+    },
+    {
+      "index": 5,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265199.6086829,
+      "outcome": "authenticated",
+      "elapsed": 10.003576387651265
+    },
+    {
+      "index": 6,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265204.6091604,
+      "outcome": "authenticated",
+      "elapsed": 10.005391348153353
+    },
+    {
+      "index": 6,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265204.6096323,
+      "outcome": "authenticated",
+      "elapsed": 10.00458556972444
+    },
+    {
+      "index": 7,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265209.6100776,
+      "outcome": "authenticated",
+      "elapsed": 10.0047752764076
+    },
+    {
+      "index": 7,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265209.6105304,
+      "outcome": "authenticated",
+      "elapsed": 10.005151942372322
+    },
+    {
+      "index": 8,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265214.6110098,
+      "outcome": "authenticated",
+      "elapsed": 10.007092215120792
+    },
+    {
+      "index": 8,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265214.611499,
+      "outcome": "authenticated",
+      "elapsed": 10.007483567111194
+    },
+    {
+      "index": 9,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265219.6119652,
+      "outcome": "authenticated",
+      "elapsed": 10.005248233675957
+    },
+    {
+      "index": 9,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265219.612372,
+      "outcome": "authenticated",
+      "elapsed": 10.004511152394116
+    },
+    {
+      "index": 10,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265224.6128888,
+      "outcome": "closed",
+      "elapsed": 10.006538925692439
+    },
+    {
+      "index": 10,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265224.6133204,
+      "outcome": "authenticated",
+      "elapsed": 10.007947720587254
+    },
+    {
+      "index": 11,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265229.6137471,
+      "outcome": "closed",
+      "elapsed": 10.003649793565273
+    },
+    {
+      "index": 11,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265229.6141806,
+      "outcome": "authenticated",
+      "elapsed": 10.004629788920283
+    },
+    {
+      "index": 12,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265234.614608,
+      "outcome": "authenticated",
+      "elapsed": 10.004356165416539
+    },
+    {
+      "index": 12,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265234.615134,
+      "outcome": "authenticated",
+      "elapsed": 10.00348757673055
+    },
+    {
+      "index": 13,
+      "label": "default",
+      "hold_seconds": 10,
+      "started": 1790265239.6156895,
+      "outcome": "authenticated",
+      "elapsed": 10.00441686436534
+    },
+    {
+      "index": 13,
+      "label": "control",
+      "hold_seconds": 10,
+      "started": 1790265239.6162276,
+      "outcome": "authenticated",
+      "elapsed": 10.00439946912229
+    }
+  ],
+  "genuine_idle_timeout": {
+    "greeting_ok": true,
+    "configured_idle_seconds": 5,
+    "closed": true,
+    "elapsed": 58.878371849656105
+  },
+  "udp_capability": {
+    "udp_associate_unsupported": true,
+    "reply_code": 7
+  },
+  "workload": {
+    "phases": [
+      {
+        "name": "idle",
+        "concurrency": 0,
+        "started": 1790265384.1162221,
+        "traffic": {
+          "naive": {
+            "ok": 0,
+            "failed": 0,
+            "latency_max": 0.0
+          },
+          "xray": {
+            "ok": 0,
+            "failed": 0,
+            "latency_max": 0.0
+          },
+          "dns": {
+            "ok": 0,
+            "failed": 0,
+            "latency_max": 0.0
+          },
+          "standby": {
+            "ok": 0,
+            "failed": 0,
+            "latency_max": 0.0
+          }
+        },
+        "ended": 1790265684.1180992
+      },
+      {
+        "name": "load1",
+        "concurrency": 1,
+        "started": 1790265684.1193879,
+        "traffic": {
+          "naive": {
+            "ok": 72,
+            "failed": 0,
+            "latency_max": 4.000499
+          },
+          "xray": {
+            "ok": 71,
+            "failed": 0,
+            "latency_max": 4.000602
+          },
+          "dns": {
+            "ok": 141,
+            "failed": 0,
+            "latency_max": 0.593531
+          },
+          "standby": {
+            "ok": 16,
+            "failed": 0,
+            "latency_max": 3.998662
+          }
+        },
+        "ended": 1790265988.1229088
+      },
+      {
+        "name": "load8",
+        "concurrency": 8,
+        "started": 1790265988.1244278,
+        "traffic": {
+          "naive": {
+            "ok": 571,
+            "failed": 0,
+            "latency_max": 4.012083
+          },
+          "xray": {
+            "ok": 72,
+            "failed": 0,
+            "latency_max": 4.000447
+          },
+          "dns": {
+            "ok": 122,
+            "failed": 0,
+            "latency_max": 1.691431
+          },
+          "standby": {
+            "ok": 16,
+            "failed": 0,
+            "latency_max": 3.99769
+          }
+        },
+        "ended": 1790266292.960651
+      },
+      {
+        "name": "load32",
+        "concurrency": 32,
+        "started": 1790266292.9623332,
+        "traffic": {
+          "naive": {
+            "ok": 1105,
+            "failed": 0,
+            "latency_max": 10.709663
+          },
+          "xray": {
+            "ok": 71,
+            "failed": 0,
+            "latency_max": 4.000531
+          },
+          "dns": {
+            "ok": 29,
+            "failed": 0,
+            "latency_max": 9.325319
+          },
+          "standby": {
+            "ok": 16,
+            "failed": 0,
+            "latency_max": 3.999767
+          }
+        },
+        "ended": 1790266600.771815
+      }
+    ],
+    "errors": []
+  },
+  "resource_aggregates": {
+    "idle": {
+      "samples": 28,
+      "naive_rss_sum_max_kb": 38504,
+      "xray_rss_max_kb": 29556,
+      "naive_fd_max": 10,
+      "pool_fd_max": 52,
+      "memavailable_min_kb": 161228,
+      "pool_cpu_peak_percent_machine_capacity": 0.12
+    },
+    "load1": {
+      "samples": 28,
+      "naive_rss_sum_max_kb": 39584,
+      "xray_rss_max_kb": 32104,
+      "naive_fd_max": 12,
+      "pool_fd_max": 56,
+      "memavailable_min_kb": 157504,
+      "pool_cpu_peak_percent_machine_capacity": 6.71
+    },
+    "load8": {
+      "samples": 28,
+      "naive_rss_sum_max_kb": 40192,
+      "xray_rss_max_kb": 32532,
+      "naive_fd_max": 19,
+      "pool_fd_max": 63,
+      "memavailable_min_kb": 155432,
+      "pool_cpu_peak_percent_machine_capacity": 21.6
+    },
+    "load32": {
+      "samples": 28,
+      "naive_rss_sum_max_kb": 51720,
+      "xray_rss_max_kb": 32624,
+      "naive_fd_max": 43,
+      "pool_fd_max": 86,
+      "memavailable_min_kb": 142808,
+      "pool_cpu_peak_percent_machine_capacity": 32.84
+    }
+  },
+  "resource_samples": [
+    {
+      "router_time": 1790265372,
+      "estimated_pi_time": 1790265379,
+      "available_kb": 163192,
+      "machine_ticks": 1619376666,
+      "engines": {
+        "client0": {
+          "rss_kb": 6728,
+          "fd": 9,
+          "cpu_ticks": 20
+        },
+        "client1": {
+          "rss_kb": 6500,
+          "fd": 8,
+          "cpu_ticks": 18
+        },
+        "client2": {
+          "rss_kb": 6500,
+          "fd": 8,
+          "cpu_ticks": 16
+        },
+        "client3": {
+          "rss_kb": 6496,
+          "fd": 8,
+          "cpu_ticks": 17
+        },
+        "client4": {
+          "rss_kb": 6500,
+          "fd": 8,
+          "cpu_ticks": 16
+        },
+        "xray": {
+          "rss_kb": 25860,
+          "fd": 6,
+          "cpu_ticks": 82
+        }
+      }
+    },
+    {
+      "router_time": 1790265382,
+      "estimated_pi_time": 1790265389,
+      "available_kb": 161496,
+      "machine_ticks": 1619380736,
+      "engines": {
+        "client0": {
+          "rss_kb": 7804,
+          "fd": 10,
+          "cpu_ticks": 65
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 47
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 128
+        }
+      }
+    },
+    {
+      "router_time": 1790265392,
+      "estimated_pi_time": 1790265399,
+      "available_kb": 161440,
+      "machine_ticks": 1619384807,
+      "engines": {
+        "client0": {
+          "rss_kb": 7804,
+          "fd": 10,
+          "cpu_ticks": 65
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 47
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 128
+        }
+      }
+    },
+    {
+      "router_time": 1790265402,
+      "estimated_pi_time": 1790265409,
+      "available_kb": 161388,
+      "machine_ticks": 1619388877,
+      "engines": {
+        "client0": {
+          "rss_kb": 7804,
+          "fd": 10,
+          "cpu_ticks": 65
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 47
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 130
+        }
+      }
+    },
+    {
+      "router_time": 1790265413,
+      "estimated_pi_time": 1790265420,
+      "available_kb": 161480,
+      "machine_ticks": 1619392950,
+      "engines": {
+        "client0": {
+          "rss_kb": 7804,
+          "fd": 10,
+          "cpu_ticks": 65
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 47
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 130
+        }
+      }
+    },
+    {
+      "router_time": 1790265423,
+      "estimated_pi_time": 1790265430,
+      "available_kb": 161452,
+      "machine_ticks": 1619397019,
+      "engines": {
+        "client0": {
+          "rss_kb": 7804,
+          "fd": 10,
+          "cpu_ticks": 65
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 47
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 9,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 130
+        }
+      }
+    },
+    {
+      "router_time": 1790265433,
+      "estimated_pi_time": 1790265440,
+      "available_kb": 161476,
+      "machine_ticks": 1619401091,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 131
+        }
+      }
+    },
+    {
+      "router_time": 1790265443,
+      "estimated_pi_time": 1790265450,
+      "available_kb": 161432,
+      "machine_ticks": 1619405161,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 131
+        }
+      }
+    },
+    {
+      "router_time": 1790265453,
+      "estimated_pi_time": 1790265460,
+      "available_kb": 161504,
+      "machine_ticks": 1619409231,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 131
+        }
+      }
+    },
+    {
+      "router_time": 1790265464,
+      "estimated_pi_time": 1790265471,
+      "available_kb": 161496,
+      "machine_ticks": 1619413302,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 131
+        }
+      }
+    },
+    {
+      "router_time": 1790265474,
+      "estimated_pi_time": 1790265481,
+      "available_kb": 161296,
+      "machine_ticks": 1619417370,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 131
+        }
+      }
+    },
+    {
+      "router_time": 1790265484,
+      "estimated_pi_time": 1790265491,
+      "available_kb": 161348,
+      "machine_ticks": 1619421440,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 131
+        }
+      }
+    },
+    {
+      "router_time": 1790265494,
+      "estimated_pi_time": 1790265501,
+      "available_kb": 161312,
+      "machine_ticks": 1619425510,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 28608,
+          "fd": 6,
+          "cpu_ticks": 132
+        }
+      }
+    },
+    {
+      "router_time": 1790265504,
+      "estimated_pi_time": 1790265511,
+      "available_kb": 161364,
+      "machine_ticks": 1619429582,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 136
+        }
+      }
+    },
+    {
+      "router_time": 1790265514,
+      "estimated_pi_time": 1790265521,
+      "available_kb": 161380,
+      "machine_ticks": 1619433651,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 136
+        }
+      }
+    },
+    {
+      "router_time": 1790265525,
+      "estimated_pi_time": 1790265532,
+      "available_kb": 161352,
+      "machine_ticks": 1619437723,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 137
+        }
+      }
+    },
+    {
+      "router_time": 1790265535,
+      "estimated_pi_time": 1790265542,
+      "available_kb": 161284,
+      "machine_ticks": 1619441792,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 137
+        }
+      }
+    },
+    {
+      "router_time": 1790265545,
+      "estimated_pi_time": 1790265552,
+      "available_kb": 161292,
+      "machine_ticks": 1619445863,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 137
+        }
+      }
+    },
+    {
+      "router_time": 1790265555,
+      "estimated_pi_time": 1790265562,
+      "available_kb": 161284,
+      "machine_ticks": 1619449933,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 138
+        }
+      }
+    },
+    {
+      "router_time": 1790265565,
+      "estimated_pi_time": 1790265572,
+      "available_kb": 161284,
+      "machine_ticks": 1619454004,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 138
+        }
+      }
+    },
+    {
+      "router_time": 1790265575,
+      "estimated_pi_time": 1790265582,
+      "available_kb": 161396,
+      "machine_ticks": 1619458075,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 138
+        }
+      }
+    },
+    {
+      "router_time": 1790265586,
+      "estimated_pi_time": 1790265593,
+      "available_kb": 161296,
+      "machine_ticks": 1619462144,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 139
+        }
+      }
+    },
+    {
+      "router_time": 1790265596,
+      "estimated_pi_time": 1790265603,
+      "available_kb": 161288,
+      "machine_ticks": 1619466215,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 139
+        }
+      }
+    },
+    {
+      "router_time": 1790265606,
+      "estimated_pi_time": 1790265613,
+      "available_kb": 161228,
+      "machine_ticks": 1619470286,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 139
+        }
+      }
+    },
+    {
+      "router_time": 1790265616,
+      "estimated_pi_time": 1790265623,
+      "available_kb": 161284,
+      "machine_ticks": 1619474354,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 140
+        }
+      }
+    },
+    {
+      "router_time": 1790265626,
+      "estimated_pi_time": 1790265633,
+      "available_kb": 161320,
+      "machine_ticks": 1619478426,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 140
+        }
+      }
+    },
+    {
+      "router_time": 1790265637,
+      "estimated_pi_time": 1790265644,
+      "available_kb": 161404,
+      "machine_ticks": 1619482497,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29136,
+          "fd": 6,
+          "cpu_ticks": 140
+        }
+      }
+    },
+    {
+      "router_time": 1790265647,
+      "estimated_pi_time": 1790265654,
+      "available_kb": 161268,
+      "machine_ticks": 1619486567,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29556,
+          "fd": 6,
+          "cpu_ticks": 145
+        }
+      }
+    },
+    {
+      "router_time": 1790265657,
+      "estimated_pi_time": 1790265664,
+      "available_kb": 161468,
+      "machine_ticks": 1619490636,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29556,
+          "fd": 6,
+          "cpu_ticks": 145
+        }
+      }
+    },
+    {
+      "router_time": 1790265667,
+      "estimated_pi_time": 1790265674,
+      "available_kb": 161720,
+      "machine_ticks": 1619494708,
+      "engines": {
+        "client0": {
+          "rss_kb": 7928,
+          "fd": 9,
+          "cpu_ticks": 66
+        },
+        "client1": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 49
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29556,
+          "fd": 6,
+          "cpu_ticks": 145
+        }
+      }
+    },
+    {
+      "router_time": 1790265677,
+      "estimated_pi_time": 1790265684,
+      "available_kb": 160800,
+      "machine_ticks": 1619498783,
+      "engines": {
+        "client0": {
+          "rss_kb": 8056,
+          "fd": 12,
+          "cpu_ticks": 105
+        },
+        "client1": {
+          "rss_kb": 7912,
+          "fd": 10,
+          "cpu_ticks": 85
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29556,
+          "fd": 8,
+          "cpu_ticks": 186
+        }
+      }
+    },
+    {
+      "router_time": 1790265688,
+      "estimated_pi_time": 1790265695,
+      "available_kb": 160800,
+      "machine_ticks": 1619502882,
+      "engines": {
+        "client0": {
+          "rss_kb": 8080,
+          "fd": 11,
+          "cpu_ticks": 237
+        },
+        "client1": {
+          "rss_kb": 7840,
+          "fd": 9,
+          "cpu_ticks": 94
+        },
+        "client2": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 47
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29820,
+          "fd": 8,
+          "cpu_ticks": 241
+        }
+      }
+    },
+    {
+      "router_time": 1790265698,
+      "estimated_pi_time": 1790265705,
+      "available_kb": 160236,
+      "machine_ticks": 1619506953,
+      "engines": {
+        "client0": {
+          "rss_kb": 8028,
+          "fd": 10,
+          "cpu_ticks": 334
+        },
+        "client1": {
+          "rss_kb": 7840,
+          "fd": 9,
+          "cpu_ticks": 94
+        },
+        "client2": {
+          "rss_kb": 7928,
+          "fd": 10,
+          "cpu_ticks": 78
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 29820,
+          "fd": 8,
+          "cpu_ticks": 287
+        }
+      }
+    },
+    {
+      "router_time": 1790265708,
+      "estimated_pi_time": 1790265715,
+      "available_kb": 159956,
+      "machine_ticks": 1619511025,
+      "engines": {
+        "client0": {
+          "rss_kb": 8100,
+          "fd": 11,
+          "cpu_ticks": 462
+        },
+        "client1": {
+          "rss_kb": 7840,
+          "fd": 9,
+          "cpu_ticks": 94
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 9,
+          "cpu_ticks": 78
+        },
+        "client3": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 30284,
+          "fd": 8,
+          "cpu_ticks": 361
+        }
+      }
+    },
+    {
+      "router_time": 1790265718,
+      "estimated_pi_time": 1790265725,
+      "available_kb": 159504,
+      "machine_ticks": 1619515095,
+      "engines": {
+        "client0": {
+          "rss_kb": 8096,
+          "fd": 11,
+          "cpu_ticks": 558
+        },
+        "client1": {
+          "rss_kb": 7840,
+          "fd": 9,
+          "cpu_ticks": 94
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 9,
+          "cpu_ticks": 78
+        },
+        "client3": {
+          "rss_kb": 7924,
+          "fd": 10,
+          "cpu_ticks": 82
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 30536,
+          "fd": 8,
+          "cpu_ticks": 417
+        }
+      }
+    },
+    {
+      "router_time": 1790265728,
+      "estimated_pi_time": 1790265735,
+      "available_kb": 158920,
+      "machine_ticks": 1619519176,
+      "engines": {
+        "client0": {
+          "rss_kb": 8140,
+          "fd": 11,
+          "cpu_ticks": 695
+        },
+        "client1": {
+          "rss_kb": 7840,
+          "fd": 9,
+          "cpu_ticks": 94
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 9,
+          "cpu_ticks": 78
+        },
+        "client3": {
+          "rss_kb": 7844,
+          "fd": 9,
+          "cpu_ticks": 82
+        },
+        "client4": {
+          "rss_kb": 7644,
+          "fd": 8,
+          "cpu_ticks": 48
+        },
+        "xray": {
+          "rss_kb": 31096,
+          "fd": 8,
+          "cpu_ticks": 520
+        }
+      }
+    },
+    {
+      "router_time": 1790265738,
+      "estimated_pi_time": 1790265745,
+      "available_kb": 158788,
+      "machine_ticks": 1619523259,
+      "engines": {
+        "client0": {
+          "rss_kb": 8080,
+          "fd": 11,
+          "cpu_ticks": 808
+        },
+        "client1": {
+          "rss_kb": 7836,
+          "fd": 8,
+          "cpu_ticks": 94
+        },
+        "client2": {
+          "rss_kb": 7844,
+          "fd": 8,
+          "cpu_ticks": 78
+        },
+        "client3": {
+          "rss_kb": 7840,
+          "fd": 8,
+          "cpu_ticks": 82
+        },
+        "client4": {
+          "rss_kb": 7844,
+          "fd": 9,
+          "cpu_ticks": 79
+        },
+        "xray": {
+          "rss_kb": 31096,
+          "fd": 8,
+          "cpu_ticks": 576
+        }
+      }
+    },
+    {
+      "router_time": 1790265749,
+      "estimated_pi_time": 1790265756,
+      "available_kb": 158620,
+      "machine_ticks": 1619527332,
+      "engines": {
+        "client0": {
+          "rss_kb": 8000,
+          "fd": 10,
+          "cpu_ticks": 911
+        },
+        "client1": {
+          "rss_kb": 7836,
+          "fd": 8,
+          "cpu_ticks": 94
+        },
+        "client2": {
+          "rss_kb": 7844,
+          "fd": 8,
+          "cpu_ticks": 78
+        },
+        "client3": {
+          "rss_kb": 7840,
+          "fd": 8,
+          "cpu_ticks": 82
+        },
+        "client4": {
+          "rss_kb": 7844,
+          "fd": 9,
+          "cpu_ticks": 79
+        },
+        "xray": {
+          "rss_kb": 31096,
+          "fd": 6,
+          "cpu_ticks": 629
+        }
+      }
+    },
+    {
+      "router_time": 1790265759,
+      "estimated_pi_time": 1790265766,
+      "available_kb": 158384,
+      "machine_ticks": 1619531404,
+      "engines": {
+        "client0": {
+          "rss_kb": 8088,
+          "fd": 11,
+          "cpu_ticks": 1053
+        },
+        "client1": {
+          "rss_kb": 7800,
+          "fd": 9,
+          "cpu_ticks": 127
+        },
+        "client2": {
+          "rss_kb": 7844,
+          "fd": 8,
+          "cpu_ticks": 78
+        },
+        "client3": {
+          "rss_kb": 7840,
+          "fd": 8,
+          "cpu_ticks": 82
+        },
+        "client4": {
+          "rss_kb": 7844,
+          "fd": 9,
+          "cpu_ticks": 79
+        },
+        "xray": {
+          "rss_kb": 31096,
+          "fd": 8,
+          "cpu_ticks": 715
+        }
+      }
+    },
+    {
+      "router_time": 1790265769,
+      "estimated_pi_time": 1790265776,
+      "available_kb": 158740,
+      "machine_ticks": 1619535472,
+      "engines": {
+        "client0": {
+          "rss_kb": 8132,
+          "fd": 11,
+          "cpu_ticks": 1143
+        },
+        "client1": {
+          "rss_kb": 7800,
+          "fd": 9,
+          "cpu_ticks": 127
+        },
+        "client2": {
+          "rss_kb": 7844,
+          "fd": 8,
+          "cpu_ticks": 78
+        },
+        "client3": {
+          "rss_kb": 7840,
+          "fd": 8,
+          "cpu_ticks": 82
+        },
+        "client4": {
+          "rss_kb": 7844,
+          "fd": 9,
+          "cpu_ticks": 79
+        },
+        "xray": {
+          "rss_kb": 31336,
+          "fd": 8,
+          "cpu_ticks": 761
+        }
+      }
+    },
+    {
+      "router_time": 1790265779,
+      "estimated_pi_time": 1790265786,
+      "available_kb": 158264,
+      "machine_ticks": 1619539549,
+      "engines": {
+        "client0": {
+          "rss_kb": 8096,
+          "fd": 11,
+          "cpu_ticks": 1283
+        },
+        "client1": {
+          "rss_kb": 7800,
+          "fd": 9,
+          "cpu_ticks": 127
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 111
+        },
+        "client3": {
+          "rss_kb": 7840,
+          "fd": 8,
+          "cpu_ticks": 82
+        },
+        "client4": {
+          "rss_kb": 7844,
+          "fd": 9,
+          "cpu_ticks": 79
+        },
+        "xray": {
+          "rss_kb": 31592,
+          "fd": 8,
+          "cpu_ticks": 837
+        }
+      }
+    },
+    {
+      "router_time": 1790265789,
+      "estimated_pi_time": 1790265796,
+      "available_kb": 158336,
+      "machine_ticks": 1619543623,
+      "engines": {
+        "client0": {
+          "rss_kb": 8068,
+          "fd": 11,
+          "cpu_ticks": 1382
+        },
+        "client1": {
+          "rss_kb": 7800,
+          "fd": 9,
+          "cpu_ticks": 127
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 111
+        },
+        "client3": {
+          "rss_kb": 7840,
+          "fd": 8,
+          "cpu_ticks": 82
+        },
+        "client4": {
+          "rss_kb": 7844,
+          "fd": 9,
+          "cpu_ticks": 79
+        },
+        "xray": {
+          "rss_kb": 31592,
+          "fd": 8,
+          "cpu_ticks": 895
+        }
+      }
+    },
+    {
+      "router_time": 1790265800,
+      "estimated_pi_time": 1790265807,
+      "available_kb": 157908,
+      "machine_ticks": 1619547694,
+      "engines": {
+        "client0": {
+          "rss_kb": 8140,
+          "fd": 11,
+          "cpu_ticks": 1529
+        },
+        "client1": {
+          "rss_kb": 7796,
+          "fd": 8,
+          "cpu_ticks": 127
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 111
+        },
+        "client3": {
+          "rss_kb": 7808,
+          "fd": 9,
+          "cpu_ticks": 119
+        },
+        "client4": {
+          "rss_kb": 7840,
+          "fd": 8,
+          "cpu_ticks": 80
+        },
+        "xray": {
+          "rss_kb": 31592,
+          "fd": 8,
+          "cpu_ticks": 983
+        }
+      }
+    },
+    {
+      "router_time": 1790265810,
+      "estimated_pi_time": 1790265817,
+      "available_kb": 158116,
+      "machine_ticks": 1619551766,
+      "engines": {
+        "client0": {
+          "rss_kb": 8164,
+          "fd": 11,
+          "cpu_ticks": 1623
+        },
+        "client1": {
+          "rss_kb": 7796,
+          "fd": 8,
+          "cpu_ticks": 127
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 111
+        },
+        "client3": {
+          "rss_kb": 7808,
+          "fd": 9,
+          "cpu_ticks": 119
+        },
+        "client4": {
+          "rss_kb": 7852,
+          "fd": 10,
+          "cpu_ticks": 94
+        },
+        "xray": {
+          "rss_kb": 31592,
+          "fd": 8,
+          "cpu_ticks": 1038
+        }
+      }
+    },
+    {
+      "router_time": 1790265820,
+      "estimated_pi_time": 1790265827,
+      "available_kb": 158252,
+      "machine_ticks": 1619555853,
+      "engines": {
+        "client0": {
+          "rss_kb": 8020,
+          "fd": 10,
+          "cpu_ticks": 1730
+        },
+        "client1": {
+          "rss_kb": 7796,
+          "fd": 8,
+          "cpu_ticks": 127
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 111
+        },
+        "client3": {
+          "rss_kb": 7808,
+          "fd": 9,
+          "cpu_ticks": 119
+        },
+        "client4": {
+          "rss_kb": 7848,
+          "fd": 9,
+          "cpu_ticks": 117
+        },
+        "xray": {
+          "rss_kb": 31592,
+          "fd": 8,
+          "cpu_ticks": 1122
+        }
+      }
+    },
+    {
+      "router_time": 1790265830,
+      "estimated_pi_time": 1790265837,
+      "available_kb": 158292,
+      "machine_ticks": 1619559953,
+      "engines": {
+        "client0": {
+          "rss_kb": 8064,
+          "fd": 11,
+          "cpu_ticks": 1868
+        },
+        "client1": {
+          "rss_kb": 7868,
+          "fd": 10,
+          "cpu_ticks": 162
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 111
+        },
+        "client3": {
+          "rss_kb": 7808,
+          "fd": 9,
+          "cpu_ticks": 119
+        },
+        "client4": {
+          "rss_kb": 7848,
+          "fd": 9,
+          "cpu_ticks": 117
+        },
+        "xray": {
+          "rss_kb": 31848,
+          "fd": 8,
+          "cpu_ticks": 1185
+        }
+      }
+    },
+    {
+      "router_time": 1790265840,
+      "estimated_pi_time": 1790265847,
+      "available_kb": 158140,
+      "machine_ticks": 1619564023,
+      "engines": {
+        "client0": {
+          "rss_kb": 8100,
+          "fd": 11,
+          "cpu_ticks": 1970
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 162
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 111
+        },
+        "client3": {
+          "rss_kb": 7808,
+          "fd": 9,
+          "cpu_ticks": 119
+        },
+        "client4": {
+          "rss_kb": 7848,
+          "fd": 9,
+          "cpu_ticks": 117
+        },
+        "xray": {
+          "rss_kb": 31848,
+          "fd": 8,
+          "cpu_ticks": 1244
+        }
+      }
+    },
+    {
+      "router_time": 1790265851,
+      "estimated_pi_time": 1790265858,
+      "available_kb": 157504,
+      "machine_ticks": 1619568097,
+      "engines": {
+        "client0": {
+          "rss_kb": 8208,
+          "fd": 11,
+          "cpu_ticks": 2111
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 162
+        },
+        "client2": {
+          "rss_kb": 7908,
+          "fd": 10,
+          "cpu_ticks": 143
+        },
+        "client3": {
+          "rss_kb": 7808,
+          "fd": 9,
+          "cpu_ticks": 119
+        },
+        "client4": {
+          "rss_kb": 7848,
+          "fd": 9,
+          "cpu_ticks": 117
+        },
+        "xray": {
+          "rss_kb": 31848,
+          "fd": 8,
+          "cpu_ticks": 1335
+        }
+      }
+    },
+    {
+      "router_time": 1790265861,
+      "estimated_pi_time": 1790265868,
+      "available_kb": 157968,
+      "machine_ticks": 1619572167,
+      "engines": {
+        "client0": {
+          "rss_kb": 8176,
+          "fd": 11,
+          "cpu_ticks": 2207
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 162
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 144
+        },
+        "client3": {
+          "rss_kb": 7804,
+          "fd": 8,
+          "cpu_ticks": 119
+        },
+        "client4": {
+          "rss_kb": 7844,
+          "fd": 8,
+          "cpu_ticks": 117
+        },
+        "xray": {
+          "rss_kb": 32104,
+          "fd": 8,
+          "cpu_ticks": 1394
+        }
+      }
+    },
+    {
+      "router_time": 1790265871,
+      "estimated_pi_time": 1790265878,
+      "available_kb": 157732,
+      "machine_ticks": 1619576242,
+      "engines": {
+        "client0": {
+          "rss_kb": 8172,
+          "fd": 11,
+          "cpu_ticks": 2340
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 162
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 144
+        },
+        "client3": {
+          "rss_kb": 7856,
+          "fd": 9,
+          "cpu_ticks": 153
+        },
+        "client4": {
+          "rss_kb": 7844,
+          "fd": 8,
+          "cpu_ticks": 117
+        },
+        "xray": {
+          "rss_kb": 32104,
+          "fd": 8,
+          "cpu_ticks": 1472
+        }
+      }
+    },
+    {
+      "router_time": 1790265881,
+      "estimated_pi_time": 1790265888,
+      "available_kb": 157812,
+      "machine_ticks": 1619580331,
+      "engines": {
+        "client0": {
+          "rss_kb": 8092,
+          "fd": 11,
+          "cpu_ticks": 2441
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 162
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 144
+        },
+        "client3": {
+          "rss_kb": 7856,
+          "fd": 9,
+          "cpu_ticks": 153
+        },
+        "client4": {
+          "rss_kb": 7844,
+          "fd": 8,
+          "cpu_ticks": 117
+        },
+        "xray": {
+          "rss_kb": 32104,
+          "fd": 8,
+          "cpu_ticks": 1537
+        }
+      }
+    },
+    {
+      "router_time": 1790265891,
+      "estimated_pi_time": 1790265898,
+      "available_kb": 157900,
+      "machine_ticks": 1619584407,
+      "engines": {
+        "client0": {
+          "rss_kb": 8144,
+          "fd": 11,
+          "cpu_ticks": 2539
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 162
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 144
+        },
+        "client3": {
+          "rss_kb": 7856,
+          "fd": 9,
+          "cpu_ticks": 153
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 149
+        },
+        "xray": {
+          "rss_kb": 32104,
+          "fd": 6,
+          "cpu_ticks": 1588
+        }
+      }
+    },
+    {
+      "router_time": 1790265901,
+      "estimated_pi_time": 1790265908,
+      "available_kb": 157700,
+      "machine_ticks": 1619588478,
+      "engines": {
+        "client0": {
+          "rss_kb": 8220,
+          "fd": 11,
+          "cpu_ticks": 2678
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 162
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 144
+        },
+        "client3": {
+          "rss_kb": 7856,
+          "fd": 9,
+          "cpu_ticks": 153
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 149
+        },
+        "xray": {
+          "rss_kb": 31908,
+          "fd": 8,
+          "cpu_ticks": 1675
+        }
+      }
+    },
+    {
+      "router_time": 1790265912,
+      "estimated_pi_time": 1790265919,
+      "available_kb": 157972,
+      "machine_ticks": 1619592547,
+      "engines": {
+        "client0": {
+          "rss_kb": 8140,
+          "fd": 12,
+          "cpu_ticks": 2782
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 198
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 144
+        },
+        "client3": {
+          "rss_kb": 7852,
+          "fd": 8,
+          "cpu_ticks": 153
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 149
+        },
+        "xray": {
+          "rss_kb": 31908,
+          "fd": 8,
+          "cpu_ticks": 1734
+        }
+      }
+    },
+    {
+      "router_time": 1790265922,
+      "estimated_pi_time": 1790265929,
+      "available_kb": 157544,
+      "machine_ticks": 1619596692,
+      "engines": {
+        "client0": {
+          "rss_kb": 8192,
+          "fd": 11,
+          "cpu_ticks": 2921
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 198
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 144
+        },
+        "client3": {
+          "rss_kb": 7852,
+          "fd": 8,
+          "cpu_ticks": 153
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 149
+        },
+        "xray": {
+          "rss_kb": 31908,
+          "fd": 8,
+          "cpu_ticks": 1816
+        }
+      }
+    },
+    {
+      "router_time": 1790265932,
+      "estimated_pi_time": 1790265939,
+      "available_kb": 157728,
+      "machine_ticks": 1619600769,
+      "engines": {
+        "client0": {
+          "rss_kb": 8116,
+          "fd": 11,
+          "cpu_ticks": 3021
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 198
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 176
+        },
+        "client3": {
+          "rss_kb": 7852,
+          "fd": 8,
+          "cpu_ticks": 153
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 149
+        },
+        "xray": {
+          "rss_kb": 31908,
+          "fd": 8,
+          "cpu_ticks": 1876
+        }
+      }
+    },
+    {
+      "router_time": 1790265942,
+      "estimated_pi_time": 1790265949,
+      "available_kb": 157924,
+      "machine_ticks": 1619604838,
+      "engines": {
+        "client0": {
+          "rss_kb": 8100,
+          "fd": 11,
+          "cpu_ticks": 3119
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 198
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 176
+        },
+        "client3": {
+          "rss_kb": 7852,
+          "fd": 8,
+          "cpu_ticks": 153
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 149
+        },
+        "xray": {
+          "rss_kb": 31908,
+          "fd": 8,
+          "cpu_ticks": 1929
+        }
+      }
+    },
+    {
+      "router_time": 1790265953,
+      "estimated_pi_time": 1790265960,
+      "available_kb": 157832,
+      "machine_ticks": 1619608911,
+      "engines": {
+        "client0": {
+          "rss_kb": 8104,
+          "fd": 11,
+          "cpu_ticks": 3255
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 198
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 176
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 187
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 149
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2008
+        }
+      }
+    },
+    {
+      "router_time": 1790265963,
+      "estimated_pi_time": 1790265970,
+      "available_kb": 157780,
+      "machine_ticks": 1619612981,
+      "engines": {
+        "client0": {
+          "rss_kb": 8080,
+          "fd": 11,
+          "cpu_ticks": 3342
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 198
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 176
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 187
+        },
+        "client4": {
+          "rss_kb": 7904,
+          "fd": 10,
+          "cpu_ticks": 181
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2059
+        }
+      }
+    },
+    {
+      "router_time": 1790265973,
+      "estimated_pi_time": 1790265980,
+      "available_kb": 157672,
+      "machine_ticks": 1619617064,
+      "engines": {
+        "client0": {
+          "rss_kb": 8148,
+          "fd": 11,
+          "cpu_ticks": 3474
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 198
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 176
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 187
+        },
+        "client4": {
+          "rss_kb": 7804,
+          "fd": 8,
+          "cpu_ticks": 181
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2138
+        }
+      }
+    },
+    {
+      "router_time": 1790265983,
+      "estimated_pi_time": 1790265990,
+      "available_kb": 156648,
+      "machine_ticks": 1619621146,
+      "engines": {
+        "client0": {
+          "rss_kb": 8732,
+          "fd": 18,
+          "cpu_ticks": 3786
+        },
+        "client1": {
+          "rss_kb": 7916,
+          "fd": 10,
+          "cpu_ticks": 239
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 176
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 187
+        },
+        "client4": {
+          "rss_kb": 7804,
+          "fd": 8,
+          "cpu_ticks": 181
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2183
+        }
+      }
+    },
+    {
+      "router_time": 1790265993,
+      "estimated_pi_time": 1790266000,
+      "available_kb": 157364,
+      "machine_ticks": 1619625230,
+      "engines": {
+        "client0": {
+          "rss_kb": 8528,
+          "fd": 17,
+          "cpu_ticks": 4386
+        },
+        "client1": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 239
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 176
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 187
+        },
+        "client4": {
+          "rss_kb": 7804,
+          "fd": 8,
+          "cpu_ticks": 181
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2245
+        }
+      }
+    },
+    {
+      "router_time": 1790266004,
+      "estimated_pi_time": 1790266011,
+      "available_kb": 156060,
+      "machine_ticks": 1619629312,
+      "engines": {
+        "client0": {
+          "rss_kb": 8772,
+          "fd": 19,
+          "cpu_ticks": 5134
+        },
+        "client1": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 239
+        },
+        "client2": {
+          "rss_kb": 7932,
+          "fd": 10,
+          "cpu_ticks": 207
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 187
+        },
+        "client4": {
+          "rss_kb": 7804,
+          "fd": 8,
+          "cpu_ticks": 181
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2339
+        }
+      }
+    },
+    {
+      "router_time": 1790266014,
+      "estimated_pi_time": 1790266021,
+      "available_kb": 157076,
+      "machine_ticks": 1619633400,
+      "engines": {
+        "client0": {
+          "rss_kb": 8780,
+          "fd": 18,
+          "cpu_ticks": 5768
+        },
+        "client1": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 239
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 207
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 187
+        },
+        "client4": {
+          "rss_kb": 7804,
+          "fd": 8,
+          "cpu_ticks": 181
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2411
+        }
+      }
+    },
+    {
+      "router_time": 1790266024,
+      "estimated_pi_time": 1790266031,
+      "available_kb": 156068,
+      "machine_ticks": 1619637475,
+      "engines": {
+        "client0": {
+          "rss_kb": 8648,
+          "fd": 18,
+          "cpu_ticks": 6452
+        },
+        "client1": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 239
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 207
+        },
+        "client3": {
+          "rss_kb": 7828,
+          "fd": 9,
+          "cpu_ticks": 230
+        },
+        "client4": {
+          "rss_kb": 7804,
+          "fd": 8,
+          "cpu_ticks": 181
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2511
+        }
+      }
+    },
+    {
+      "router_time": 1790266034,
+      "estimated_pi_time": 1790266041,
+      "available_kb": 156904,
+      "machine_ticks": 1619641563,
+      "engines": {
+        "client0": {
+          "rss_kb": 8700,
+          "fd": 18,
+          "cpu_ticks": 7147
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 239
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 207
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 8,
+          "cpu_ticks": 230
+        },
+        "client4": {
+          "rss_kb": 7804,
+          "fd": 8,
+          "cpu_ticks": 181
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2580
+        }
+      }
+    },
+    {
+      "router_time": 1790266044,
+      "estimated_pi_time": 1790266051,
+      "available_kb": 156484,
+      "machine_ticks": 1619645638,
+      "engines": {
+        "client0": {
+          "rss_kb": 8528,
+          "fd": 17,
+          "cpu_ticks": 7759
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 239
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 207
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 8,
+          "cpu_ticks": 230
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 213
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 6,
+          "cpu_ticks": 2640
+        }
+      }
+    },
+    {
+      "router_time": 1790266055,
+      "estimated_pi_time": 1790266062,
+      "available_kb": 155860,
+      "machine_ticks": 1619649728,
+      "engines": {
+        "client0": {
+          "rss_kb": 8780,
+          "fd": 19,
+          "cpu_ticks": 8497
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 239
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 207
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 8,
+          "cpu_ticks": 230
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 213
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2735
+        }
+      }
+    },
+    {
+      "router_time": 1790266065,
+      "estimated_pi_time": 1790266072,
+      "available_kb": 157452,
+      "machine_ticks": 1619653813,
+      "engines": {
+        "client0": {
+          "rss_kb": 8496,
+          "fd": 16,
+          "cpu_ticks": 9088
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 278
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 207
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 8,
+          "cpu_ticks": 230
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 213
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2812
+        }
+      }
+    },
+    {
+      "router_time": 1790266075,
+      "estimated_pi_time": 1790266082,
+      "available_kb": 155432,
+      "machine_ticks": 1619657891,
+      "engines": {
+        "client0": {
+          "rss_kb": 8688,
+          "fd": 19,
+          "cpu_ticks": 9841
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 278
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 207
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 8,
+          "cpu_ticks": 230
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 213
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2904
+        }
+      }
+    },
+    {
+      "router_time": 1790266085,
+      "estimated_pi_time": 1790266092,
+      "available_kb": 157244,
+      "machine_ticks": 1619661975,
+      "engines": {
+        "client0": {
+          "rss_kb": 8808,
+          "fd": 18,
+          "cpu_ticks": 10478
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 278
+        },
+        "client2": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 239
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 8,
+          "cpu_ticks": 230
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 213
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 2969
+        }
+      }
+    },
+    {
+      "router_time": 1790266095,
+      "estimated_pi_time": 1790266102,
+      "available_kb": 156456,
+      "machine_ticks": 1619666050,
+      "engines": {
+        "client0": {
+          "rss_kb": 8608,
+          "fd": 19,
+          "cpu_ticks": 11147
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 278
+        },
+        "client2": {
+          "rss_kb": 7816,
+          "fd": 8,
+          "cpu_ticks": 239
+        },
+        "client3": {
+          "rss_kb": 7924,
+          "fd": 10,
+          "cpu_ticks": 256
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 214
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3064
+        }
+      }
+    },
+    {
+      "router_time": 1790266106,
+      "estimated_pi_time": 1790266113,
+      "available_kb": 156424,
+      "machine_ticks": 1619670159,
+      "engines": {
+        "client0": {
+          "rss_kb": 8808,
+          "fd": 18,
+          "cpu_ticks": 11881
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 278
+        },
+        "client2": {
+          "rss_kb": 7816,
+          "fd": 8,
+          "cpu_ticks": 239
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 270
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 214
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3133
+        }
+      }
+    },
+    {
+      "router_time": 1790266116,
+      "estimated_pi_time": 1790266123,
+      "available_kb": 157132,
+      "machine_ticks": 1619674230,
+      "engines": {
+        "client0": {
+          "rss_kb": 8380,
+          "fd": 14,
+          "cpu_ticks": 12453
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 278
+        },
+        "client2": {
+          "rss_kb": 7816,
+          "fd": 8,
+          "cpu_ticks": 239
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 270
+        },
+        "client4": {
+          "rss_kb": 7904,
+          "fd": 10,
+          "cpu_ticks": 245
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3219
+        }
+      }
+    },
+    {
+      "router_time": 1790266126,
+      "estimated_pi_time": 1790266133,
+      "available_kb": 156020,
+      "machine_ticks": 1619678346,
+      "engines": {
+        "client0": {
+          "rss_kb": 8796,
+          "fd": 18,
+          "cpu_ticks": 13262
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 278
+        },
+        "client2": {
+          "rss_kb": 7816,
+          "fd": 8,
+          "cpu_ticks": 239
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 270
+        },
+        "client4": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 246
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3298
+        }
+      }
+    },
+    {
+      "router_time": 1790266136,
+      "estimated_pi_time": 1790266143,
+      "available_kb": 156848,
+      "machine_ticks": 1619682434,
+      "engines": {
+        "client0": {
+          "rss_kb": 8720,
+          "fd": 18,
+          "cpu_ticks": 13840
+        },
+        "client1": {
+          "rss_kb": 7924,
+          "fd": 10,
+          "cpu_ticks": 318
+        },
+        "client2": {
+          "rss_kb": 7816,
+          "fd": 8,
+          "cpu_ticks": 239
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 270
+        },
+        "client4": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 246
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3364
+        }
+      }
+    },
+    {
+      "router_time": 1790266147,
+      "estimated_pi_time": 1790266154,
+      "available_kb": 155900,
+      "machine_ticks": 1619686516,
+      "engines": {
+        "client0": {
+          "rss_kb": 8716,
+          "fd": 17,
+          "cpu_ticks": 14576
+        },
+        "client1": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 318
+        },
+        "client2": {
+          "rss_kb": 7816,
+          "fd": 8,
+          "cpu_ticks": 239
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 270
+        },
+        "client4": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 246
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3454
+        }
+      }
+    },
+    {
+      "router_time": 1790266157,
+      "estimated_pi_time": 1790266164,
+      "available_kb": 156432,
+      "machine_ticks": 1619690600,
+      "engines": {
+        "client0": {
+          "rss_kb": 8756,
+          "fd": 18,
+          "cpu_ticks": 15216
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 318
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 272
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 270
+        },
+        "client4": {
+          "rss_kb": 7816,
+          "fd": 8,
+          "cpu_ticks": 246
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3512
+        }
+      }
+    },
+    {
+      "router_time": 1790266167,
+      "estimated_pi_time": 1790266174,
+      "available_kb": 156312,
+      "machine_ticks": 1619694673,
+      "engines": {
+        "client0": {
+          "rss_kb": 8788,
+          "fd": 17,
+          "cpu_ticks": 15856
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 318
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 272
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 270
+        },
+        "client4": {
+          "rss_kb": 7816,
+          "fd": 8,
+          "cpu_ticks": 246
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3613
+        }
+      }
+    },
+    {
+      "router_time": 1790266177,
+      "estimated_pi_time": 1790266184,
+      "available_kb": 156056,
+      "machine_ticks": 1619698763,
+      "engines": {
+        "client0": {
+          "rss_kb": 8784,
+          "fd": 19,
+          "cpu_ticks": 16595
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 318
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 272
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 304
+        },
+        "client4": {
+          "rss_kb": 7816,
+          "fd": 8,
+          "cpu_ticks": 246
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3668
+        }
+      }
+    },
+    {
+      "router_time": 1790266187,
+      "estimated_pi_time": 1790266194,
+      "available_kb": 156516,
+      "machine_ticks": 1619702841,
+      "engines": {
+        "client0": {
+          "rss_kb": 8652,
+          "fd": 17,
+          "cpu_ticks": 17146
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 318
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 272
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 304
+        },
+        "client4": {
+          "rss_kb": 7816,
+          "fd": 8,
+          "cpu_ticks": 246
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3747
+        }
+      }
+    },
+    {
+      "router_time": 1790266198,
+      "estimated_pi_time": 1790266205,
+      "available_kb": 155660,
+      "machine_ticks": 1619706918,
+      "engines": {
+        "client0": {
+          "rss_kb": 8800,
+          "fd": 18,
+          "cpu_ticks": 17879
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 318
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 272
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 304
+        },
+        "client4": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 278
+        },
+        "xray": {
+          "rss_kb": 32020,
+          "fd": 8,
+          "cpu_ticks": 3806
+        }
+      }
+    },
+    {
+      "router_time": 1790266208,
+      "estimated_pi_time": 1790266215,
+      "available_kb": 156232,
+      "machine_ticks": 1619711006,
+      "engines": {
+        "client0": {
+          "rss_kb": 8756,
+          "fd": 18,
+          "cpu_ticks": 18489
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 318
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 272
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 304
+        },
+        "client4": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 278
+        },
+        "xray": {
+          "rss_kb": 32336,
+          "fd": 8,
+          "cpu_ticks": 3856
+        }
+      }
+    },
+    {
+      "router_time": 1790266218,
+      "estimated_pi_time": 1790266225,
+      "available_kb": 156120,
+      "machine_ticks": 1619715079,
+      "engines": {
+        "client0": {
+          "rss_kb": 8864,
+          "fd": 17,
+          "cpu_ticks": 19158
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 352
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 272
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 304
+        },
+        "client4": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 278
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 3947
+        }
+      }
+    },
+    {
+      "router_time": 1790266228,
+      "estimated_pi_time": 1790266235,
+      "available_kb": 155952,
+      "machine_ticks": 1619719175,
+      "engines": {
+        "client0": {
+          "rss_kb": 8856,
+          "fd": 18,
+          "cpu_ticks": 19854
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 352
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 272
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 304
+        },
+        "client4": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 278
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4005
+        }
+      }
+    },
+    {
+      "router_time": 1790266238,
+      "estimated_pi_time": 1790266245,
+      "available_kb": 156176,
+      "machine_ticks": 1619723248,
+      "engines": {
+        "client0": {
+          "rss_kb": 8868,
+          "fd": 18,
+          "cpu_ticks": 20464
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 352
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 304
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 304
+        },
+        "client4": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 278
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4089
+        }
+      }
+    },
+    {
+      "router_time": 1790266249,
+      "estimated_pi_time": 1790266256,
+      "available_kb": 155680,
+      "machine_ticks": 1619727336,
+      "engines": {
+        "client0": {
+          "rss_kb": 8768,
+          "fd": 18,
+          "cpu_ticks": 21203
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 352
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 304
+        },
+        "client3": {
+          "rss_kb": 7900,
+          "fd": 10,
+          "cpu_ticks": 338
+        },
+        "client4": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 278
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4148
+        }
+      }
+    },
+    {
+      "router_time": 1790266259,
+      "estimated_pi_time": 1790266266,
+      "available_kb": 156676,
+      "machine_ticks": 1619731426,
+      "engines": {
+        "client0": {
+          "rss_kb": 8604,
+          "fd": 16,
+          "cpu_ticks": 21782
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 352
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 304
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 338
+        },
+        "client4": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 278
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4214
+        }
+      }
+    },
+    {
+      "router_time": 1790266269,
+      "estimated_pi_time": 1790266276,
+      "available_kb": 156168,
+      "machine_ticks": 1619735515,
+      "engines": {
+        "client0": {
+          "rss_kb": 8736,
+          "fd": 18,
+          "cpu_ticks": 22497
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 352
+        },
+        "client2": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 304
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 338
+        },
+        "client4": {
+          "rss_kb": 7868,
+          "fd": 10,
+          "cpu_ticks": 311
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4306
+        }
+      }
+    },
+    {
+      "router_time": 1790266279,
+      "estimated_pi_time": 1790266286,
+      "available_kb": 156644,
+      "machine_ticks": 1619739599,
+      "engines": {
+        "client0": {
+          "rss_kb": 8720,
+          "fd": 17,
+          "cpu_ticks": 23182
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 352
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 304
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 339
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 311
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4356
+        }
+      }
+    },
+    {
+      "router_time": 1790266289,
+      "estimated_pi_time": 1790266296,
+      "available_kb": 153644,
+      "machine_ticks": 1619743675,
+      "engines": {
+        "client0": {
+          "rss_kb": 11336,
+          "fd": 43,
+          "cpu_ticks": 23612
+        },
+        "client1": {
+          "rss_kb": 7908,
+          "fd": 10,
+          "cpu_ticks": 374
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 304
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 339
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 311
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4417
+        }
+      }
+    },
+    {
+      "router_time": 1790266300,
+      "estimated_pi_time": 1790266307,
+      "available_kb": 148940,
+      "machine_ticks": 1619747770,
+      "engines": {
+        "client0": {
+          "rss_kb": 14072,
+          "fd": 41,
+          "cpu_ticks": 24820
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 396
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 304
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 339
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 311
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4507
+        }
+      }
+    },
+    {
+      "router_time": 1790266310,
+      "estimated_pi_time": 1790266317,
+      "available_kb": 148160,
+      "machine_ticks": 1619751858,
+      "engines": {
+        "client0": {
+          "rss_kb": 15108,
+          "fd": 43,
+          "cpu_ticks": 26022
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 396
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 342
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 339
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 311
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4572
+        }
+      }
+    },
+    {
+      "router_time": 1790266320,
+      "estimated_pi_time": 1790266327,
+      "available_kb": 147372,
+      "machine_ticks": 1619755949,
+      "engines": {
+        "client0": {
+          "rss_kb": 16124,
+          "fd": 43,
+          "cpu_ticks": 27232
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 396
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 342
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 339
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 311
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 6,
+          "cpu_ticks": 4643
+        }
+      }
+    },
+    {
+      "router_time": 1790266330,
+      "estimated_pi_time": 1790266337,
+      "available_kb": 146532,
+      "machine_ticks": 1619760036,
+      "engines": {
+        "client0": {
+          "rss_kb": 16664,
+          "fd": 42,
+          "cpu_ticks": 28429
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 396
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 342
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 373
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 311
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4742
+        }
+      }
+    },
+    {
+      "router_time": 1790266341,
+      "estimated_pi_time": 1790266348,
+      "available_kb": 146496,
+      "machine_ticks": 1619764132,
+      "engines": {
+        "client0": {
+          "rss_kb": 16996,
+          "fd": 43,
+          "cpu_ticks": 29630
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 397
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 342
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 373
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 311
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4806
+        }
+      }
+    },
+    {
+      "router_time": 1790266351,
+      "estimated_pi_time": 1790266358,
+      "available_kb": 145848,
+      "machine_ticks": 1619768219,
+      "engines": {
+        "client0": {
+          "rss_kb": 17372,
+          "fd": 42,
+          "cpu_ticks": 30843
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 397
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 342
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 373
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 349
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4897
+        }
+      }
+    },
+    {
+      "router_time": 1790266361,
+      "estimated_pi_time": 1790266368,
+      "available_kb": 145960,
+      "machine_ticks": 1619772301,
+      "engines": {
+        "client0": {
+          "rss_kb": 17364,
+          "fd": 43,
+          "cpu_ticks": 32050
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 397
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 342
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 373
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 349
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 4960
+        }
+      }
+    },
+    {
+      "router_time": 1790266371,
+      "estimated_pi_time": 1790266378,
+      "available_kb": 145384,
+      "machine_ticks": 1619776389,
+      "engines": {
+        "client0": {
+          "rss_kb": 17496,
+          "fd": 42,
+          "cpu_ticks": 33270
+        },
+        "client1": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 432
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 342
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 373
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 349
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 5027
+        }
+      }
+    },
+    {
+      "router_time": 1790266382,
+      "estimated_pi_time": 1790266389,
+      "available_kb": 142808,
+      "machine_ticks": 1619780491,
+      "engines": {
+        "client0": {
+          "rss_kb": 20404,
+          "fd": 42,
+          "cpu_ticks": 34446
+        },
+        "client1": {
+          "rss_kb": 7852,
+          "fd": 9,
+          "cpu_ticks": 432
+        },
+        "client2": {
+          "rss_kb": 7840,
+          "fd": 10,
+          "cpu_ticks": 359
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 373
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 349
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 5120
+        }
+      }
+    },
+    {
+      "router_time": 1790266392,
+      "estimated_pi_time": 1790266399,
+      "available_kb": 145484,
+      "machine_ticks": 1619784610,
+      "engines": {
+        "client0": {
+          "rss_kb": 17784,
+          "fd": 41,
+          "cpu_ticks": 35665
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 432
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 392
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 373
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 350
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 5180
+        }
+      }
+    },
+    {
+      "router_time": 1790266402,
+      "estimated_pi_time": 1790266409,
+      "available_kb": 144944,
+      "machine_ticks": 1619788702,
+      "engines": {
+        "client0": {
+          "rss_kb": 17788,
+          "fd": 43,
+          "cpu_ticks": 36872
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 432
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 392
+        },
+        "client3": {
+          "rss_kb": 7868,
+          "fd": 10,
+          "cpu_ticks": 407
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 350
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 5272
+        }
+      }
+    },
+    {
+      "router_time": 1790266412,
+      "estimated_pi_time": 1790266419,
+      "available_kb": 144928,
+      "machine_ticks": 1619792798,
+      "engines": {
+        "client0": {
+          "rss_kb": 17760,
+          "fd": 43,
+          "cpu_ticks": 38074
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 432
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 392
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 407
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 350
+        },
+        "xray": {
+          "rss_kb": 32532,
+          "fd": 8,
+          "cpu_ticks": 5335
+        }
+      }
+    },
+    {
+      "router_time": 1790266423,
+      "estimated_pi_time": 1790266430,
+      "available_kb": 145032,
+      "machine_ticks": 1619796889,
+      "engines": {
+        "client0": {
+          "rss_kb": 17972,
+          "fd": 43,
+          "cpu_ticks": 39270
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 432
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 392
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 407
+        },
+        "client4": {
+          "rss_kb": 7868,
+          "fd": 10,
+          "cpu_ticks": 386
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 5418
+        }
+      }
+    },
+    {
+      "router_time": 1790266433,
+      "estimated_pi_time": 1790266440,
+      "available_kb": 145364,
+      "machine_ticks": 1619800986,
+      "engines": {
+        "client0": {
+          "rss_kb": 17956,
+          "fd": 42,
+          "cpu_ticks": 40468
+        },
+        "client1": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 432
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 392
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 407
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 386
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 5500
+        }
+      }
+    },
+    {
+      "router_time": 1790266443,
+      "estimated_pi_time": 1790266450,
+      "available_kb": 145476,
+      "machine_ticks": 1619805076,
+      "engines": {
+        "client0": {
+          "rss_kb": 17964,
+          "fd": 42,
+          "cpu_ticks": 41657
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 467
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 392
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 407
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 386
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 5567
+        }
+      }
+    },
+    {
+      "router_time": 1790266453,
+      "estimated_pi_time": 1790266460,
+      "available_kb": 144628,
+      "machine_ticks": 1619809182,
+      "engines": {
+        "client0": {
+          "rss_kb": 18272,
+          "fd": 42,
+          "cpu_ticks": 42857
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 467
+        },
+        "client2": {
+          "rss_kb": 7848,
+          "fd": 8,
+          "cpu_ticks": 392
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 407
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 386
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 5655
+        }
+      }
+    },
+    {
+      "router_time": 1790266463,
+      "estimated_pi_time": 1790266470,
+      "available_kb": 144908,
+      "machine_ticks": 1619813273,
+      "engines": {
+        "client0": {
+          "rss_kb": 18208,
+          "fd": 42,
+          "cpu_ticks": 44067
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 467
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 428
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 407
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 386
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 5727
+        }
+      }
+    },
+    {
+      "router_time": 1790266474,
+      "estimated_pi_time": 1790266481,
+      "available_kb": 144952,
+      "machine_ticks": 1619817365,
+      "engines": {
+        "client0": {
+          "rss_kb": 18216,
+          "fd": 42,
+          "cpu_ticks": 45278
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 467
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 428
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 407
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 386
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 5809
+        }
+      }
+    },
+    {
+      "router_time": 1790266484,
+      "estimated_pi_time": 1790266491,
+      "available_kb": 145068,
+      "machine_ticks": 1619821474,
+      "engines": {
+        "client0": {
+          "rss_kb": 18188,
+          "fd": 43,
+          "cpu_ticks": 46489
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 467
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 428
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 440
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 386
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 5880
+        }
+      }
+    },
+    {
+      "router_time": 1790266494,
+      "estimated_pi_time": 1790266501,
+      "available_kb": 144964,
+      "machine_ticks": 1619825557,
+      "engines": {
+        "client0": {
+          "rss_kb": 18180,
+          "fd": 42,
+          "cpu_ticks": 47689
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 467
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 428
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 440
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 386
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 5940
+        }
+      }
+    },
+    {
+      "router_time": 1790266504,
+      "estimated_pi_time": 1790266511,
+      "available_kb": 144984,
+      "machine_ticks": 1619829642,
+      "engines": {
+        "client0": {
+          "rss_kb": 18200,
+          "fd": 42,
+          "cpu_ticks": 48882
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 467
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 428
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 440
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 420
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 6037
+        }
+      }
+    },
+    {
+      "router_time": 1790266515,
+      "estimated_pi_time": 1790266522,
+      "available_kb": 144936,
+      "machine_ticks": 1619833734,
+      "engines": {
+        "client0": {
+          "rss_kb": 18160,
+          "fd": 43,
+          "cpu_ticks": 50081
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 467
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 428
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 440
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 421
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 6101
+        }
+      }
+    },
+    {
+      "router_time": 1790266525,
+      "estimated_pi_time": 1790266532,
+      "available_kb": 145168,
+      "machine_ticks": 1619837831,
+      "engines": {
+        "client0": {
+          "rss_kb": 18176,
+          "fd": 42,
+          "cpu_ticks": 51271
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 428
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 440
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 421
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 6190
+        }
+      }
+    },
+    {
+      "router_time": 1790266535,
+      "estimated_pi_time": 1790266542,
+      "available_kb": 144920,
+      "machine_ticks": 1619841939,
+      "engines": {
+        "client0": {
+          "rss_kb": 18160,
+          "fd": 41,
+          "cpu_ticks": 52470
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7900,
+          "fd": 10,
+          "cpu_ticks": 462
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 440
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 421
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 6258
+        }
+      }
+    },
+    {
+      "router_time": 1790266545,
+      "estimated_pi_time": 1790266552,
+      "available_kb": 145076,
+      "machine_ticks": 1619846028,
+      "engines": {
+        "client0": {
+          "rss_kb": 18192,
+          "fd": 43,
+          "cpu_ticks": 53668
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 463
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 440
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 421
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 6318
+        }
+      }
+    },
+    {
+      "router_time": 1790266556,
+      "estimated_pi_time": 1790266563,
+      "available_kb": 144288,
+      "machine_ticks": 1619850117,
+      "engines": {
+        "client0": {
+          "rss_kb": 18204,
+          "fd": 42,
+          "cpu_ticks": 54861
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 463
+        },
+        "client3": {
+          "rss_kb": 7860,
+          "fd": 10,
+          "cpu_ticks": 475
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 421
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 6423
+        }
+      }
+    },
+    {
+      "router_time": 1790266566,
+      "estimated_pi_time": 1790266573,
+      "available_kb": 144752,
+      "machine_ticks": 1619854208,
+      "engines": {
+        "client0": {
+          "rss_kb": 18204,
+          "fd": 41,
+          "cpu_ticks": 56070
+        },
+        "client1": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 463
+        },
+        "client3": {
+          "rss_kb": 7820,
+          "fd": 9,
+          "cpu_ticks": 476
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 421
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 6485
+        }
+      }
+    },
+    {
+      "router_time": 1790266576,
+      "estimated_pi_time": 1790266583,
+      "available_kb": 144664,
+      "machine_ticks": 1619858299,
+      "engines": {
+        "client0": {
+          "rss_kb": 18236,
+          "fd": 41,
+          "cpu_ticks": 57279
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 463
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 477
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 463
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 6569
+        }
+      }
+    },
+    {
+      "router_time": 1790266586,
+      "estimated_pi_time": 1790266593,
+      "available_kb": 144896,
+      "machine_ticks": 1619862408,
+      "engines": {
+        "client0": {
+          "rss_kb": 18260,
+          "fd": 38,
+          "cpu_ticks": 58489
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 463
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 477
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 463
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 8,
+          "cpu_ticks": 6646
+        }
+      }
+    },
+    {
+      "router_time": 1790266597,
+      "estimated_pi_time": 1790266604,
+      "available_kb": 156460,
+      "machine_ticks": 1619866494,
+      "engines": {
+        "client0": {
+          "rss_kb": 8600,
+          "fd": 10,
+          "cpu_ticks": 59273
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 463
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 477
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 463
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 6,
+          "cpu_ticks": 6647
+        }
+      }
+    },
+    {
+      "router_time": 1790266607,
+      "estimated_pi_time": 1790266614,
+      "available_kb": 156552,
+      "machine_ticks": 1619870564,
+      "engines": {
+        "client0": {
+          "rss_kb": 8600,
+          "fd": 10,
+          "cpu_ticks": 59273
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 463
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 477
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 463
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 6,
+          "cpu_ticks": 6647
+        }
+      }
+    },
+    {
+      "router_time": 1790266617,
+      "estimated_pi_time": 1790266624,
+      "available_kb": 156760,
+      "machine_ticks": 1619874632,
+      "engines": {
+        "client0": {
+          "rss_kb": 8600,
+          "fd": 10,
+          "cpu_ticks": 59273
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 463
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 477
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 463
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 6,
+          "cpu_ticks": 6647
+        }
+      }
+    },
+    {
+      "router_time": 1790266627,
+      "estimated_pi_time": 1790266634,
+      "available_kb": 156812,
+      "machine_ticks": 1619878703,
+      "engines": {
+        "client0": {
+          "rss_kb": 8600,
+          "fd": 10,
+          "cpu_ticks": 59273
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 463
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 477
+        },
+        "client4": {
+          "rss_kb": 7812,
+          "fd": 9,
+          "cpu_ticks": 463
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 6,
+          "cpu_ticks": 6647
+        }
+      }
+    },
+    {
+      "router_time": 1790266637,
+      "estimated_pi_time": 1790266644,
+      "available_kb": 156820,
+      "machine_ticks": 1619882772,
+      "engines": {
+        "client0": {
+          "rss_kb": 8388,
+          "fd": 9,
+          "cpu_ticks": 59275
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 464
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 477
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 463
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 6,
+          "cpu_ticks": 6649
+        }
+      }
+    },
+    {
+      "router_time": 1790266647,
+      "estimated_pi_time": 1790266654,
+      "available_kb": 156864,
+      "machine_ticks": 1619886842,
+      "engines": {
+        "client0": {
+          "rss_kb": 8388,
+          "fd": 9,
+          "cpu_ticks": 59275
+        },
+        "client1": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 504
+        },
+        "client2": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 464
+        },
+        "client3": {
+          "rss_kb": 7812,
+          "fd": 8,
+          "cpu_ticks": 477
+        },
+        "client4": {
+          "rss_kb": 7808,
+          "fd": 8,
+          "cpu_ticks": 463
+        },
+        "xray": {
+          "rss_kb": 32624,
+          "fd": 6,
+          "cpu_ticks": 6649
+        }
+      }
+    }
+  ],
+  "measurement": {
+    "pss_available": false,
+    "rss_sum_counts_shared_pages_multiple_times": true,
+    "router_to_pi_shift_seconds": 7,
+    "clock_shift_uncertainty_seconds": 1,
+    "phase_edges_excluded_seconds": 10,
+    "netlog_enabled_on_active_naive": true,
+    "idle_timeout_seconds": 600,
+    "idle_timeout_overridden": false,
+    "resident_naive": 5,
+    "resident_xray": 1,
+    "memavailable_guard_kb": 65536,
+    "fd_guard_per_process": 256,
+    "guard_triggered": false,
+    "ttl_triggered": false
+  },
+  "fixture_before": {
+    "sessions": 5,
+    "connects": 5,
+    "bytesRequests": 6,
+    "dnsRequests": 0,
+    "authRejects": 5,
+    "errors": {}
+  },
+  "fixture_after": {
+    "sessions": 105,
+    "connects": 2093,
+    "bytesRequests": 2016,
+    "dnsRequests": 292,
+    "authRejects": 2093,
+    "errors": {}
+  },
+  "post_load_checks": {
+    "bad-ca": {
+      "exit": 35,
+      "http": 0,
+      "bytes": 0,
+      "seconds": 0.139651,
+      "expected_success": false,
+      "matched_expectation": true
+    },
+    "healthy-peer": {
+      "exit": 0,
+      "http": 200,
+      "bytes": 262144,
+      "seconds": 0.356059,
+      "expected_success": true,
+      "matched_expectation": true
+    },
+    "server-down": {
+      "exit": 35,
+      "http": 0,
+      "bytes": 0,
+      "seconds": 0.027375,
+      "expected_success": false,
+      "matched_expectation": true
+    },
+    "server-restored": {
+      "exit": 0,
+      "http": 200,
+      "bytes": 262144,
+      "seconds": 0.509876,
+      "expected_success": true,
+      "matched_expectation": true
+    }
+  },
+  "totals": {
+    "naive": 1748,
+    "xray": 214,
+    "dns": 292,
+    "standby": 48
+  },
+  "limitations": [
+    "Controlled unpadded CONNECT fixture, not an external provider stop test.",
+    "Instrumented active client has NetLog enabled; throughput/CPU are not a like-for-like comparison with the earlier uninstrumented run.",
+    "Measured DoH latency does not establish production timeout or session budgets.",
+    "Physical runtime validation is limited to NC-1913 MIPSel; other platform gates remain separate."
+  ],
+  "cleanup": {
+    "owned_processes_and_listeners_stopped": true,
+    "router_rules_routes_restored": true,
+    "pi_routes_forwarding_mtu_preserved": true,
+    "private_runtime_directories_removed_router_pi_pc": true,
+    "pc_system_configuration_changed": false,
+    "local_docker_containers_created": false
+  },
+  "repository_qa": {
+    "bats_passed": 493,
+    "static_passed": true,
+    "xray_versions_passed": [
+      "1.8.24",
+      "26.2.6"
+    ]
+  }
+}

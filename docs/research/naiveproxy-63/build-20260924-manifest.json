@@ -1,0 +1,17 @@
+{
+  "upstream_commit": "3ba967e2d36cc133a896e81a36257ad4c6ea20f4",
+  "mors_commit": "d0074127e3aac4e1c89945a03041d6720ff50739",
+  "run_id": "36016911546",
+  "target": "openwrt-mipsel_24kc-static",
+  "openwrt": "24.10.0",
+  "gcc": "13.3.0",
+  "parallel_jobs": 2,
+  "sha256": {
+    "LICENSE": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308",
+    "naive": "06b41b41473d24bcd0716e6c37dd39e6b765fa3389de8646e910f7e92b0725d9",
+    "args.gn": "5693b757321ec1d23fda5ca6eed55a518e2061d0fd13d6b2889b5eaac017a08c",
+    "clang-revision.txt": "38992a784aa4df47f4d55cf1175316642e2ba39aed39ac01caa6a552fea818ea",
+    "idle-handshake-created-at.patch": "01b7d7d4356ce8d6b9d5367c1322d919f96201a8fd99d96b9a896a943d0c935f",
+    "elf.txt": "3426e0f8588cf8d7ed48830d6cecd048ca60b1a258321580cb821f8827db328e"
+  }
+}

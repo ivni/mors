@@ -104,8 +104,45 @@ Probe сначала проверяет готовность/аутентифи�
 git apply --check /path/to/idle-handshake-created-at.patch
 ```
 
-Полный исправленный Naive-бинарник ещё не собран/не квалифицирован. Большой
-idle timeout использован только как диагностический A/B-контроль и не должен
-попасть в production defaults. Результаты и ограничения:
+Полный исправленный MIPSel-бинарник собран и проверен на NC-1913 со штатным
+timeout: см. [финальный результат](results-20260924-patched.json).
+Большой idle timeout использован только в предварительной диагностике
+и не должен попасть в production defaults. Предварительные результаты:
 [results-20260924-diagnosis.json](results-20260924-diagnosis.json) и
 [отчёт](../naiveproxy-runtime-spike.md#причина-ранних-обрывов-диагностика-24092026).
+
+## Сборка и смешанная проверка патча
+
+`.github/workflows/naiveproxy-spike.yml` и
+`scripts/qa/naiveproxy-spike-build.sh` собирают закреплённый MIPSel static
+кандидат с единственным source patch в одноразовом Ubuntu runner. Параллелизм
+компиляции ограничен двумя задачами. Workflow не имеет доступа к стенду,
+не выпускает release и не собирает пакет Mors. Артефакт хранится 7 дней;
+`manifest.json` содержит commit, patch/ELF SHA-256 и run identity;
+`args.gn` сохраняет фактические build flags.
+Перед запуском на роутере сверить digest скачанного ELF с manifest.
+
+`mixed-fixture.cjs DIR` запускается на Pi с закрытым `DIR/settings.json`:
+`bind` — разрешённый адрес Pi, `peer` — WAN-адрес тестового роутера,
+`user`/`password` — синтетическая proxy auth. Нужны одноразовые `valid.key`,
+`valid.pem`, `root.pem`. HTTPS origin слушает loopback:18444, CONNECT —
+заданный bind:18443 и разрешает только `nonce.fixture.invalid:18444`.
+Это unpadded HTTP/2 fixture, не production Naive-сервер.
+
+`mixed-runtime.py DIR` запускается на Pi с закрытым `bench-settings.json`
+(`host`, `user`, `password` для SOCKS listeners тестового роутера).
+Он использует пять Naive listeners 18170–18174 и VLESS/Xray listener 18179;
+создание и проверка этих процессов принадлежат оператору стенда.
+Фазы: idle 300 s и по 300 s при 1/8/32 Naive workers. Одновременно работают
+VLESS, DoH и последовательные standby probes. Data response 256 KiB,
+limit 64 KiB/s, connect timeout 8 s, общий 20 s. DoH сверяет точный DNS wire
+response, а не только размер или HTTP status. `mixed-results.json` обезличен;
+`errors-private.jsonl`, curl configs и прочие private files удалить после
+анализа. Raw stderr не переносить в репозиторий.
+
+Перед mixed run выполнить `probe-idle-handshake.py` для исходного и
+исправленного ELF с **неизменённым** idle timeout 600 s. Отдельный негативный
+опыт с коротким timeout должен подтвердить, что настоящая очистка продолжает
+работать. Во время mixed run контролировать RAM/FD и identity каждого PID;
+MemAvailable < 65536 kB, FD > 256 или потеря собственного процесса прекращают
+опыт. Эти пороги защищают стенд и не задают production budget.
