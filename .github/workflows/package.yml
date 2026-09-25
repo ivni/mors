@@ -2,6 +2,13 @@ name: Entware Package
 
 on:
   workflow_call:
+    inputs:
+      target:
+        type: string
+        default: aarch64-3.10
+      core:
+        type: boolean
+        default: false
     outputs:
       builder_image:
         description: Immutable Entware builder image used for the package.
@@ -20,7 +27,7 @@ jobs:
       contents: read
       packages: write
     concurrency:
-      group: entware-builder-${{ github.repository }}
+      group: entware-builder-${{ github.repository }}-${{ inputs.target || 'aarch64-3.10' }}
       cancel-in-progress: false
     outputs:
       image: ${{ steps.resolve.outputs.image }}
@@ -32,6 +39,7 @@ jobs:
         id: resolve
         env:
           GHCR_TOKEN: ${{ github.token }}
+          MORS_ENTWARE_TARGET: ${{ inputs.target || 'aarch64-3.10' }}
         run: |
           builder_id="$(bash scripts/qa/entware-builder-id.sh)"
           image_name="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/mors-entware-builder"
@@ -52,6 +60,7 @@ jobs:
                 --file builder/entware/Dockerfile \
                 --platform linux/amd64 \
                 --build-arg "BUILDER_ID=${builder_id}" \
+                --build-arg "ENTWARE_TARGET=${MORS_ENTWARE_TARGET}" \
                 --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
                 --tag "${image_tag}" \
                 --push \
@@ -94,6 +103,9 @@ jobs:
     needs: builder
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      MORS_ENTWARE_TARGET: ${{ inputs.target || 'aarch64-3.10' }}
+      MORS_ENTWARE_BUILDER_IMAGE: ${{ needs.builder.outputs.image }}
     permissions:
       contents: read
       packages: read
@@ -113,9 +125,21 @@ jobs:
       - name: Build package
         run: bash scripts/qa/entware-builder-package.sh
 
+      - name: Build core scaffold for selected ABI
+        if: inputs.core
+        run: python3 scripts/qa/entware-core-build.py
+
+      - name: Upload core evidence
+        if: inputs.core
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mors-core-${{ inputs.target }}
+          path: packages/core/${{ inputs.target }}/
+          if-no-files-found: error
+
       - name: Upload package artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mors-ipk
+          name: ${{ inputs.core && format('mors-ipk-check-{0}', inputs.target) || 'mors-ipk' }}
           path: packages/mors_*_all.ipk
           if-no-files-found: error

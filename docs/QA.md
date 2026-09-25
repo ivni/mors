@@ -35,7 +35,7 @@ GitHub Actions использует builder image `ghcr.io/ivni/mors-entware-bui
 
 Entware host tools собираются внутри изолированного container stage под UID 0, поэтому там явно установлен `FORCE_UNSAFE_CONFIGURE=1`. Переменная действует только в builder image: она не попадает в IPK и не меняет среду роутера. Buildroot создаётся непосредственно в финальном image stage, а исходники Mors доступны только через read-only BuildKit bind mounts в одном `RUN` и не сохраняются в OCI layers.
 
-Обычный package job не запускает верхнеуровневый `make package/mors/compile`: OpenWrt при каждом таком вызове обновляет общие `.prepared` gates и повторно обходит уже собранные tools и runtime-зависимости. После fail-closed проверки image скрипт `scripts/qa/entware-builder-package.sh` создаёт отдельное allowlist-only дерево исходников (`Makefile`, `opt`, канонический dependency-файл) и вызывает точный package submake Mors. Verifier предварительно подтверждает host `bash`/`fakeroot`/`patchelf`, единственные aarch64 toolchain/target и installed stamp каждой канонической runtime-зависимости. Сам Mors очищается и собирается заново из текущего checkout; чужие dependency targets не переаттестовываются и не компилируются повторно.
+Обычный package job не запускает верхнеуровневый `make package/mors/compile`: OpenWrt при каждом таком вызове обновляет общие `.prepared` gates и повторно обходит уже собранные tools и runtime-зависимости. После fail-closed проверки image скрипт `scripts/qa/entware-builder-package.sh` создаёт отдельное allowlist-only дерево исходников (`Makefile`, `opt`, канонический dependency-файл) и вызывает точный package submake Mors. Verifier предварительно подтверждает host `bash`/`fakeroot`/`patchelf`, единственные toolchain/target выбранной ABI и installed stamp каждой канонической runtime-зависимости. Сам Mors очищается и собирается заново из текущего checkout; чужие dependency targets не переаттестовываются и не компилируются повторно.
 
 Тег image служит лишь для поиска подготовленного builder. Package job всегда запускается с точной ссылкой `ghcr.io/...@sha256:...`, а release notes сохраняют этот digest вместе с SHA-256 IPK. Builder image не содержит готовый Mors IPK или подключённый `package/mors`: перед каждым запуском текущий checkout подключается заново, `package/mors` очищается и пакет создаётся из текущего SHA.
 
@@ -53,7 +53,8 @@ bash scripts/qa/entware-build.sh
 - `ENTWARE_REPO_URL` - URL репозитория Entware;
 - `ENTWARE_REVISION` - 40-символьная ревизия buildroot; по умолчанию берётся из lock-файла;
 - `ENTWARE_LOCK_FILE` - путь к альтернативному lock-файлу buildroot и feeds;
-- `ENTWARE_CONFIG` - целевой config, по умолчанию `configs/aarch64-3.10.config`;
+- `MORS_ENTWARE_TARGET` - `aarch64-3.10` (default), `mips-3.4` или `mipsel-3.4`; выбор задаёт закреплённый config и toolchain/staging contract;
+- `ENTWARE_CONFIG` - необязательная проверка выбранного config; несовпадение с `MORS_ENTWARE_TARGET` отклоняется;
 - `JOBS` - число параллельных make-задач.
 
 Для диагностики builder contract локально:
@@ -63,9 +64,16 @@ bash scripts/qa/entware-builder-id.sh
 bash scripts/qa/entware-builder-id.sh --manifest
 ```
 
-`scripts/qa/verify-entware-builder.sh` предназначен для запуска внутри builder image. Проверка fail-closed сверяет ID, lock/dependency digests, Entware HEAD, обязательные host tools, единственные aarch64 toolchain/target, installed stamps полного runtime dependency set и отсутствие старых Mors source/artifacts.
+`scripts/qa/verify-entware-builder.sh` предназначен для запуска внутри builder image. Проверка fail-closed сверяет ID, lock/dependency digests, Entware HEAD, обязательные host tools, единственные toolchain/target выбранной ABI, installed stamps полного runtime dependency set и отсутствие старых Mors source/artifacts.
 
 ## Release Gate
+
+Отдельный ручной workflow `core-matrix.yml` проверяет сборку Rust-каркаса на
+MIPS BE, MIPSel и AArch64 через тот же reusable package workflow, с отдельным
+immutable image на ABI. Он сохраняет ELF/evidence отдельно от проверочного
+shell IPK. Это не выпуск и не переход с `all.ipk` на ABI-пакеты; release gate
+ниже сохраняет default AArch64. Контракт, команды и независимые ограничения
+NaiveProxy описаны в [матрице сборки ядра](entware-core-matrix.md).
 
 `.github/workflows/release.yml` запускается только вручную на выбранном commit/branch и требует:
 

@@ -45,11 +45,13 @@ RUN apt-get update \
 FROM runtime-base
 
 ARG BUILDER_ID
+ARG ENTWARE_TARGET=aarch64-3.10
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # GNU host tools reject UID 0 by default. The build runs inside an isolated
 # image stage and never installs into the GitHub runner host.
 ENV ENTWARE_DIR=/opt/entware
+ENV MORS_ENTWARE_TARGET=${ENTWARE_TARGET}
 ENV FORCE_UNSAFE_CONFIGURE=1
 ENV MORS_ENTWARE_BUILDER_ID=${BUILDER_ID}
 ENV MORS_ENTWARE_BUILDER_MANIFEST=/opt/mors-builder/manifest.env

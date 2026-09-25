@@ -3,12 +3,14 @@ set -euo pipefail
 
 repo_root="${ENTWARE_BUILDER_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 schema='entware-builder-v1'
-target_config='configs/aarch64-3.10.config'
+target_config="$(python3 "${repo_root}/scripts/qa/entware-target.py" config)"
 input_files=(
 	builder/entware/Dockerfile
 	builder/entware/Dockerfile.dockerignore
 	builder/entware/runtime-dependencies.mk
 	builder/entware/rust-toolchain.json
+	builder/entware/targets.json
+	scripts/qa/entware-target.py
 	rust-toolchain.toml
 	scripts/qa/entware-rust.py
 	scripts/qa/entware-builder-id.sh
@@ -57,6 +59,7 @@ case "${1:-}" in
 		)"
 		printf 'entware_revision=%s\n' "${entware_revision}"
 		printf 'target_config=%s\n' "${target_config}"
+		python3 scripts/qa/entware-target.py manifest
 		python3 scripts/qa/entware-rust.py manifest
 		;;
 	*)

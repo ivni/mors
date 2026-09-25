@@ -83,6 +83,8 @@ package_make=(
 	make -w -r -C package/mors
 	"TOPDIR=${entware_dir}"
 	BUILD_SUBDIR=package/mors
+	# Package/Default otherwise records the random physical source path in control.
+	SOURCE=package/mors
 	BUILD_VARIANT=
 	ALL_VARIANTS=
 )

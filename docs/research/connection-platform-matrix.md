@@ -106,10 +106,13 @@ toolchain, не доказанный минимальный ABI будущего
   [vpn](../../opt/bin/libs/vpn), `dnsmasq_install_wildcard_support`, имеет ветви
   mips/mipsel/aarch64. Это свидетельство исторического охвата кода, а не
   рекомендация запускать эту замену DNSMasq.
-- [entware-builder-id.sh](../../scripts/qa/entware-builder-id.sh) фиксирует
+- В исходном baseline #59 [entware-builder-id.sh](../../scripts/qa/entware-builder-id.sh) фиксировал
   `configs/aarch64-3.10.config`;
   [verify-entware-builder.sh](../../scripts/qa/verify-entware-builder.sh)
-  требует единственные aarch64 toolchain и target staging tree.
+  требовал единственные aarch64 toolchain и target staging tree.
+  Подготовленный [matrix path #68](../entware-core-matrix.md) параметризует
+  эти проверки для трёх ABI; результаты сборки и границы evidence записываются
+  отдельно и не означают автоматического допуска NaiveProxy runtime.
 - [entware.lock](../../scripts/qa/entware.lock) закрепляет Entware
   `2d92d7c0b4055cb27901025f8a08d2e6344e849e`; [E1]–[E3] прочитаны на этом SHA.
 - `TEST_INFRASTRUCTURE.local.md` прочитан локально. Его сетевые адреса,

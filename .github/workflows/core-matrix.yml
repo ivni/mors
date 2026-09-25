@@ -1,0 +1,19 @@
+name: Entware Core Matrix
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  abi:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-3.10, mips-3.4, mipsel-3.4]
+    uses: ./.github/workflows/package.yml
+    with:
+      target: ${{ matrix.target }}
+      core: true

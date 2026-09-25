@@ -6,7 +6,6 @@
   "llvm": "21.1.8",
   "source_sha256": "b83f921cd3f321ff614f9c06a8b870d89299fc02888b48a5549683a36823474c",
   "host": "x86_64-unknown-linux-gnu",
-  "target": "aarch64-openwrt-linux-gnu",
   "gcc_version": "8.4.0",
   "tools": ["gcc", "g++", "ld", "ar", "ranlib", "readelf"]
 }

@@ -1,15 +1,17 @@
-# Закреплённый Rust в immutable builder (#67)
+# Закреплённый Rust в immutable builder (#67–#68)
 
-Builder сохраняет единственный release target `configs/aarch64-3.10.config`
-и прежний выбор `mors_*_all.ipk`. Rust-каркас не включается в пакет.
-Поставка ELF, production linkage и допуск остальных платформ остаются отдельными
-задачами; наличие компилятора не доказывает запуск ядра на роутере.
+Release по умолчанию сохраняет target `configs/aarch64-3.10.config`
+и прежний выбор `mors_*_all.ipk`. Отдельный [matrix path #68](entware-core-matrix.md)
+параметризует builder для MIPS BE, MIPSel и AArch64 и собирает Rust-каркас
+как отдельный артефакт. Он не включается в пакет. Поставка ELF и production
+linkage остаются отдельными задачами; компилятор не доказывает запуск на роутере.
 
 ## Входы и границы
 
 [`rust-toolchain.json`](../builder/entware/rust-toolchain.json) закрепляет
 patched Entware Rust 1.94.0-nightly, compiler commit, LLVM, SHA-256 исходного
-архива, host/target ABI, GCC и обязательные target tools. Рецепт и все patches
+архива, host ABI, GCC и обязательные target tools. Target ABI и точные staging
+пути задаёт [`targets.json`](../builder/entware/targets.json). Рецепт и все patches
 закреплены revision `rustlang` в [`entware.lock`](../scripts/qa/entware.lock).
 Host pin [`rust-toolchain.toml`](../rust-toolchain.toml) обязан иметь ту же
 версию исходников, но не подменяет patched compiler обычным rustup target.

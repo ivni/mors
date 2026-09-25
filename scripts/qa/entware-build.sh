@@ -73,7 +73,11 @@ fi
 entware_dir="${ENTWARE_DIR:-${repo_root}.entware-build}"
 entware_repo="${ENTWARE_REPO_URL:-${locked_entware_repo}}"
 entware_revision="${ENTWARE_REVISION:-${locked_entware_revision}}"
-entware_config="${ENTWARE_CONFIG:-configs/aarch64-3.10.config}"
+entware_config="$(python3 "${repo_root}/scripts/qa/entware-target.py" config)"
+if [ -n "${ENTWARE_CONFIG:-}" ] && [ "${ENTWARE_CONFIG}" != "${entware_config}" ]; then
+	echo 'ENTWARE_CONFIG conflicts with the selected target contract.' >&2
+	exit 1
+fi
 jobs="${JOBS:-$(nproc)}"
 
 if [[ ! "${entware_revision}" =~ ^[0-9a-f]{40}$ ]]; then
@@ -128,10 +132,7 @@ bash "${repo_root}/scripts/qa/entware-feed-lock.sh" \
 	verify "${entware_lock}" "${entware_dir}"
 scripts/feeds install -a
 
-if [ ! -f "${entware_config}" ]; then
-	entware_config="$(find configs -maxdepth 1 -type f -name 'aarch64-*.config' | sort | head -n 1)"
-fi
-test -n "${entware_config}"
+ENTWARE_DIR="${entware_dir}" python3 "${repo_root}/scripts/qa/entware-target.py" verify
 cp "${entware_config}" .config
 
 mkdir -p package

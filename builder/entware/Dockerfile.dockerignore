@@ -16,5 +16,7 @@
 !scripts/qa/opkg-version-order.sh
 !rust-toolchain.toml
 !builder/entware/rust-toolchain.json
+!builder/entware/targets.json
+!scripts/qa/entware-target.py
 !scripts/qa/entware-rust.py
 !scripts/qa/verify-entware-builder.sh

@@ -1,0 +1,32 @@
+{
+  "aarch64-3.10": {
+    "config_sha256": "d2929695cdfa630ca7a55d83d805e65a4d9cc86eb339b8ea64a4af45c73c4a9d",
+    "arch": "aarch64",
+    "cpu": "cortex-a53",
+    "rust_target": "aarch64-openwrt-linux-gnu",
+    "elf_class": 2,
+    "elf_endian": 1,
+    "elf_machine": 183,
+    "interpreter": "/opt/lib/ld-linux-aarch64.so.1"
+  },
+  "mips-3.4": {
+    "config_sha256": "58f97b05c729f2c21fd6acb7c07ead7d93dbfbcd818b9d64947799c9bd37b8fe",
+    "arch": "mips",
+    "cpu": "mips32r2",
+    "rust_target": "mips-openwrt-linux-gnu",
+    "elf_class": 1,
+    "elf_endian": 2,
+    "elf_machine": 8,
+    "interpreter": "/opt/lib/ld.so.1"
+  },
+  "mipsel-3.4": {
+    "config_sha256": "c9765b87b8c581b43c1d3cb1fc31732e9b3f1a682f6c2e235ed7522c21d1e102",
+    "arch": "mipsel",
+    "cpu": "mips32r2",
+    "rust_target": "mipsel-openwrt-linux-gnu",
+    "elf_class": 1,
+    "elf_endian": 1,
+    "elf_machine": 8,
+    "interpreter": "/opt/lib/ld.so.1"
+  }
+}

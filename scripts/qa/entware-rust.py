@@ -9,6 +9,9 @@ import re
 import subprocess
 import sys
 import tomllib
+from importlib import import_module
+
+target_contract = import_module("entware-target")
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -25,6 +28,7 @@ def run(*args, **kwargs):
 def unique(pattern, base):
     paths = list(base.glob(pattern))
     require(len(paths) == 1, f"Expected one Rust builder path: {base}/{pattern}")
+    require(paths[0].is_dir() and not paths[0].is_symlink(), "Unsafe Rust builder directory")
     return paths[0]
 
 
@@ -34,8 +38,9 @@ def main():
             "Usage: entware-rust.py manifest|build|verify")
     lock_path = ROOT / "builder/entware/rust-toolchain.json"
     lock = json.loads(lock_path.read_text())
+    spec = target_contract.selected()
     require(set(lock) == {"schema", "version", "release", "commit", "llvm",
-                          "source_sha256", "host", "target", "gcc_version", "tools"},
+                          "source_sha256", "host", "gcc_version", "tools"},
             "Unexpected Rust lock fields")
     require(lock["schema"] == 1, "Unsupported Rust lock schema")
     for key in ("version", "llvm", "gcc_version"):
@@ -43,8 +48,8 @@ def main():
     require(lock["release"] == lock["version"] + "-nightly", "Invalid patched release")
     for key, length in (("commit", 40), ("source_sha256", 64)):
         require(re.fullmatch(f"[0-9a-f]{{{length}}}", lock[key]), f"Invalid Rust {key}")
-    require(lock["host"] == "x86_64-unknown-linux-gnu" and
-            lock["target"] == "aarch64-openwrt-linux-gnu", "Unsupported builder ABI")
+    require(lock["host"] == "x86_64-unknown-linux-gnu", "Unsupported builder host")
+    lock["target"] = spec["rust_target"]
     require(lock["tools"] == ["gcc", "g++", "ld", "ar", "ranlib", "readelf"],
             "Incomplete Rust target tools")
     host_lock = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())
@@ -84,8 +89,10 @@ def main():
                            cwd=entware, check=True)
 
     staging = entware / "staging_dir"
-    target = unique("target-aarch64*", staging)
-    toolchain = unique("toolchain-aarch64*", staging)
+    target = unique("target-*", staging)
+    toolchain = unique("toolchain-*", staging)
+    require(target.name == spec["staging"] and toolchain.name == spec["toolchain"],
+            "Rust staging/toolchain differs from selected ABI")
     rust_home = target / "host"
     rustc = rust_home / "bin/rustc"
     cargo = rust_home / "bin/cargo"
@@ -96,7 +103,8 @@ def main():
                           ("host", lock["host"]), ("LLVM version", lock["llvm"])):
         require(info.get(key) == expected, f"Rust compiler {key} mismatch")
     require(re.fullmatch(r"cargo " + re.escape(lock["version"]) +
-                         r"(?:-nightly)? \([0-9a-f]+ [0-9-]+\)", run(str(cargo), "--version")),
+                         r"(?:-nightly)? \([0-9a-f]+ [0-9-]+\)"
+                         r"(?: \(built from a source tarball\))?", run(str(cargo), "--version")),
             "Rust Cargo version mismatch")
     require(lock["target"] in run(str(rustc), "--print", "target-list").splitlines(),
             "Patched Rust target missing")

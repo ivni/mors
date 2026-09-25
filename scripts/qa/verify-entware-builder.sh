@@ -44,23 +44,30 @@ for host_tool in bash fakeroot patchelf; do
 		}
 done
 
+python3 "${repo_root}/scripts/qa/entware-target.py" verify-active
+toolchain_name="$(python3 "${repo_root}/scripts/qa/entware-target.py" toolchain)"
+staging_name="$(python3 "${repo_root}/scripts/qa/entware-target.py" staging)"
+root_name="$(python3 "${repo_root}/scripts/qa/entware-target.py" root)"
 mapfile -t toolchain_dirs < <(
-	find "${entware_dir}/staging_dir" -maxdepth 1 -type d \
-		-name 'toolchain-aarch64*' -print
+	find "${entware_dir}/staging_dir" -maxdepth 1 \( -type d -o -type l \) \
+		-name 'toolchain-*' -print
 )
-[ "${#toolchain_dirs[@]}" -eq 1 ] ||
-	{ echo 'Entware builder has no aarch64 toolchain.' >&2; exit 1; }
+[ "${#toolchain_dirs[@]}" -eq 1 ] &&
+	[ "$(basename "${toolchain_dirs[0]}")" = "${toolchain_name}" ] ||
+	{ echo 'Entware builder has no unique selected toolchain.' >&2; exit 1; }
 mapfile -t target_dirs < <(
-	find "${entware_dir}/staging_dir" -maxdepth 1 -type d \
-		-name 'target-aarch64*' -print
+	find "${entware_dir}/staging_dir" -maxdepth 1 \( -type d -o -type l \) \
+		-name 'target-*' -print
 )
-[ "${#target_dirs[@]}" -eq 1 ] ||
-	{ echo 'Entware builder has no unique aarch64 target staging tree.' >&2; exit 1; }
+[ "${#target_dirs[@]}" -eq 1 ] &&
+	[ "$(basename "${target_dirs[0]}")" = "${staging_name}" ] ||
+	{ echo 'Entware builder has no unique selected target staging tree.' >&2; exit 1; }
 mapfile -t root_stamp_dirs < <(
 	find "${target_dirs[0]}" -mindepth 2 -maxdepth 2 -type d \
 		-path '*/root-*/stamp' -print
 )
-[ "${#root_stamp_dirs[@]}" -eq 1 ] ||
+[ "${#root_stamp_dirs[@]}" -eq 1 ] &&
+	[ "${root_stamp_dirs[0]}" = "${target_dirs[0]}/${root_name}/stamp" ] ||
 	{ echo 'Entware builder has no unique target root stamp directory.' >&2; exit 1; }
 
 runtime_dependencies="$(
@@ -85,7 +92,7 @@ for dependency_token in ${runtime_dependencies}; do
 		}
 done
 
-[ ! -e "${entware_dir}/package/mors" ] ||
+[ ! -e "${entware_dir}/package/mors" ] && [ ! -L "${entware_dir}/package/mors" ] ||
 	{ echo 'Entware builder contains a stale package/mors source.' >&2; exit 1; }
 if find "${entware_dir}/bin/targets" -type f \
 	-name 'mors_*_all.ipk' -print -quit | grep -q .; then

@@ -9,6 +9,8 @@ setup() {
 	cp "${REPO_ROOT}/rust-toolchain.toml" "${FIXTURE_ROOT}/"
 	cp "${REPO_ROOT}/builder/entware/rust-toolchain.json" "${FIXTURE_ROOT}/builder/entware/"
 	cp "${REPO_ROOT}/scripts/qa/entware-rust.py" "${FIXTURE_ROOT}/scripts/qa/"
+	cp "${REPO_ROOT}/scripts/qa/entware-target.py" "${FIXTURE_ROOT}/scripts/qa/"
+	cp "${REPO_ROOT}/builder/entware/targets.json" "${FIXTURE_ROOT}/builder/entware/"
 	cp "${REPO_ROOT}/builder/entware/Dockerfile" \
 		"${REPO_ROOT}/builder/entware/Dockerfile.dockerignore" \
 		"${REPO_ROOT}/builder/entware/runtime-dependencies.mk" \
@@ -69,6 +71,13 @@ setup() {
 	local fake_bin="${BATS_TEST_TMPDIR}/bin"
 	local manifest="${BATS_TEST_TMPDIR}/manifest.env"
 	local builder_id locked_revision target_dir root_stamp_dir
+	mkdir -p "${entware_dir}/configs"
+	printf 'fixture\n' >"${entware_dir}/configs/aarch64-3.10.config"
+	printf '%s\n' 'CONFIG_ARCH="aarch64"' 'CONFIG_CPU_TYPE="cortex-a53"' \
+		'CONFIG_TARGET_ARCH_PACKAGES="aarch64-3.10"' 'CONFIG_TARGET_BOARD="aarch64-3.10"' >"${entware_dir}/.config"
+	local config_hash
+	config_hash="$(sha256sum "${entware_dir}/configs/aarch64-3.10.config" | cut -d ' ' -f1)"
+	sed -i "s/d2929695cdfa630ca7a55d83d805e65a4d9cc86eb339b8ea64a4af45c73c4a9d/${config_hash}/" "${FIXTURE_ROOT}/builder/entware/targets.json"
 
 	builder_id="$(
 		ENTWARE_BUILDER_REPO_ROOT="${FIXTURE_ROOT}" \
@@ -82,14 +91,14 @@ setup() {
 		bash "${FIXTURE_ROOT}/scripts/qa/entware-builder-id.sh" --manifest \
 		>"${manifest}"
 
-	target_dir="${entware_dir}/staging_dir/target-aarch64_fixture"
-	root_stamp_dir="${target_dir}/root-aarch64/stamp"
+	target_dir="${entware_dir}/staging_dir/target-aarch64_cortex-a53_glibc-2.27"
+	root_stamp_dir="${target_dir}/root-aarch64-3.10/stamp"
 	mkdir -p \
 		"${fake_bin}" \
 		"${entware_dir}/.git" \
 		"${entware_dir}/bin/targets" \
 		"${entware_dir}/staging_dir/host/bin" \
-		"${entware_dir}/staging_dir/toolchain-aarch64_fixture" \
+		"${entware_dir}/staging_dir/toolchain-aarch64_cortex-a53_gcc-8.4.0_glibc-2.27" \
 		"${root_stamp_dir}"
 	for host_tool in opkg bash fakeroot patchelf; do
 		printf '#!/bin/sh\nexit 0\n' \
@@ -118,6 +127,14 @@ EOF
 	[ "${status}" -eq 0 ]
 	[[ "${output}" == *"Entware builder verified: ${builder_id}"* ]]
 
+	mkdir -p "${entware_dir}/package"
+	ln -s /missing-mors-source "${entware_dir}/package/mors"
+	run env ENTWARE_DIR="${entware_dir}" MORS_ENTWARE_BUILDER_MANIFEST="${manifest}" \
+		PATH="${fake_bin}:${PATH}" bash "${FIXTURE_ROOT}/scripts/qa/verify-entware-builder.sh"
+	[ "${status}" -ne 0 ]
+	[[ "${output}" == *'stale package/mors source'* ]]
+	rm "${entware_dir}/package/mors"
+
 	rm "${root_stamp_dir}/.xray_installed"
 	run env \
 		ENTWARE_DIR="${entware_dir}" \
@@ -131,9 +148,11 @@ EOF
 
 prepare_rust_fixture() {
 	local rust_home="${target_dir}/host" tool recipe_dir
+	local triple="${fixture_triple:-aarch64-openwrt-linux-gnu}"
+	local toolchain="${fixture_toolchain:-toolchain-aarch64_cortex-a53_gcc-8.4.0_glibc-2.27}"
 	recipe_dir="${entware_dir}/feeds/rustlang/rustc-dev"
 	mkdir -p "${rust_home}/bin" "${recipe_dir}" \
-		"${entware_dir}/staging_dir/toolchain-aarch64_fixture/bin"
+		"${entware_dir}/staging_dir/${toolchain}/bin"
 	cat >"${recipe_dir}/Makefile" <<'EOF'
 PKG_VERSION:=1.94.0
 PKG_HASH:=b83f921cd3f321ff614f9c06a8b870d89299fc02888b48a5549683a36823474c
@@ -151,20 +170,21 @@ EOF
 #!/bin/sh
 case "\$*" in
   '-vV') printf '%s\n' 'release: 1.94.0-nightly' 'commit-hash: 4a4ef493e3a1488c6e321570238084b38948f6db' 'host: x86_64-unknown-linux-gnu' 'LLVM version: 21.1.8' ;;
-  '--print target-list') echo aarch64-openwrt-linux-gnu ;;
+  '--print target-list') echo '${triple}' ;;
   '--print sysroot') echo '${rust_home}' ;;
   *) exit 1 ;;
 esac
 EOF
 	printf '#!/bin/sh\necho "cargo 1.94.0-nightly (4a4ef493e 2026-03-02)"\n' >"${rust_home}/bin/cargo"
 	chmod +x "${rust_home}/bin/"*
-	for triple in x86_64-unknown-linux-gnu aarch64-openwrt-linux-gnu; do
-		mkdir -p "${rust_home}/lib/rustlib/${triple}/lib"
-		printf 'fixture\n' >"${rust_home}/lib/rustlib/${triple}/lib/libstd-fixture.rlib"
-		printf 'fixture\n' >"${rust_home}/lib/rustlib/${triple}/lib/libcore-fixture.rlib"
+	local library_triple
+	for library_triple in x86_64-unknown-linux-gnu "${triple}"; do
+		mkdir -p "${rust_home}/lib/rustlib/${library_triple}/lib"
+		printf 'fixture\n' >"${rust_home}/lib/rustlib/${library_triple}/lib/libstd-fixture.rlib"
+		printf 'fixture\n' >"${rust_home}/lib/rustlib/${library_triple}/lib/libcore-fixture.rlib"
 	done
 	for tool in gcc g++ ld ar ranlib readelf; do
-		cat >"${entware_dir}/staging_dir/toolchain-aarch64_fixture/bin/aarch64-openwrt-linux-gnu-${tool}" <<'EOF'
+		cat >"${entware_dir}/staging_dir/${toolchain}/bin/${triple}-${tool}" <<'EOF'
 #!/bin/sh
 case "$1" in
   -dumpfullversion) echo 8.4.0 ;;
@@ -173,8 +193,9 @@ case "$1" in
   *) exit 1 ;;
 esac
 EOF
+		sed -i "s/aarch64-openwrt-linux-gnu/${triple}/" "${entware_dir}/staging_dir/${toolchain}/bin/${triple}-${tool}"
 	done
-	chmod +x "${entware_dir}/staging_dir/toolchain-aarch64_fixture/bin/"*
+	chmod +x "${entware_dir}/staging_dir/${toolchain}/bin/"*
 }
 
 @test "Rust toolchain inputs invalidate builder ID but Mors source and version do not" {
@@ -196,28 +217,31 @@ EOF
 
 @test "Rust verifier rejects missing and mismatched compiler target and feed fixtures" {
 	local entware_dir="${BATS_TEST_TMPDIR}/entware" fake_bin="${BATS_TEST_TMPDIR}/bin"
-	local target_dir="${entware_dir}/staging_dir/target-aarch64_fixture" locked_revision=unused
+	local target_dir="${entware_dir}/staging_dir/target-aarch64_cortex-a53_glibc-2.27" locked_revision=unused
 	local rust_home="${target_dir}/host" mutation
 	mkdir -p "${fake_bin}"
-	for mutation in valid compiler cargo target_std empty_std target_tool target_version feed recipe dirty_feed wrong_sysroot missing_target; do
+	for mutation in valid source_tarball compiler cargo cargo_version cargo_unknown_suffix target_std empty_std target_tool target_version feed recipe dirty_feed wrong_sysroot missing_target; do
 		prepare_rust_fixture
 		chmod +x "${fake_bin}/git"
 		case "${mutation}" in
+			source_tarball) sed -i 's/)"/) (built from a source tarball)"/' "${rust_home}/bin/cargo" ;;
 			compiler) sed -i 's/1.94.0-nightly/1.93.0-nightly/' "${rust_home}/bin/rustc" ;;
 			cargo) rm "${rust_home}/bin/cargo" ;;
+			cargo_version) sed -i 's/1.94.0/1.93.0/' "${rust_home}/bin/cargo" ;;
+			cargo_unknown_suffix) sed -i 's/)"/) unknown"/' "${rust_home}/bin/cargo" ;;
 			target_std) rm "${rust_home}/lib/rustlib/aarch64-openwrt-linux-gnu/lib/libstd-fixture.rlib" ;;
 			empty_std) : >"${rust_home}/lib/rustlib/aarch64-openwrt-linux-gnu/lib/libstd-fixture.rlib" ;;
-			target_tool) rm "${entware_dir}/staging_dir/toolchain-aarch64_fixture/bin/aarch64-openwrt-linux-gnu-ar" ;;
-			target_version) sed -i 's/8.4.0/9.0.0/' "${entware_dir}/staging_dir/toolchain-aarch64_fixture/bin/aarch64-openwrt-linux-gnu-gcc" ;;
+			target_tool) rm "${entware_dir}/staging_dir/toolchain-aarch64_cortex-a53_gcc-8.4.0_glibc-2.27/bin/aarch64-openwrt-linux-gnu-ar" ;;
+			target_version) sed -i 's/8.4.0/9.0.0/' "${entware_dir}/staging_dir/toolchain-aarch64_cortex-a53_gcc-8.4.0_glibc-2.27/bin/aarch64-openwrt-linux-gnu-gcc" ;;
 			feed) sed -i 's/379fa6ff578506a50e3158b92ac2c09bc22cb450/stale/' "${fake_bin}/git" ;;
 			recipe) printf 'PKG_VERSION:=latest\n' >"${entware_dir}/feeds/rustlang/rustc-dev/Makefile" ;;
 			dirty_feed) sed -i 's/exit 0/echo modified; exit 0/' "${fake_bin}/git" ;;
 			wrong_sysroot) sed -i "s|echo '${rust_home}'|echo /unattested|" "${rust_home}/bin/rustc" ;;
-			missing_target) sed -i 's/echo aarch64-openwrt-linux-gnu/echo aarch64-unknown-linux-gnu/' "${rust_home}/bin/rustc" ;;
+			missing_target) sed -i 's/aarch64-openwrt-linux-gnu/aarch64-unknown-linux-gnu/' "${rust_home}/bin/rustc" ;;
 		esac
 		run env ENTWARE_DIR="${entware_dir}" PATH="${fake_bin}:${PATH}" \
 			python3 "${FIXTURE_ROOT}/scripts/qa/entware-rust.py" verify
-		if [ "${mutation}" = valid ]; then
+		if [ "${mutation}" = valid ] || [ "${mutation}" = source_tarball ]; then
 			[ "${status}" -eq 0 ]
 		else
 			[ "${status}" -ne 0 ]
@@ -226,9 +250,65 @@ EOF
 	done
 }
 
+@test "matrix ABIs have distinct IDs and reject unknown target without fallback" {
+	local abi id ids=''
+	for abi in aarch64-3.10 mips-3.4 mipsel-3.4; do
+		run env MORS_ENTWARE_TARGET="${abi}" bash "${FIXTURE_ROOT}/scripts/qa/entware-builder-id.sh" --manifest
+		[ "${status}" -eq 0 ]
+		[[ "${output}" == *"target_config=configs/${abi}.config"* ]]
+		id="$(printf '%s\n' "${output}" | sed -n 's/^builder_id=//p')"
+		[[ " ${ids} " != *" ${id} "* ]]
+		ids="${ids} ${id}"
+	done
+	run env MORS_ENTWARE_TARGET=mips-unknown bash "${FIXTURE_ROOT}/scripts/qa/entware-builder-id.sh"
+	[ "${status}" -ne 0 ]
+	[[ "${output}" == *'Unsupported Entware target'* ]]
+}
+
+@test "each ABI requires its own Rust std and exactly one matching toolchain" {
+	local abi fixture_triple fixture_toolchain entware_dir target_dir
+	local fake_bin="${BATS_TEST_TMPDIR}/bin" locked_revision=unused
+	mkdir -p "${fake_bin}"
+	for abi in aarch64-3.10 mips-3.4 mipsel-3.4; do
+		entware_dir="${BATS_TEST_TMPDIR}/${abi}"
+		fixture_triple="$(MORS_ENTWARE_TARGET="${abi}" python3 "${FIXTURE_ROOT}/scripts/qa/entware-target.py" rust_target)"
+		fixture_toolchain="$(MORS_ENTWARE_TARGET="${abi}" python3 "${FIXTURE_ROOT}/scripts/qa/entware-target.py" toolchain)"
+		target_dir="${entware_dir}/staging_dir/$(MORS_ENTWARE_TARGET="${abi}" python3 "${FIXTURE_ROOT}/scripts/qa/entware-target.py" staging)"
+		prepare_rust_fixture
+		chmod +x "${fake_bin}/git"
+		run env MORS_ENTWARE_TARGET="${abi}" ENTWARE_DIR="${entware_dir}" PATH="${fake_bin}:${PATH}" \
+			python3 "${FIXTURE_ROOT}/scripts/qa/entware-rust.py" verify
+		[ "${status}" -eq 0 ]
+		mkdir -p "${entware_dir}/staging_dir/toolchain-foreign"
+		run env MORS_ENTWARE_TARGET="${abi}" ENTWARE_DIR="${entware_dir}" PATH="${fake_bin}:${PATH}" \
+			python3 "${FIXTURE_ROOT}/scripts/qa/entware-rust.py" verify
+		[ "${status}" -ne 0 ]
+		rmdir "${entware_dir}/staging_dir/toolchain-foreign"
+		rm "${target_dir}/host/lib/rustlib/${fixture_triple}/lib/libstd-fixture.rlib"
+		run env MORS_ENTWARE_TARGET="${abi}" ENTWARE_DIR="${entware_dir}" PATH="${fake_bin}:${PATH}" \
+			python3 "${FIXTURE_ROOT}/scripts/qa/entware-rust.py" verify
+		[ "${status}" -ne 0 ]
+	done
+}
+
+@test "matrix config digest and cross-target manifests fail closed" {
+	local entware_dir="${BATS_TEST_TMPDIR}/entware" manifest="${BATS_TEST_TMPDIR}/manifest.env"
+	mkdir -p "${entware_dir}/configs"
+	printf 'wrong\n' >"${entware_dir}/configs/mips-3.4.config"
+	run env MORS_ENTWARE_TARGET=mips-3.4 ENTWARE_DIR="${entware_dir}" \
+		python3 "${FIXTURE_ROOT}/scripts/qa/entware-target.py" verify
+	[ "${status}" -ne 0 ]
+	[[ "${output}" == *'config digest mismatch'* ]]
+	MORS_ENTWARE_TARGET=mips-3.4 bash "${FIXTURE_ROOT}/scripts/qa/entware-builder-id.sh" --manifest >"${manifest}"
+	run env MORS_ENTWARE_TARGET=mipsel-3.4 MORS_ENTWARE_BUILDER_MANIFEST="${manifest}" \
+		bash "${FIXTURE_ROOT}/scripts/qa/verify-entware-builder.sh"
+	[ "${status}" -ne 0 ]
+	[[ "${output}" == *'manifest does not match'* ]]
+}
+
 @test "Rust builder invokes only pinned feed host and target builds then attests tools" {
 	local entware_dir="${BATS_TEST_TMPDIR}/entware" fake_bin="${BATS_TEST_TMPDIR}/bin"
-	local target_dir="${entware_dir}/staging_dir/target-aarch64_fixture" locked_revision=unused
+	local target_dir="${entware_dir}/staging_dir/target-aarch64_cortex-a53_glibc-2.27" locked_revision=unused
 	mkdir -p "${fake_bin}"
 	prepare_rust_fixture
 	cat >"${fake_bin}/make" <<EOF
