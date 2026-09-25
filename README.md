@@ -193,6 +193,7 @@ mors test cold recover
 - [Архитектура end-to-end проверки](docs/test-architecture.md).
 - [Архитектура управляемых VLESS-соединений](docs/vless-architecture.md).
 - [Архитектура телеметрии Monium](docs/telemetry-architecture.md).
+- [Rust workspace и локальная проверка каркаса](docs/rust-workspace.md).
 
 ## Релизы проекта
 - [GitHub Releases](https://github.com/ivni/mors/releases)

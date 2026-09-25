@@ -53,3 +53,7 @@ fabric.properties
 !/Makefile
 !/tests/
 #ipk/
+
+# Rust host build outputs
+/target/
+!/crates/*/tests/
