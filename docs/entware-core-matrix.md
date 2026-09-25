@@ -43,10 +43,29 @@ manifest MIPS BE нельзя использовать для MIPSel. Rust verif
 Обычный release продолжает вызывать тот же workflow с default AArch64 и
 `core=false`, получает прежний artifact `mors-ipk` и единственный `all.ipk`.
 
+Для проверки новой ветки до появления `core-matrix.yml` в default branch
+тот же путь доступен через уже зарегистрированный `package.yml`:
+
+```sh
+gh workflow run package.yml --repo ivni/mors --ref codex/issue-68 \
+  -f target=aarch64-3.10 -f core=true
+```
+
+Для двух остальных строк передаются `target=mips-3.4` и `target=mipsel-3.4`.
+Это три отдельных запуска тех же builder/package/core jobs. Ручной запуск
+без параметров сохраняет прежний AArch64 package-only путь. GitHub требует
+наличия workflow в default branch для первого `workflow_dispatch`; одного
+нового файла в feature branch недостаточно.
+
 Matrix сначала проверяет обычный direct package submake; его команды остаются
 `make -w -r -C package/mors ... clean/compile`, без top-level пересборки
 tools/dependencies. Проверочные shell IPK получают имена CI artifacts
 `mors-ipk-check-<target>` и не становятся релизными ABI-пакетами.
+При `core=true` package submake выполняется повторно, и CI требует совпадения
+SHA-256 обоих IPK. `PKG_SOURCE_DATE_EPOCH` и `SOURCE_DATE_EPOCH` передаются
+явно из timestamp текущего Git-коммита; для дерева без Git требуется явный
+числовой `SOURCE_DATE_EPOCH`. Это исключает fallback Entware на время создания
+файла внутри builder. Исходные права файлов остаются частью package inputs.
 
 [`entware-core-build.py`](../scripts/qa/entware-core-build.py) сначала вызывает
 общий verifier, затем копирует только `Cargo.toml`, `Cargo.lock` и `crates/`

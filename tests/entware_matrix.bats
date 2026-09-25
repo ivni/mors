@@ -31,6 +31,7 @@ EOF
 	chmod +x "${fake_bin}/make"
 	for abi in aarch64-3.10 mips-3.4 mipsel-3.4; do
 		run env MORS_ENTWARE_TARGET="${abi}" ENTWARE_DIR="${entware_dir}" \
+			SOURCE_DATE_EPOCH=1700000000 \
 			MAKE_LOG="${BATS_TEST_TMPDIR}/${abi}.log" PATH="${fake_bin}:${PATH}" \
 			bash "${fixture}/scripts/qa/entware-builder-package.sh"
 		[ "${status}" -eq 0 ]
@@ -38,8 +39,15 @@ EOF
 		[ "$(wc -l <"${BATS_TEST_TMPDIR}/${abi}.log")" -eq 4 ]
 		[ "$(grep -c -- '-C package/mors' "${BATS_TEST_TMPDIR}/${abi}.log")" -eq 3 ]
 		[ "$(grep -c 'SOURCE=package/mors' "${BATS_TEST_TMPDIR}/${abi}.log")" -eq 3 ]
+		[ "$(grep -c 'PKG_SOURCE_DATE_EPOCH=1700000000 SOURCE_DATE_EPOCH=1700000000' "${BATS_TEST_TMPDIR}/${abi}.log")" -eq 3 ]
 		[ -f "${fixture}/packages/mors_1.0.0-1_all.ipk" ]
 		[ ! -L "${entware_dir}/package/mors" ]
 		[ -z "$(find "${entware_dir}" -maxdepth 1 -name '.mors-package-source.*' -print)" ]
 	done
+}
+
+@test "package rejects an invalid source epoch before touching the builder" {
+	run env SOURCE_DATE_EPOCH=invalid bash "${REPO_ROOT}/scripts/qa/entware-builder-package.sh"
+	[ "${status}" -ne 0 ]
+	[[ "${output}" == *"numeric SOURCE_DATE_EPOCH"* ]]
 }

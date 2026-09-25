@@ -138,6 +138,13 @@ jobs:
       - name: Build package
         run: bash scripts/qa/entware-builder-package.sh
 
+      - name: Verify repeat package build
+        if: inputs.core
+        run: |
+          sha256sum packages/mors_*_all.ipk >"${RUNNER_TEMP}/mors-first.sha256"
+          bash scripts/qa/entware-builder-package.sh
+          sha256sum --check "${RUNNER_TEMP}/mors-first.sha256"
+
       - name: Build core scaffold for selected ABI
         if: inputs.core
         run: python3 scripts/qa/entware-core-build.py

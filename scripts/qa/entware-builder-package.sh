@@ -7,6 +7,7 @@ package_version="$(sed -n 's/^PKG_VERSION:=//p; /^PKG_VERSION:=/q' "${repo_root}
 package_release="$(sed -n 's/^PKG_RELEASE:=//p; /^PKG_RELEASE:=/q' "${repo_root}/Makefile")"
 expected_package="mors_${package_version}-${package_release}_all.ipk"
 jobs="${JOBS:-$(nproc)}"
+source_epoch="${SOURCE_DATE_EPOCH:-$(git -C "${repo_root}" log -1 --format=%ct 2>/dev/null || true)}"
 
 if [ -z "${package_version}" ] || [[ ! "${package_release}" =~ ^[1-9][0-9]*$ ]]; then
 	echo 'Makefile has no valid PKG_VERSION/PKG_RELEASE pair.' >&2
@@ -14,6 +15,10 @@ if [ -z "${package_version}" ] || [[ ! "${package_release}" =~ ^[1-9][0-9]*$ ]];
 fi
 if [[ ! "${jobs}" =~ ^[1-9][0-9]*$ ]]; then
 	echo "Invalid package build parallelism: ${jobs}" >&2
+	exit 1
+fi
+if [[ ! "${source_epoch}" =~ ^[0-9]+$ ]]; then
+	echo 'Package build needs a Git commit timestamp or numeric SOURCE_DATE_EPOCH.' >&2
 	exit 1
 fi
 
@@ -85,6 +90,10 @@ package_make=(
 	BUILD_SUBDIR=package/mors
 	# Package/Default otherwise records the random physical source path in control.
 	SOURCE=package/mors
+	# The temporary source has no history; Entware otherwise falls back to a
+	# builder file mtime, making identical source differ across ABI images.
+	"PKG_SOURCE_DATE_EPOCH=${source_epoch}"
+	"SOURCE_DATE_EPOCH=${source_epoch}"
 	BUILD_VARIANT=
 	ALL_VARIANTS=
 )
@@ -111,5 +120,6 @@ cp -p "${built_packages[0]}" "${packages_dir}/${expected_package}"
 rm -f "${built_packages[0]}"
 
 printf 'Builder package compile: %s seconds\n' "${build_elapsed_seconds}"
+printf 'Package source epoch: %s\n' "${source_epoch}"
 printf 'Built package: %s\n' "${packages_dir}/${expected_package}"
 sha256sum "${packages_dir}/${expected_package}"
