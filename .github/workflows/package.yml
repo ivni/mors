@@ -14,6 +14,19 @@ on:
         description: Immutable Entware builder image used for the package.
         value: ${{ jobs.builder.outputs.image }}
   workflow_dispatch:
+    inputs:
+      target:
+        description: Entware ABI to build
+        type: choice
+        options:
+          - aarch64-3.10
+          - mips-3.4
+          - mipsel-3.4
+        default: aarch64-3.10
+      core:
+        description: Build and upload the Rust core scaffold
+        type: boolean
+        default: false
 
 permissions:
   contents: read
