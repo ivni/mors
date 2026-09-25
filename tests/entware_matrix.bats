@@ -29,6 +29,11 @@ case "$*" in
 esac
 EOF
 	chmod +x "${fake_bin}/make"
+	git -C "${fixture}" init -q
+	git -C "${fixture}" add .
+	env GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
+		git -C "${fixture}" -c user.name='Mors QA' -c user.email=qa@example.invalid \
+		-c commit.gpgsign=false commit -q -m fixture
 	for abi in aarch64-3.10 mips-3.4 mipsel-3.4; do
 		run env MORS_ENTWARE_TARGET="${abi}" ENTWARE_DIR="${entware_dir}" \
 			SOURCE_DATE_EPOCH=1700000000 \
@@ -44,6 +49,13 @@ EOF
 		[ ! -L "${entware_dir}/package/mors" ]
 		[ -z "$(find "${entware_dir}" -maxdepth 1 -name '.mors-package-source.*' -print)" ]
 	done
+	# Git models the runner/container ownership mismatch without requiring root.
+	run env -u SOURCE_DATE_EPOCH GIT_TEST_ASSUME_DIFFERENT_OWNER=1 \
+		MORS_ENTWARE_TARGET=aarch64-3.10 ENTWARE_DIR="${entware_dir}" \
+		MAKE_LOG="${BATS_TEST_TMPDIR}/git-epoch.log" PATH="${fake_bin}:${PATH}" \
+		bash "${fixture}/scripts/qa/entware-builder-package.sh"
+	[ "${status}" -eq 0 ]
+	[ "$(grep -c 'PKG_SOURCE_DATE_EPOCH=946684800 SOURCE_DATE_EPOCH=946684800' "${BATS_TEST_TMPDIR}/git-epoch.log")" -eq 3 ]
 }
 
 @test "package rejects an invalid source epoch before touching the builder" {

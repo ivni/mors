@@ -7,7 +7,9 @@ package_version="$(sed -n 's/^PKG_VERSION:=//p; /^PKG_VERSION:=/q' "${repo_root}
 package_release="$(sed -n 's/^PKG_RELEASE:=//p; /^PKG_RELEASE:=/q' "${repo_root}/Makefile")"
 expected_package="mors_${package_version}-${package_release}_all.ipk"
 jobs="${JOBS:-$(nproc)}"
-source_epoch="${SOURCE_DATE_EPOCH:-$(git -C "${repo_root}" log -1 --format=%ct 2>/dev/null || true)}"
+# Container checkouts can be owned by the host runner. Trust only this explicit
+# source directory for this read, without changing the global Git configuration.
+source_epoch="${SOURCE_DATE_EPOCH:-$(git -c "safe.directory=${repo_root}" -C "${repo_root}" log -1 --format=%ct 2>/dev/null || true)}"
 
 if [ -z "${package_version}" ] || [[ ! "${package_release}" =~ ^[1-9][0-9]*$ ]]; then
 	echo 'Makefile has no valid PKG_VERSION/PKG_RELEASE pair.' >&2
