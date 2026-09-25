@@ -4,6 +4,8 @@
 Изменение касается host build infrastructure. Runtime-команды Mors и decision
 lock #57 не меняются. Полная приёмка требует реальных сборок каждой строки;
 fixture-проверки ниже не заменяют compiler/ELF evidence.
+Полный OCI/CI-прогон трёх ABI завершён; итоговые manifests и результаты
+приёмки находятся в конце документа.
 
 ## Выбор ABI и attestation
 
@@ -228,17 +230,94 @@ dependencies до/после direct submake не изменились; на MIPS
 `--version` — `mors-core 0.1.0`. Это реальные ELF проверки текущего каркаса #66,
 а не повторное использование бинарников исторического spike #60.
 
-**Граница результата:** новые полные OCI images через канонический Dockerfile
-и remote `core-matrix.yml` в этом проходе не создавались/не запускались.
+**Граница локального результата:** на описанном выше локальном этапе новые
+полные OCI images через канонический Dockerfile ещё не создавались.
 Реально построен `runtime-base`, а core/package paths проверены в подготовленных
 диагностических writable layers. Их input manifests и ELF digests нельзя
 выдавать за digests новых immutable images: поле `builder_image` намеренно
-равно `null`. Перед использованием новых images в release pipeline остаётся
-полный OCI build/resolution/verification gate для каждой ABI. Router runtime,
-NaiveProxy admission и выпуск релиза этой проверкой не подтверждаются.
+равно `null`. Поэтому требовался отдельный полный OCI build/resolution/
+verification gate для каждой ABI; его результат приведён ниже. Router runtime,
+NaiveProxy admission и выпуск релиза этими проверками не подтверждаются.
 
 Контейнеры `mors-68-build`, `mors-68-mips`, `mors-68-mipsel` сохраняются как
 локальный диагностический cache на Docker pause, чтобы повторная проверка не
 требовала заново собирать toolchain. Для доступа сначала нужен `docker unpause`
 нужного контейнера. Исходники проверяемого snapshot находятся внутри в `/work`,
 диагностический manifest — `/tmp/issue68-diagnostic.env`. Это не release images.
+
+## Полный OCI/CI-прогон 25.09.2026
+
+Все три образа реально собраны каноническим Dockerfile из коммита `cc52236`,
+прошли встроенный полный verifier и опубликованы в GHCR. Отдельные package jobs
+загрузили образы по OCI digest, повторно проверили их и собрали IPK и Rust ELF:
+
+| ABI | Полный первый прогон | OCI manifest digest |
+| --- | --- | --- |
+| AArch64 | [36150670698](https://github.com/ivni/mors/actions/runs/36150670698), PASS | `sha256:67157b952aa44e33ee84a6034643738faa5754f6f04e867cef39f96d665ecc8b` |
+| MIPS BE | [36150674736](https://github.com/ivni/mors/actions/runs/36150674736), PASS | `sha256:8c16bd214d22a3a41e10d016f6fa1e4d37317947dc10cfa9a95cda8dde43721b` |
+| MIPSel | [36150679287](https://github.com/ivni/mors/actions/runs/36150679287), PASS | `sha256:d7e419c76984864bd241023a285345a54caf36b2eadc946f7150a867a95a9a15` |
+
+Имена images: `ghcr.io/ivni/mors-entware-builder@<digest>`. Manifest digests
+дополнительно разрешены через `docker buildx imagetools inspect`; это не
+локальные Docker config/image IDs. Builder input IDs остались теми же, что
+в диагностических manifests. После этого cold build не повторялся: дальнейшие
+package/core проверки использовали уже опубликованные неизменяемые образы.
+
+Сравнение первого CI IPK с диагностическим выявило дополнительный источник
+невоспроизводимости: Entware вычислял `PKG_SOURCE_DATE_EPOCH` для временного
+source tree через fallback на mtime своего `get_source_date_epoch.sh`.
+Timestamp зависел от момента создания builder. Исправление явно передаёт
+timestamp текущего Git-коммита в оба make-параметра, как описано выше.
+Содержимое payload первого MIPSel CI IPK совпало с диагностическим; кроме
+timestamp, отличались права части файлов/каталогов Windows-снимка.
+Диагностический IPK SHA не выдаётся за канонический CI IPK SHA.
+
+Первый повтор на `8e3a99c` остановился на новом timestamp gate: Git в package
+контейнере отвергал checkout с другим владельцем. В `575d676` чтение timestamp
+использует command-scoped `safe.directory` ровно для выбранного source root,
+без глобального разрешения произвольных репозиториев. BATS воспроизводит
+ownership mismatch через `GIT_TEST_ASSUME_DIFFERENT_OWNER=1`; старая команда
+падает на этом тесте, исправленная получает timestamp fixture-коммита.
+
+### Приёмка окончательной реализации
+
+Проверенный code SHA: `575d6762c495aa4881d92647c6751be2252987e3`.
+[QA 36167434858](https://github.com/ivni/mors/actions/runs/36167434858) — PASS:
+**504/504 BATS**, static/ShellCheck/actionlint, Rust fmt/clippy/tests/release,
+обе Xray compatibility jobs.
+
+| ABI | Окончательный CI | Verifier / IPK / повтор IPK / core ELF | Evidence |
+| --- | --- | --- | --- |
+| AArch64 | [36167425441](https://github.com/ivni/mors/actions/runs/36167425441) | PASS / PASS / PASS / PASS | [build.json](research/entware-core-68/ci/aarch64-3.10/build.json) |
+| MIPS BE | [36167428697](https://github.com/ivni/mors/actions/runs/36167428697) | PASS / PASS / PASS / PASS | [build.json](research/entware-core-68/ci/mips-3.4/build.json) |
+| MIPSel | [36167431767](https://github.com/ivni/mors/actions/runs/36167431767) | PASS / PASS / PASS / PASS | [build.json](research/entware-core-68/ci/mipsel-3.4/build.json) |
+
+[Сводный машиночитаемый результат](research/entware-core-68/ci/results.json)
+фиксирует source SHA, run URLs, OCI digests, ELF/IPK hashes, archive metadata
+и успех отдельных CI steps. Рядом с каждым `build.json` сохранены исходный
+`builder.env` и вывод `readelf` (`elf.txt`, удалены только конечные пробелы).
+Бинарные ELF/IPK остаются в GitHub Actions artifacts и не включены в Git.
+
+Скачанные артефакты независимо проверены: class/endian/machine ELF, SHA-256
+самого ELF, каждого перечисленного Git source input и core build helper,
+равенство manifest ожидаемым builder inputs, совпадение OCI digest с GHCR.
+Все три ELF побайтово совпали с соответствующими диагностическими ELF,
+проверенными ранее под QEMU. Повторный запуск CI ELF на физическом роутере
+этим не заявляется; `execution=not-tested` в manifests сохраняется.
+
+Каждый direct package compile занял **0–1 секунду** по секундному таймеру.
+В каждом CI job две сборки совпали побайтово; дополнительно одинаковый IPK
+получен из всех трёх разных ABI images:
+
+```text
+mors_1.3.0~rc2-1_all.ipk
+SHA-256: 1019b28523a386582ec089a16cb2867f280cedc28ae1db595c6b578b95647254
+SourceDateEpoch: 1790357353
+```
+
+Timestamp совпадает с committer timestamp проверенного code SHA. Это
+проверочный shell IPK, не релиз и не ABI-пакет с установленным Rust-ядром.
+Использование других source timestamps или прав файлов не обязано давать
+тот же digest. Критерии сборочной инфраструктуры #68 выполнены; NaiveProxy
+ISA/port/admission, физический router runtime и production packaging #69
+остаются самостоятельными задачами.

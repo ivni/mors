@@ -1,0 +1,98 @@
+[
+  {
+    "target": "aarch64-3.10",
+    "source_commit": "575d6762c495aa4881d92647c6751be2252987e3",
+    "run_url": "https://github.com/ivni/mors/actions/runs/36167425441",
+    "builder_id": "994ccf6d242a69dc049dca8a03101d2b5206e9744b07c14f0f5633a4a6c5bfdb",
+    "builder_image": "ghcr.io/ivni/mors-entware-builder@sha256:67157b952aa44e33ee84a6034643738faa5754f6f04e867cef39f96d665ecc8b",
+    "elf_sha256": "eadaa5baa6db12adcb6ed3d1c0a4874b372af98b59ad6bea0d05c8ca26bf3d4d",
+    "ipk_sha256": "1019b28523a386582ec089a16cb2867f280cedc28ae1db595c6b578b95647254",
+    "package_source_epoch": 1790357353,
+    "artifact_metadata": [
+      {
+        "id": 10879311664,
+        "name": "mors-ipk-check-aarch64-3.10",
+        "digest": "sha256:dae6d29ebfc32ebc18c772b32dbe8572bde793634128b9558edbbabf4f7019a9",
+        "size_in_bytes": 228446
+      },
+      {
+        "id": 10879191739,
+        "name": "mors-core-aarch64-3.10",
+        "digest": "sha256:f41e90c1d4d178f4b727746bf48aac618c6c03156ad7ccfe9ac91e87dc6f2c67",
+        "size_in_bytes": 150722
+      }
+    ],
+    "ci_checks": {
+      "Verify immutable builder": "success",
+      "Build package": "success",
+      "Verify repeat package build": "success",
+      "Build core scaffold for selected ABI": "success"
+    },
+    "verification": "PASS: Git source/helper hashes, ABI, ELF hash, manifest, registry digest, IPK source epoch",
+    "execution": "not-tested; identical ELF to the earlier QEMU-tested diagnostic build"
+  },
+  {
+    "target": "mips-3.4",
+    "source_commit": "575d6762c495aa4881d92647c6751be2252987e3",
+    "run_url": "https://github.com/ivni/mors/actions/runs/36167428697",
+    "builder_id": "3e38bac232f35e06e550e02bc850b77dfe86bd42491947c02e7df88d64e685f7",
+    "builder_image": "ghcr.io/ivni/mors-entware-builder@sha256:8c16bd214d22a3a41e10d016f6fa1e4d37317947dc10cfa9a95cda8dde43721b",
+    "elf_sha256": "157181e400294ffef6189ded01624be87ef392ff1ba84ee9cfd94842b485c0d3",
+    "ipk_sha256": "1019b28523a386582ec089a16cb2867f280cedc28ae1db595c6b578b95647254",
+    "package_source_epoch": 1790357353,
+    "artifact_metadata": [
+      {
+        "id": 10880115383,
+        "name": "mors-core-mips-3.4",
+        "digest": "sha256:7b21bdb9f85c6c9d399ec95674fd61b389905a247944a17107907a1c044e0f28",
+        "size_in_bytes": 174758
+      },
+      {
+        "id": 10879665580,
+        "name": "mors-ipk-check-mips-3.4",
+        "digest": "sha256:13fb064d3ee45945ad0cf8835806607d48e2a24a04c0134d2784c5afedb1dca1",
+        "size_in_bytes": 228446
+      }
+    ],
+    "ci_checks": {
+      "Verify immutable builder": "success",
+      "Build package": "success",
+      "Verify repeat package build": "success",
+      "Build core scaffold for selected ABI": "success"
+    },
+    "verification": "PASS: Git source/helper hashes, ABI, ELF hash, manifest, registry digest, IPK source epoch",
+    "execution": "not-tested; identical ELF to the earlier QEMU-tested diagnostic build"
+  },
+  {
+    "target": "mipsel-3.4",
+    "source_commit": "575d6762c495aa4881d92647c6751be2252987e3",
+    "run_url": "https://github.com/ivni/mors/actions/runs/36167431767",
+    "builder_id": "ba8256aea0ed40eb1b75e33bc32cf4f87a2a29127d09e7f7adfc299d5b1d208d",
+    "builder_image": "ghcr.io/ivni/mors-entware-builder@sha256:d7e419c76984864bd241023a285345a54caf36b2eadc946f7150a867a95a9a15",
+    "elf_sha256": "38a072268229aae2a0af966123036af8d698631fc9c1cdf002f0b2277e089b22",
+    "ipk_sha256": "1019b28523a386582ec089a16cb2867f280cedc28ae1db595c6b578b95647254",
+    "package_source_epoch": 1790357353,
+    "artifact_metadata": [
+      {
+        "id": 10879885678,
+        "name": "mors-core-mipsel-3.4",
+        "digest": "sha256:b7addc390cef8056703689e305493e2f4ff5735b7b9c909bb4049e03ce0f352a",
+        "size_in_bytes": 174526
+      },
+      {
+        "id": 10879825686,
+        "name": "mors-ipk-check-mipsel-3.4",
+        "digest": "sha256:d9608d634c9ed349a8d307fae31b3eb348bd6673c79f266febf08f579630a89f",
+        "size_in_bytes": 228446
+      }
+    ],
+    "ci_checks": {
+      "Verify immutable builder": "success",
+      "Build package": "success",
+      "Verify repeat package build": "success",
+      "Build core scaffold for selected ABI": "success"
+    },
+    "verification": "PASS: Git source/helper hashes, ABI, ELF hash, manifest, registry digest, IPK source epoch",
+    "execution": "not-tested; identical ELF to the earlier QEMU-tested diagnostic build"
+  }
+]
