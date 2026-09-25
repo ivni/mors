@@ -8,6 +8,11 @@ input_files=(
 	builder/entware/Dockerfile
 	builder/entware/Dockerfile.dockerignore
 	builder/entware/runtime-dependencies.mk
+	builder/entware/rust-toolchain.json
+	rust-toolchain.toml
+	scripts/qa/entware-rust.py
+	scripts/qa/entware-builder-id.sh
+	scripts/qa/verify-entware-builder.sh
 	scripts/qa/entware.lock
 	scripts/qa/entware-build.sh
 	scripts/qa/entware-feed-lock.sh
@@ -52,6 +57,7 @@ case "${1:-}" in
 		)"
 		printf 'entware_revision=%s\n' "${entware_revision}"
 		printf 'target_config=%s\n' "${target_config}"
+		python3 scripts/qa/entware-rust.py manifest
 		;;
 	*)
 		echo 'Usage: entware-builder-id.sh [--manifest]' >&2

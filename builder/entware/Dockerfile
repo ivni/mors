@@ -59,7 +59,8 @@ RUN mkdir -p /src/mors
 # BuildKit bind mounts expose only the allowlisted build inputs for this RUN.
 # They are never copied into an OCI layer; the reusable buildroot is created
 # directly in the final stage so Entware stamp and directory mtimes survive.
-RUN --mount=type=bind,source=Makefile,target=/src/mors/Makefile,readonly \
+RUN --mount=type=bind,source=rust-toolchain.toml,target=/src/mors/rust-toolchain.toml,readonly \
+	--mount=type=bind,source=Makefile,target=/src/mors/Makefile,readonly \
 	--mount=type=bind,source=opt,target=/src/mors/opt,readonly \
 	--mount=type=bind,source=builder/entware,target=/src/mors/builder/entware,readonly \
 	--mount=type=bind,source=scripts/qa,target=/src/mors/scripts/qa,readonly \
@@ -68,12 +69,14 @@ RUN --mount=type=bind,source=Makefile,target=/src/mors/Makefile,readonly \
 	&& test -n "${BUILDER_ID}" \
 	&& test "${actual_builder_id}" = "${BUILDER_ID}" \
 	&& ENTWARE_DIR=/opt/entware bash scripts/qa/entware-build.sh \
+	&& python3 scripts/qa/entware-rust.py build \
 	&& test ! -e /opt/entware/package/mors \
 	&& test -z "$(find /opt/entware/bin/targets -type f \
 		-name 'mors_*_all.ipk' -print -quit)" \
 	&& mkdir -p /opt/mors-builder \
 	&& bash scripts/qa/entware-builder-id.sh --manifest \
 		>/opt/mors-builder/manifest.env \
+	&& bash scripts/qa/verify-entware-builder.sh \
 	&& rm -rf /src/mors/packages
 
 LABEL org.opencontainers.image.source="https://github.com/ivni/mors"

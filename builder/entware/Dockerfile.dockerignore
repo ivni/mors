@@ -14,3 +14,7 @@
 !scripts/qa/entware-feed-lock.sh
 !scripts/qa/entware.lock
 !scripts/qa/opkg-version-order.sh
+!rust-toolchain.toml
+!builder/entware/rust-toolchain.json
+!scripts/qa/entware-rust.py
+!scripts/qa/verify-entware-builder.sh

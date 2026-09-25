@@ -10,52 +10,13 @@ if [ ! -r "${manifest}" ]; then
 	exit 1
 fi
 
-schema=''
-builder_id=''
-entware_lock_sha256=''
-runtime_dependencies_sha256=''
-entware_revision=''
-target_config=''
-while IFS='=' read -r key value; do
-	case "${key}" in
-		schema) schema="${value}" ;;
-		builder_id) builder_id="${value}" ;;
-		entware_lock_sha256) entware_lock_sha256="${value}" ;;
-		runtime_dependencies_sha256) runtime_dependencies_sha256="${value}" ;;
-		entware_revision) entware_revision="${value}" ;;
-		target_config) target_config="${value}" ;;
-		*)
-			echo "Unknown Entware builder manifest key: ${key}" >&2
-			exit 1
-			;;
-	esac
-done <"${manifest}"
-
-expected_builder_id="$(bash "${repo_root}/scripts/qa/entware-builder-id.sh")"
-expected_lock_sha256="$(
-	sha256sum "${repo_root}/scripts/qa/entware.lock" | awk '{ print $1 }'
-)"
-expected_dependencies_sha256="$(
-	sha256sum "${repo_root}/builder/entware/runtime-dependencies.mk" |
-		awk '{ print $1 }'
-)"
-expected_entware_revision="$(
-	awk '$1 == "entware" { print $3; exit }' \
-		"${repo_root}/scripts/qa/entware.lock"
-)"
-
-[ "${schema}" = entware-builder-v1 ] ||
-	{ echo "Unsupported Entware builder schema: ${schema}" >&2; exit 1; }
-[ "${builder_id}" = "${expected_builder_id}" ] ||
-	{ echo 'Entware builder ID does not match the checked-out inputs.' >&2; exit 1; }
-[ "${entware_lock_sha256}" = "${expected_lock_sha256}" ] ||
-	{ echo 'Entware builder lock digest does not match.' >&2; exit 1; }
-[ "${runtime_dependencies_sha256}" = "${expected_dependencies_sha256}" ] ||
-	{ echo 'Entware builder dependency digest does not match.' >&2; exit 1; }
-[ "${entware_revision}" = "${expected_entware_revision}" ] ||
-	{ echo 'Entware builder revision does not match the lock.' >&2; exit 1; }
-[ "${target_config}" = configs/aarch64-3.10.config ] ||
-	{ echo "Unexpected Entware builder target: ${target_config}" >&2; exit 1; }
+# Compare the complete canonical manifest: missing, unknown, duplicate and stale
+# fields all fail closed. Never source an image-provided manifest as shell code.
+expected_manifest="$(bash "${repo_root}/scripts/qa/entware-builder-id.sh" --manifest)"
+[ "$(cat "${manifest}")" = "${expected_manifest}" ] ||
+	{ echo 'Entware builder manifest does not match the checked-out inputs.' >&2; exit 1; }
+builder_id="$(sed -n 's/^builder_id=//p' "${manifest}")"
+entware_revision="$(sed -n 's/^entware_revision=//p' "${manifest}")"
 
 if [ -n "${MORS_ENTWARE_BUILDER_ID:-}" ] &&
 	[ "${MORS_ENTWARE_BUILDER_ID}" != "${builder_id}" ]; then
@@ -131,5 +92,7 @@ if find "${entware_dir}/bin/targets" -type f \
 	echo 'Entware builder contains a stale Mors package artifact.' >&2
 	exit 1
 fi
+
+python3 "${repo_root}/scripts/qa/entware-rust.py" verify
 
 printf 'Entware builder verified: %s\n' "${builder_id}"

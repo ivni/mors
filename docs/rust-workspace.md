@@ -50,8 +50,9 @@ rustfmt и clippy. Это версия исходников из [#60](research/
 - Отдельные Entware std/GCC 8.4.0/sysroot, glibc 2.27 для трёх ABI;
   плавающий `nightly` и stock rustup MIPS target не заменяют этот lock.
 
-Постоянный cross-builder и окончательный dynamic/static linkage — #67;
-до получения ELF/dependency/loader evidence production linkage не выбран.
+Контракт постоянного AArch64 cross-builder описан в
+[immutable Rust builder (#67)](entware-rust-builder.md). До получения
+ELF/dependency/loader evidence production linkage не выбран.
 Host release binary не включается в нынешний `all.ipk`. Rust нужен только
 на машине сборки; установка toolchain на роутер не добавляется.
 
