@@ -2,7 +2,8 @@
 
 База: `main`, `1893eb7`. Границы соответствуют
 [ADR-0001](adr/0001-connection-core-boundaries.md). Это исходники будущего
-управляющего ядра, пока без daemon, IPC, сети, файлов состояния и router API.
+управляющего ядра, пока без daemon, файлов состояния и router API. В #72 добавлен
+отдельно тестируемый [volatile snapshot и локальный API чтения](volatile-read-api.md).
 Первый бинарник `mors-core` печатает только справку/версию; неизвестные и лишние
 аргументы отклоняются с кодом 2 без отражения входных значений в stderr.
 Без аргументов показывается справка. Версия `0.1.0` относится к каркасу,
@@ -15,7 +16,7 @@
 | `mors-domain` | Чистые типы capability, operation, transport, health/selection и версия контракта | Нет |
 | `mors-adapters` | Типизированный интерфейс engine adapter и каркас NaiveProxy | domain |
 | `mors-platform` | Отдельная граница допуска platform routing | domain |
-| `mors-coordinator` | Место будущего единственного владельца orchestration; пока только граница crate | domain, adapters, platform |
+| `mors-coordinator` | Volatile snapshot и root-only API чтения; orchestration ещё не подключён | domain, adapters, platform; Linux rustix |
 | `mors-core` | Безопасный бинарник help/version, пока без подключения coordinator | Нет |
 
 Чистые health/selection реализованы в [#70](health-selection.md) без подключения к runtime.
@@ -58,8 +59,8 @@ ELF/dependency/loader evidence production linkage не выбран.
 Host release binary не включается в нынешний `all.ipk`. Rust нужен только
 на машине сборки; установка toolchain на роутер не добавляется.
 
-Внешних crate нет. Все workspace dependencies локальные; `Cargo.lock`
-хранится в Git. Проверки используют `--frozen` (locked + offline), поэтому
+Для Linux IPC используется `rustix`, для tests — `serde_json`; `Cargo.lock`
+хранится в Git. После явного `cargo fetch --locked` проверки используют `--frozen` (locked + offline), поэтому
 не могут скрыто обновить lockfile или скачать dependency. Это воспроизводимость
 dependency resolution, не обещание побитового совпадения ELF между разными host.
 
@@ -69,6 +70,7 @@ dependency resolution, не обещание побитового совпаде
 
 ```sh
 rustup show active-toolchain
+cargo fetch --locked
 bash scripts/qa/rust.sh
 bash scripts/qa/static.sh
 bats tests

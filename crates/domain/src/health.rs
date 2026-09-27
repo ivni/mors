@@ -154,6 +154,9 @@ impl Health {
     pub fn last_success(&self) -> Option<Time> {
         self.success_at
     }
+    pub fn last_observed_at(&self) -> Option<Time> {
+        self.last.map(|observation| observation.observed_at)
+    }
     pub fn latency_ms(&self) -> Option<u32> {
         self.latency_ms
     }

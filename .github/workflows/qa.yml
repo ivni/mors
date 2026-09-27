@@ -58,7 +58,15 @@ jobs:
         run: rustup show active-toolchain
 
       - name: Rust checks and release build
-        run: bash scripts/qa/rust.sh
+        run: |
+          cargo fetch --locked
+          bash scripts/qa/rust.sh
+
+      - name: Root-only local API and read-only I/O gate
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y strace
+          sudo bash scripts/qa/read-api-io.sh
 
   xray:
     name: Xray ${{ matrix.version }} compatibility
