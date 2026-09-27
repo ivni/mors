@@ -2,7 +2,7 @@
 
 База: `main`, `1893eb7`. Границы соответствуют
 [ADR-0001](adr/0001-connection-core-boundaries.md). Это исходники будущего
-управляющего ядра, пока без daemon, файлов состояния и router API. В #72 добавлен
+управляющего ядра, пока без daemon и router API. В #72 добавлен
 отдельно тестируемый [volatile snapshot и локальный API чтения](volatile-read-api.md).
 Первый бинарник `mors-core` печатает только справку/версию; неизвестные и лишние
 аргументы отклоняются с кодом 2 без отражения входных значений в stderr.
@@ -17,11 +17,13 @@
 | `mors-adapters` | Типизированный интерфейс engine adapter и каркас NaiveProxy | domain |
 | `mors-platform` | Отдельная граница допуска platform routing | domain |
 | `mors-coordinator` | Volatile snapshot и root-only API чтения; orchestration ещё не подключён | domain, adapters, platform; Linux rustix |
+| `mors-storage` | Versioned registry и защищённые immutable secrets, Linux I/O | Нет |
 | `mors-core` | Безопасный бинарник help/version, пока без подключения coordinator | Нет |
 
 Чистые health/selection реализованы в [#70](health-selection.md) без подключения к runtime.
 
-Реестр/secret store, observability, typed lifecycle
+Реестр/secret store реализован отдельно в [#71](connection-registry.md).
+Observability, typed lifecycle
 prepare/apply/verify/restore/probe/drain и протокол команд реализуются в своих
 последующих задачах. Пустая граница координатора намеренно не имитирует рабочие
 транзакции. Адаптеры и platform не зависят от coordinator и не выбирают active.

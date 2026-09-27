@@ -9,6 +9,8 @@ if [ -z "${toolchain}" ]; then
 	echo "Missing pinned host toolchain in rust-toolchain.toml" >&2
 	exit 1
 fi
+# Fetch exactly Cargo.lock before the offline/frozen validation gates.
+cargo "+${toolchain}" fetch --locked
 cargo "+${toolchain}" fmt --all -- --check
 cargo "+${toolchain}" clippy --workspace --all-targets --frozen -- -D warnings
 cargo "+${toolchain}" test --workspace --all-targets --frozen
