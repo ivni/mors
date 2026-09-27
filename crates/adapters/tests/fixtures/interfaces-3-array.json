@@ -1,0 +1,9 @@
+[
+  {"id":"Wireguard0","type":"Wireguard","state":"up","link":"down","connected":"no","global":false},
+  {"id":"PPTP0","type":"PPTP","interface-name":"ppp0","state":"down","link":"down","defaultgw":true},
+  {"id":"PPPoE0","type":"PPPOE","defaultgw":false,"state":"up"},
+  {"id":"Proxy21","type":"Proxy","interface-name":"opkg21","state":"down","description":"Mors-proxy-vless"},
+  {"id":"OpenVPN0","type":"OpenVPN","state":"up"},
+  {"id":"Server0","type":"PPTPServer","state":"up"},
+  {"type":"IKE","state":"future-state"}
+]

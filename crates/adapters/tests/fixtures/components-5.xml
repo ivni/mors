@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<components version="5.00.C.12.0-0">
+  <group><name>NotAComponent</name></group>
+  <component><name>base</name><description>Ignored</description></component>
+  <component><name>proxy</name></component>
+  <component><name>opkg-kmod-netfilter</name></component>
+</components>

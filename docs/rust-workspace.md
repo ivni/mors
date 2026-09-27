@@ -121,3 +121,5 @@ Makefile, `/opt`, shell dispatch, NDM hooks, decision lock #57 и пакетна
 в эту задачу не входят.
 
 Транзакционный исполнитель #73 описан в [отдельном контракте](transaction-executor.md).
+
+Read-only адаптер Keenetic описан в [контракте обнаружения](keenetic-discovery.md).

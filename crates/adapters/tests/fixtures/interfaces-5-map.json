@@ -1,0 +1,8 @@
+{
+  "GigabitEthernet0": {"id":"GigabitEthernet0","type":"GigabitEthernet","interface-name":"eth0","state":"up","link":"up","connected":"yes","defaultgw":true,"global":true},
+  "Bridge0": {"id":"Bridge0","type":"Bridge","interface-name":"br0","state":"up","link":"up","connected":"yes"},
+  "Proxy0": {"id":"Proxy0","type":"Proxy","interface-name":"opkg0","state":"down","link":"down","connected":"no"},
+  "SSTP0": {"id":"SSTP0","type":"SSTP","state":"up","link":"down","connected":"no"},
+  "Wireguard0": {"id":"Wireguard0","type":"Wireguard","interface-name":"nwg0","state":"up","link":"up","connected":"yes"},
+  "New0": {"id":"New0","type":"NewType","state":"up"}
+}
