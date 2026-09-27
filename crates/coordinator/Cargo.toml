@@ -9,12 +9,12 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+mors-storage = { path = "../storage" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 mors-domain.workspace = true
 mors-adapters.workspace = true
 mors-platform.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1.1", features = ["fs", "net", "process"] }
-
-[dev-dependencies]
-serde_json = "1.0"

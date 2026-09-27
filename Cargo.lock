@@ -56,7 +56,9 @@ dependencies = [
  "mors-adapters",
  "mors-domain",
  "mors-platform",
+ "mors-storage",
  "rustix",
+ "serde",
  "serde_json",
 ]
 

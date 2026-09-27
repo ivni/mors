@@ -16,7 +16,7 @@
 | `mors-domain` | Чистые типы capability, operation, transport, health/selection и версия контракта | Нет |
 | `mors-adapters` | Типизированный интерфейс engine adapter и каркас NaiveProxy | domain |
 | `mors-platform` | Отдельная граница допуска platform routing | domain |
-| `mors-coordinator` | Volatile snapshot и root-only API чтения; orchestration ещё не подключён | domain, adapters, platform; Linux rustix |
+| `mors-coordinator` | Volatile snapshot, root-only API чтения и fake transaction executor | domain, adapters, platform, storage; serde, Linux rustix |
 | `mors-storage` | Versioned registry и защищённые immutable secrets, Linux I/O | Нет |
 | `mors-core` | Безопасный бинарник help/version, пока без подключения coordinator | Нет |
 
@@ -116,3 +116,5 @@ Makefile, `/opt`, shell dispatch, NDM hooks, decision lock #57 и пакетна
 
 Локальные проверки каркаса завершены. Выпуск пакета и включение нового runtime
 в эту задачу не входят.
+
+Транзакционный исполнитель #73 описан в [отдельном контракте](transaction-executor.md).
