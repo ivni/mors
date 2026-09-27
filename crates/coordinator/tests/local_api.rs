@@ -184,7 +184,15 @@ fn unprivileged_peer_is_rejected_even_if_socket_permissions_are_relaxed() {
     fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o755)).unwrap();
     let path = directory.0.join(SOCKET_NAME);
     fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
-    let mut child = Command::new(std::env::current_exe().unwrap())
+    // CI checkout ancestors may be private to the runner. Give the deliberately
+    // unprivileged child its own executable path without relaxing checkout ACLs.
+    let executable_directory = Directory::new("/tmp");
+    let executable = executable_directory.0.join("peer-test");
+    fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions(&executable_directory.0, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut child = Command::new(executable)
+        .current_dir("/")
         .args(["--exact", "unprivileged_child"])
         .env("MORS72_SOCKET", &path)
         .uid(65534)
