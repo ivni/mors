@@ -1,5 +1,8 @@
 //! Pure contracts for registry, health/selection and adapters.
-//! No I/O, persistence, clock, secrets or selection policy in this scaffold.
+//! No I/O, persistence, real clock or secrets; health/selection only returns plans.
+
+pub mod health;
+pub mod selection;
 
 /// In-process contract version, not a dynamic Rust plugin ABI.
 pub const ADAPTER_CONTRACT_VERSION: u32 = 1;

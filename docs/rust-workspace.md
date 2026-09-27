@@ -12,13 +12,15 @@
 
 | Crate | Ответственность | Зависимости workspace |
 | --- | --- | --- |
-| `mors-domain` | Чистые типы capability, operation, transport и версия контракта | Нет |
+| `mors-domain` | Чистые типы capability, operation, transport, health/selection и версия контракта | Нет |
 | `mors-adapters` | Типизированный интерфейс engine adapter и каркас NaiveProxy | domain |
 | `mors-platform` | Отдельная граница допуска platform routing | domain |
 | `mors-coordinator` | Место будущего единственного владельца orchestration; пока только граница crate | domain, adapters, platform |
 | `mors-core` | Безопасный бинарник help/version, пока без подключения coordinator | Нет |
 
-Реестр/secret store, чистые health/selection, observability, typed lifecycle
+Чистые health/selection реализованы в [#70](health-selection.md) без подключения к runtime.
+
+Реестр/secret store, observability, typed lifecycle
 prepare/apply/verify/restore/probe/drain и протокол команд реализуются в своих
 последующих задачах. Пустая граница координатора намеренно не имитирует рабочие
 транзакции. Адаптеры и platform не зависят от coordinator и не выбирают active.
