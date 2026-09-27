@@ -110,7 +110,7 @@ fn state(value: Option<&str>) -> State {
         _ => State::Unknown,
     }
 }
-fn semantic_error(value: &Value) -> bool {
+pub(crate) fn semantic_error(value: &Value) -> bool {
     match value {
         Value::Object(m) => {
             m.get("status").and_then(Value::as_str) == Some("error")
@@ -263,16 +263,46 @@ pub fn read_bounded(reader: impl Read) -> Result<Vec<u8>, Error> {
 
 #[cfg(target_os = "linux")]
 fn read_interfaces_http(url: &str) -> Result<(u32, Vec<u8>), Error> {
+    read_interfaces_http_timeout(url, std::time::Duration::from_secs(5))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn read_interfaces_http_timeout(
+    url: &str,
+    timeout: std::time::Duration,
+) -> Result<(u32, Vec<u8>), Error> {
+    http_request(url, None, timeout)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn http_request(
+    url: &str,
+    payload: Option<&[u8]>,
+    timeout: std::time::Duration,
+) -> Result<(u32, Vec<u8>), Error> {
+    if timeout.is_zero() {
+        return Err(Error::Transport);
+    }
     use std::time::Duration;
     let mut easy = curl::easy::Easy::new();
     easy.url(url).map_err(|_| Error::Transport)?;
-    easy.get(true).map_err(|_| Error::Transport)?;
+    if let Some(payload) = payload {
+        easy.post(true).map_err(|_| Error::Transport)?;
+        easy.post_fields_copy(payload)
+            .map_err(|_| Error::Transport)?;
+        let mut headers = curl::easy::List::new();
+        headers
+            .append("Content-Type: application/json")
+            .map_err(|_| Error::Transport)?;
+        easy.http_headers(headers).map_err(|_| Error::Transport)?;
+    } else {
+        easy.get(true).map_err(|_| Error::Transport)?;
+    }
     easy.proxy("").map_err(|_| Error::Transport)?;
     easy.follow_location(false).map_err(|_| Error::Transport)?;
-    easy.connect_timeout(Duration::from_secs(2))
+    easy.connect_timeout(timeout.min(Duration::from_secs(2)))
         .map_err(|_| Error::Transport)?;
-    easy.timeout(Duration::from_secs(5))
-        .map_err(|_| Error::Transport)?;
+    easy.timeout(timeout).map_err(|_| Error::Transport)?;
     let mut body = Vec::new();
     let mut limited = false;
     let performed;

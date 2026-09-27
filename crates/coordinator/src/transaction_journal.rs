@@ -11,13 +11,30 @@ use std::{
 const LIMIT: u64 = 64 * 1024;
 const CURRENT: &str = "transaction.json";
 const PENDING: &str = ".transaction.pending";
-pub struct FileJournal {
+/// Shared durable storage mechanism; record schemas remain independent.
+pub trait DurableRecord: serde::Serialize + serde::de::DeserializeOwned {
+    const CURRENT: &'static str = CURRENT;
+    const PENDING: &'static str = PENDING;
+    fn validate(&self) -> Result<()>;
+    fn is_prepared(&self) -> bool;
+}
+impl DurableRecord for Record {
+    fn validate(&self) -> Result<()> {
+        Record::validate(self)
+    }
+    fn is_prepared(&self) -> bool {
+        self.phase == crate::transaction::Phase::Prepared
+    }
+}
+pub type FileJournal = RecordJournal<Record>;
+pub struct RecordJournal<R> {
+    record_type: std::marker::PhantomData<R>,
     root: OwnedFd,
     poisoned: bool,
     #[cfg(test)]
     fail_at: usize,
 }
-impl FileJournal {
+impl<R: DurableRecord> RecordJournal<R> {
     pub fn open(path: &Path) -> Result<Self> {
         if !path.is_absolute() {
             return Err(Reason::Journal);
@@ -50,6 +67,7 @@ impl FileJournal {
             }
         })?;
         Ok(Self {
+            record_type: std::marker::PhantomData,
             root,
             poisoned: false,
             #[cfg(test)]
@@ -94,12 +112,12 @@ impl FileJournal {
         }
         Ok(())
     }
-    fn write(&self, record: &Record) -> Result<()> {
+    fn write(&self, record: &R) -> Result<()> {
         record.validate()?;
         // Reject an unsafe existing target even though rename would not follow it.
-        self.read_file(CURRENT)?;
-        if self.read_file(PENDING)?.is_some() {
-            fs::unlinkat(&self.root, PENDING, AtFlags::empty()).map_err(|_| Reason::Journal)?;
+        self.read_file(R::CURRENT)?;
+        if self.read_file(R::PENDING)?.is_some() {
+            fs::unlinkat(&self.root, R::PENDING, AtFlags::empty()).map_err(|_| Reason::Journal)?;
         }
         let bytes = serde_json::to_vec(record).map_err(|_| Reason::Journal)?;
         if bytes.len() as u64 > LIMIT {
@@ -107,7 +125,7 @@ impl FileJournal {
         }
         let fd = fs::openat(
             &self.root,
-            PENDING,
+            R::PENDING,
             OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::from_raw_mode(0o600),
         )
@@ -118,38 +136,39 @@ impl FileJournal {
         self.checkpoint(1)?;
         file.sync_all().map_err(|_| Reason::Journal)?;
         self.checkpoint(2)?;
-        fs::renameat(&self.root, PENDING, &self.root, CURRENT).map_err(|_| Reason::Journal)?;
+        fs::renameat(&self.root, R::PENDING, &self.root, R::CURRENT)
+            .map_err(|_| Reason::Journal)?;
         self.checkpoint(3)?;
         fs::fsync(&self.root).map_err(|_| Reason::Journal)?;
         self.checkpoint(4)
     }
 }
-impl Journal for FileJournal {
-    fn load(&mut self) -> Result<Option<Record>> {
+impl<R: DurableRecord> RecordJournal<R> {
+    pub fn load_record(&mut self) -> Result<Option<R>> {
         if self.poisoned {
             return Err(Reason::Journal);
         }
-        let bytes = match self.read_file(CURRENT)? {
+        let bytes = match self.read_file(R::CURRENT)? {
             Some(bytes) => bytes,
             None => {
-                let Some(bytes) = self.read_file(PENDING)? else {
+                let Some(bytes) = self.read_file(R::PENDING)? else {
                     return Ok(None);
                 };
-                let record: Record = serde_json::from_slice(&bytes).map_err(|_| Reason::Journal)?;
+                let record: R = serde_json::from_slice(&bytes).map_err(|_| Reason::Journal)?;
                 record.validate().map_err(|_| Reason::Journal)?;
                 // First prepare was not published. No effect was authorized.
-                if record.phase != crate::transaction::Phase::Prepared {
+                if !record.is_prepared() {
                     return Err(Reason::Journal);
                 }
                 return Ok(Some(record));
             }
         };
 
-        let record: Record = serde_json::from_slice(&bytes).map_err(|_| Reason::Journal)?;
+        let record: R = serde_json::from_slice(&bytes).map_err(|_| Reason::Journal)?;
         record.validate().map_err(|_| Reason::Journal)?;
         Ok(Some(record))
     }
-    fn save(&mut self, record: &Record) -> Result<()> {
+    pub fn save_record(&mut self, record: &R) -> Result<()> {
         if self.poisoned {
             return Err(Reason::Journal);
         }
@@ -158,6 +177,15 @@ impl Journal for FileJournal {
             return Err(Reason::Journal);
         }
         Ok(())
+    }
+}
+
+impl Journal for FileJournal {
+    fn load(&mut self) -> Result<Option<Record>> {
+        self.load_record()
+    }
+    fn save(&mut self, record: &Record) -> Result<()> {
+        self.save_record(record)
     }
 }
 

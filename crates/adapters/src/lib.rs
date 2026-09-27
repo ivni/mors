@@ -1,4 +1,5 @@
-//! Typed engine boundary. Config/secret handling and lifecycle effects are deferred.
+//! Typed engine boundary, discovery and prepared native VPN lifecycle.
+//! Protocol configuration and adoption remain separate integration work.
 //! Adapters never select the active connection or write the durable registry.
 
 use mors_domain::{Capability, Operation, Transport, TransportContract};
@@ -66,3 +67,4 @@ mod tests {
 }
 
 pub mod keenetic;
+pub mod native;

@@ -1,0 +1,47 @@
+[
+  {
+    "stage": "grant",
+    "result": "Ok(())"
+  },
+  {
+    "stage": "stop",
+    "result": "Ok(Some(Down))"
+  },
+  {
+    "stage": "repeat-stop",
+    "result": "Ok(Some(Down))"
+  },
+  {
+    "stage": "start",
+    "result": "Err(Failure { reason: Unknown, recovery_required: true })"
+  },
+  {
+    "stage": "recover",
+    "result": "failure reason=Unknown recovery=true"
+  },
+  {
+    "stage": "recover",
+    "result": "recovered phase=Reconciled user_down=true revoked=false"
+  },
+  {
+    "stage": "automatic",
+    "result": "Err(Failure { reason: Policy, recovery_required: false })"
+  },
+  {
+    "stage": "stale-stop",
+    "result": "Err(Failure { reason: OwnershipConflict, recovery_required: true })"
+  },
+  {
+    "stage": "recover",
+    "result": "failure reason=OwnershipConflict recovery=true"
+  },
+  {
+    "stage": "reused_id",
+    "state": "down",
+    "old_grant": "revoked"
+  },
+  {
+    "stage": "cleanup",
+    "configuration_restored": true
+  }
+]

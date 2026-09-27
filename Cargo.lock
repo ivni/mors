@@ -104,6 +104,7 @@ dependencies = [
  "curl",
  "mors-domain",
  "roxmltree",
+ "serde",
  "serde_json",
 ]
 
