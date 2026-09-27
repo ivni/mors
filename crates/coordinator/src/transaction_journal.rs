@@ -170,6 +170,15 @@ mod tests {
         os::unix::fs::{symlink, PermissionsExt},
         path::PathBuf,
     };
+    // A concurrent subprocess spawn can inherit another test's flock descriptor
+    // until exec closes CLOEXEC fds. Keep unrelated lease fixtures out of that
+    // window; the explicit subprocess exclusion checks remain cross-process.
+    static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn isolate() -> std::sync::MutexGuard<'static, ()> {
+        TEST_SERIAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
@@ -245,6 +254,7 @@ mod tests {
     }
     #[test]
     fn durable_roundtrip_permissions_and_volatile_exclusion() {
+        let _isolation = isolate();
         let dir = Fixture::new();
         let mut journal = FileJournal::open(&dir.0).unwrap();
         assert!(matches!(FileJournal::open(&dir.0), Err(Reason::Busy)));
@@ -266,6 +276,7 @@ mod tests {
     }
     #[test]
     fn all_atomic_replace_failure_boundaries_poison_writer_and_reopen_valid_record() {
+        let _isolation = isolate();
         for point in 1..=4 {
             let dir = Fixture::new();
             let mut journal = FileJournal::open(&dir.0).unwrap();
@@ -286,6 +297,7 @@ mod tests {
     }
     #[test]
     fn unsafe_files_directories_and_symlink_ancestors_are_rejected() {
+        let _isolation = isolate();
         let dir = Fixture::new();
         let other = Fixture::new();
         symlink(&other.0, dir.0.join("link")).unwrap();
@@ -308,6 +320,7 @@ mod tests {
     }
     #[test]
     fn malformed_and_future_records_are_preserved() {
+        let _isolation = isolate();
         for bytes in [
             b"{broken".to_vec(),
             serde_json::to_vec(&Record {
@@ -326,6 +339,7 @@ mod tests {
     }
     #[test]
     fn subprocess_lock_probe() {
+        let _isolation = isolate();
         let Some(path) = std::env::var_os("MORS_TEST_JOURNAL_PATH") else {
             return;
         };
@@ -336,6 +350,7 @@ mod tests {
     }
     #[test]
     fn independent_process_cannot_acquire_current_executor_lease() {
+        let _isolation = isolate();
         let dir = Fixture::new();
         let lease = FileJournal::open(&dir.0).unwrap();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
@@ -353,6 +368,7 @@ mod tests {
 
     #[test]
     fn initial_unpublished_intent_recovers_without_allowing_apply() {
+        let _isolation = isolate();
         for point in 1..=4 {
             let dir = Fixture::new();
             let mut journal = FileJournal::open(&dir.0).unwrap();
@@ -369,6 +385,7 @@ mod tests {
     }
     #[test]
     fn subprocess_crash_writer() {
+        let _isolation = isolate();
         let Some(path) = std::env::var_os("MORS_TEST_CRASH_JOURNAL") else {
             return;
         };
@@ -378,6 +395,7 @@ mod tests {
     }
     #[test]
     fn process_exit_releases_lease_and_preserves_intent() {
+        let _isolation = isolate();
         let dir = Fixture::new();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
