@@ -1,0 +1,311 @@
+{
+  "schema": "mors-naiveproxy-packaging-evidence-v1",
+  "date": "2026-09-27",
+  "architecture": "aarch64-3.10",
+  "package": "mors-naiveproxy_150.0.7871.63-1_aarch64-3.10.ipk",
+  "package_sha256": "3e4c881bb8b025e52609acad379aa9b9b34bbcebcf43cef0b44cb0ec59dcad56",
+  "package_size": 4417747,
+  "runtime_sha256": "cadb0398c37a0e3d4b69f78e7cae8d9474ae1ed24f4efff714e36725f02dfbb3",
+  "source_commit": "3ba967e2d36cc133a896e81a36257ad4c6ea20f4",
+  "input_lock_sha256": "b64387b991a8f2774e23702ff7bbecb64531d21af41ee8f4cc82d821cd855c3f",
+  "recipe_sha256": {
+    "builder/entware/naiveproxy-inputs.json": "b64387b991a8f2774e23702ff7bbecb64531d21af41ee8f4cc82d821cd855c3f",
+    "builder/entware/naiveproxy-common.gn": "93e480f260ec9604e972b1fc5ff439dd9e1c226eb1b7d1af237a8d0da181849d",
+    "builder/entware/naiveproxy-linkmap.patch": "76f8368046618d88b731676c2c006e60f29a569f9ef505149343b765de8c94a2",
+    "docs/research/naiveproxy-63/idle-handshake-created-at.patch": "01b7d7d4356ce8d6b9d5367c1322d919f96201a8fd99d96b9a896a943d0c935f",
+    "scripts/qa/naiveproxy-inputs.py": "af6e61a45db1e19aab68ad714f2cd4fe88c6ed5fa778312b61ccb1621d6d99b4",
+    "scripts/qa/naiveproxy-runtime-build.py": "c4dc7212497ecec8e077fd9b8d0806ca6bb657b6f03d6c74e6dac86b28055d55",
+    "scripts/qa/naiveproxy-ninja.sh": "0a5a970660893976fc2a050daaede1418230fdbce5c801c176b866872684dea9"
+  },
+  "finalization": {
+    "schema": "mors-runtime-finalization-v1",
+    "linked_elf_sha256": "57eb2cb3c0aa9299dd556e10c114f2f9ba7c60eefc439c963ca6b98a946c3dda",
+    "elf_sha256": "cadb0398c37a0e3d4b69f78e7cae8d9474ae1ed24f4efff714e36725f02dfbb3",
+    "allocated_sections": {
+      ".note.gnu.build-id": {
+        "address": 2097776,
+        "size": 36,
+        "type": 7,
+        "flags": 2,
+        "alignment": 4,
+        "sha256": "71784bc457bd33d4b97dd9cd0968468fc8f71d1f84ed101652d6e3f78ad82b62"
+      },
+      ".rodata": {
+        "address": 2097920,
+        "size": 1083180,
+        "type": 1,
+        "flags": 50,
+        "alignment": 128,
+        "sha256": "ae740c5b24e45c4d8b9aa11af2412a950719063087a7c70fed43559f559e34b5"
+      },
+      ".eh_frame_hdr": {
+        "address": 3181100,
+        "size": 452,
+        "type": 1,
+        "flags": 2,
+        "alignment": 4,
+        "sha256": "f6fe1b152752baaa6ff0dc58bc2302c59399b61160b4be84abad0f0eb8ff328e"
+      },
+      ".eh_frame": {
+        "address": 3181552,
+        "size": 1500,
+        "type": 1,
+        "flags": 2,
+        "alignment": 8,
+        "sha256": "9a009d43d2e7d0909c3e9e980af962bcc8b714663c6e86e464150040b2875771"
+      },
+      ".text": {
+        "address": 3248640,
+        "size": 6513336,
+        "type": 1,
+        "flags": 6,
+        "alignment": 64,
+        "sha256": "4f3234562b87f750e6fe210654a65c7982e033ef17381807ac06a97ba74aa586"
+      },
+      ".init": {
+        "address": 9761976,
+        "size": 16,
+        "type": 1,
+        "flags": 6,
+        "alignment": 4,
+        "sha256": "27a4135f0ef448195b3aaba32a661f2d0e290090b19501c7b4274d71cf655f69"
+      },
+      ".fini": {
+        "address": 9761992,
+        "size": 16,
+        "type": 1,
+        "flags": 6,
+        "alignment": 4,
+        "sha256": "27a4135f0ef448195b3aaba32a661f2d0e290090b19501c7b4274d71cf655f69"
+      },
+      "malloc_hook": {
+        "address": 9762016,
+        "size": 1848,
+        "type": 1,
+        "flags": 6,
+        "alignment": 16,
+        "sha256": "8a4b04e99b2fa6bb3170dc87d047f60b0a855679a878b5ddaa1056dc1d067e03"
+      },
+      "__lcxx_override": {
+        "address": 9763872,
+        "size": 272,
+        "type": 1,
+        "flags": 6,
+        "alignment": 16,
+        "sha256": "f8c5636e36d0d3e8a95d0251954311c02b16876b353e8719f289f7053f9a95ec"
+      },
+      ".tdata": {
+        "address": 9829680,
+        "size": 85,
+        "type": 1,
+        "flags": 1027,
+        "alignment": 8,
+        "sha256": "f5475cf2f85b8121eaa7a6eed1e38bfd45e7caf0daafd2861b25c637d2088ff8"
+      },
+      ".tbss": {
+        "address": 9829768,
+        "size": 232,
+        "type": 8,
+        "flags": 1027,
+        "alignment": 8,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      ".fini_array": {
+        "address": 9829768,
+        "size": 8,
+        "type": 15,
+        "flags": 3,
+        "alignment": 8,
+        "sha256": "b61a9a82e4d417dcd6c6a1c7f1d1df228a03e25a962384f16467e42d04c94713"
+      },
+      ".init_array": {
+        "address": 9829776,
+        "size": 16,
+        "type": 14,
+        "flags": 3,
+        "alignment": 8,
+        "sha256": "9b413e99cf3ffb02a7938d206546d2bd43b68532216e77a25f4b0c128a181a4d"
+      },
+      ".got": {
+        "address": 9829792,
+        "size": 296,
+        "type": 1,
+        "flags": 3,
+        "alignment": 8,
+        "sha256": "38dd0decf990bfdae6e24f0e5f3e85f8f22ef7cc58b1859cd93b02ec19f49eaa"
+      },
+      ".relro_padding": {
+        "address": 9830088,
+        "size": 312,
+        "type": 8,
+        "flags": 3,
+        "alignment": 1,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      ".data": {
+        "address": 9895624,
+        "size": 4776,
+        "type": 1,
+        "flags": 3,
+        "alignment": 8,
+        "sha256": "b51b6b77a9a6d5e4572ffc98e1a6d8efe369b576b5a6067ad90b4321110ac3a8"
+      },
+      ".bss": {
+        "address": 9900416,
+        "size": 50360,
+        "type": 8,
+        "flags": 3,
+        "alignment": 64,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "allocated_sections_unchanged": true,
+    "program_headers_unchanged": true,
+    "gnu_attribute_records_before": 0,
+    "gnu_attribute_records_after": 0,
+    "objcopy_sha256": "f5097a6644a99a6b36e2b4a711ddd2cb1dfd609f79bd86d1f7fe2fcb3cfff10a",
+    "recipe_sha256": "858e12069b9735957a93876ccbf788587c28104e65a4df861a54a2bc15b53fb9"
+  },
+  "trust": {
+    "file": "/opt/apps/mors-naiveproxy/share/ca/ca-bundle.crt",
+    "directory": "/opt/apps/mors-naiveproxy/share/ca/empty",
+    "version": "2026.7.22",
+    "sha256": "9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f",
+    "embedded_chrome_root_store": true
+  },
+  "payload_sha256": {
+    "opt/apps/mors-naiveproxy/bin/naive": "cadb0398c37a0e3d4b69f78e7cae8d9474ae1ed24f4efff714e36725f02dfbb3",
+    "opt/apps/mors-naiveproxy/share/ca/ca-bundle.crt": "9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f",
+    "opt/apps/mors-naiveproxy/share/sbom.cdx.json": "666a07ec656f1fe72e0d3951f5b8aa7f21511d6f34bfd83fbf987e8d4cbe0173",
+    "opt/apps/mors-naiveproxy/share/components.json": "25975525f8067bc746e5aa13b99cb4683e54d219ea5d7d913f7fcfeebb7e544f",
+    "opt/apps/mors-naiveproxy/share/licenses/LICENSE": "368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/cityhash/COPYING": "3ed00dd93c75655599456c83cba2f69c6824fd53f24fc24206ba27b65057709d",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/cityhash_v103/COPYING": "3ed00dd93c75655599456c83cba2f69c6824fd53f24fc24206ba27b65057709d",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/double_conversion/LICENSE": "4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/icu/LICENSE": "5d85142a5609ad177a2d7a2e7cae060b886b8b42f25c5b9803cf0cb5ee04ad2f",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/nspr/LICENSE": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/superfasthash/LICENSE": "90b2201c340cee36b40a443f949d9eb416f0a0d204c32d350aff87fedeb67ae8",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/symbolize/LICENSE": "538edc6f52c563cf06eca1bac8dd785ff60ef5a371a950265700d5d40386db6e",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/xdg_user_dirs/LICENSE": "18351de3d7e2dc469cc83e77d38a3e25d010251e34eb348bbd1a76275e313997",
+    "opt/apps/mors-naiveproxy/share/licenses/net/third_party/quiche/src/LICENSE": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308",
+    "opt/apps/mors-naiveproxy/share/licenses/net/third_party/uri_template/LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/abseil-cpp/LICENSE": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/boringssl/src/LICENSE": "827c8d8fc207c2392794eef9e00fe246f9f61fdcc132556c275be3dd8c3cd97f",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/boringssl/src/third_party/fiat/LICENSE": "9eacbcb81be660840c714a560a9d65ba07913db98dd4baf969f78dd499fdd60f",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/brotli/LICENSE": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+    "opt/apps/mors-naiveproxy/share/licenses/external/compiler-rt-LICENSE.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/googletest/src/googletest/include/gtest/gtest_prod.h.NOTICE.txt": "c3ff484b9a6cef5e77fe08be4939e016480b69465e56f10d14099ff81fef1b17",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/libc++/src/LICENSE.TXT": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/libc++abi/src/LICENSE.TXT": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/llvm-libc/src/LICENSE.TXT": "ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/lss/linux_syscall_support.h.NOTICE.txt": "325b8440550179bd46d3389d9defd6cdab7bb9a3519ef38d2eda008dd02236ab",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/modp_b64/LICENSE": "d47e8390fb0d7ad4a18f26aedd6283c7ab6b5b4fabab536ccb4db7f9f6d90c08",
+    "opt/apps/mors-naiveproxy/share/licenses/external/perfetto-LICENSE.txt": "9a682a56cffc9524dfa9b0b1c0dca9cb81a19e96d5bd0793aaf02c08a95ee7ca",
+    "opt/apps/mors-naiveproxy/share/licenses/external/protobuf-LICENSE.txt": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/protobuf/third_party/utf8_range/LICENSE": "02de69b64fc36d9e938f418e52723e42f0b2b226d58a9cb3c8dcbdf7059f5074",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/simdutf/LICENSE": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/zlib/LICENSE": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/zstd/src/LICENSE": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+    "opt/apps/mors-naiveproxy/share/licenses/url/third_party/mozilla/LICENSE.txt": "284545e873c704952e5b1b39d457dd83a3b115a51d9f1eb5175137bd69b8fa1b",
+    "opt/apps/mors-naiveproxy/share/licenses/external/certifi-NOTICE.txt": "e93716da6b9c0d5a4a1df60fe695b370f0695603d21f6f83f053e42cfc10caf7",
+    "opt/apps/mors-naiveproxy/share/licenses/external/MPL-2.0.txt": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172",
+    "opt/apps/mors-naiveproxy/share/licenses/external/GPL-3.0.txt": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "opt/apps/mors-naiveproxy/share/licenses/external/GCC-exception-3.1.txt": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+    "opt/apps/mors-naiveproxy/share/licenses/external/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+    "opt/apps/mors-naiveproxy/share/licenses/external/LLVM-LICENSE.txt": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+    "opt/apps/mors-naiveproxy/share/licenses/external/compiler-COPYRIGHT.txt": "b2ed2fd344e8ddbf2e0c83113bd40fa1853438be61a0ff20af5acd187c07cbf6"
+  },
+  "repeated_packaging_same_sha256": true,
+  "independent_cold_rebuild_verified": false,
+  "sbom_schema": "CycloneDX 1.6 PASS",
+  "package_smoke": {
+    "package": "mors-naiveproxy_150.0.7871.63-1_aarch64-3.10.ipk",
+    "sha256": "3e4c881bb8b025e52609acad379aa9b9b34bbcebcf43cef0b44cb0ec59dcad56",
+    "architecture": "aarch64-3.10",
+    "qemu_cpu": "cortex-a53",
+    "execution": {
+      "--version": {
+        "exit_code": 0,
+        "output": "naive 150.0.7871.63\n"
+      },
+      "--help": {
+        "exit_code": 0,
+        "output": "Usage: naive { OPTIONS | config.json }\n\nOptions:\n-h, --help                 Show this message\n--version                  Print version\n--listen=<proto>://[addr][:port] [--listen=...]\n                           proto: socks, http\n                                  redir (Linux only)\n--proxy=<proto>://[<user>:<pass>@]<hostname>[:<port>]\n                           proto: https, quic\n--insecure-concurrency=<N> Use N connections, insecure\n--tunnel-timeout=<SECONDS> Rotate tunnels after timeout\n--idle-timeout=<SECONDS>   Close idle streams after timeout\n--extra-headers=...        Extra headers split by CRLF\n--host-resolver-rules=...  Resolver rules\n--resolver-range=...       Redirect resolver range\n--log[=<path>]             Log to stderr, or file\n--log-net-log=<path>       Save NetLog\n--ssl-key-log-file=<path>  Save SSL keys for Wireshark\n--no-post-quantum          No post-quantum key agreement\n\n"
+      }
+    },
+    "opkg_noaction": {
+      "aarch64-3.10": {
+        "exit_code": 0,
+        "compatible": true
+      },
+      "mipsel-3.4": {
+        "exit_code": 255,
+        "compatible": false
+      },
+      "mips-3.4": {
+        "exit_code": 255,
+        "compatible": false
+      }
+    },
+    "router_tested": false,
+    "release_admitted": false
+  },
+  "tls_smoke": {
+    "package": "mors-naiveproxy_150.0.7871.63-1_aarch64-3.10.ipk",
+    "sha256": "3e4c881bb8b025e52609acad379aa9b9b34bbcebcf43cef0b44cb0ec59dcad56",
+    "architecture": "aarch64-3.10",
+    "scope": "loopback-QEMU-HTTP2-CONNECT-no-padding",
+    "cases": {
+      "packaged-ca-rejects-private-root": {
+        "expected_success": false,
+        "observed_success": false,
+        "curl_exit_code": 35
+      },
+      "custom-ca-valid": {
+        "expected_success": true,
+        "observed_success": true,
+        "curl_exit_code": 0
+      },
+      "udp-associate": {
+        "reply": 7,
+        "supported": false
+      },
+      "wrong-name": {
+        "expected_success": false,
+        "observed_success": false,
+        "curl_exit_code": 35
+      },
+      "expired": {
+        "expected_success": false,
+        "observed_success": false,
+        "curl_exit_code": 35
+      },
+      "incomplete-chain": {
+        "expected_success": false,
+        "observed_success": false,
+        "curl_exit_code": 35
+      },
+      "full-chain": {
+        "expected_success": true,
+        "observed_success": true,
+        "curl_exit_code": 0
+      },
+      "unknown-ca": {
+        "expected_success": false,
+        "observed_success": false,
+        "curl_exit_code": 35
+      }
+    },
+    "temporary_files_cleaned": true,
+    "router_tested": false
+  },
+  "physical_smoke": {
+    "architecture": "aarch64",
+    "crypto_extensions_present": false,
+    "target": "Raspberry Pi 3 B+",
+    "install_performed": false,
+    "elf_sha256": "cadb0398c37a0e3d4b69f78e7cae8d9474ae1ed24f4efff714e36725f02dfbb3",
+    "version_help": "pass"
+  },
+  "release_admitted": false
+}

@@ -6,6 +6,16 @@ entware_dir="${ENTWARE_DIR:-/opt/entware}"
 package_version="$(sed -n 's/^PKG_VERSION:=//p; /^PKG_VERSION:=/q' "${repo_root}/Makefile")"
 package_release="$(sed -n 's/^PKG_RELEASE:=//p; /^PKG_RELEASE:=/q' "${repo_root}/Makefile")"
 expected_package="mors_${package_version}-${package_release}_all.ipk"
+package_mode="${MORS_PACKAGE_MODE:-legacy}"
+package_arch=all
+case "${package_mode}" in
+	legacy) ;;
+	platform)
+		package_arch="$(python3 "${repo_root}/scripts/qa/entware-target.py" name)"
+		expected_package="mors_${package_version}-${package_release}_${package_arch}.ipk"
+		;;
+	*) echo "Unsupported Mors package mode: ${package_mode}" >&2; exit 1 ;;
+esac
 jobs="${JOBS:-$(nproc)}"
 # Container checkouts can be owned by the host runner. Trust only this explicit
 # source directory for this read, without changing the global Git configuration.
@@ -27,6 +37,10 @@ fi
 # The direct package submake is safe only after the immutable image has proved
 # that the exact locked Entware tree, toolchain and runtime dependencies exist.
 bash "${repo_root}/scripts/qa/verify-entware-builder.sh"
+if [ "${package_mode}" = platform ]; then
+	python3 "${repo_root}/scripts/qa/entware-core-build.py"
+	python3 "${repo_root}/scripts/qa/entware-platform-package.py" inputs
+fi
 
 cd "${entware_dir}"
 if [ ! -d package ] || [ -L package ]; then
@@ -73,9 +87,16 @@ cp -p "${repo_root}/Makefile" "${source_dir}/Makefile"
 cp -a "${repo_root}/opt" "${source_dir}/opt"
 cp -p "${repo_root}/builder/entware/runtime-dependencies.mk" \
 	"${source_dir}/builder/entware/runtime-dependencies.mk"
+if [ "${package_mode}" = platform ]; then
+	mkdir -p "${source_dir}/core"
+	cp -p "${repo_root}/packages/core/${package_arch}/mors-core" "${source_dir}/core/"
+fi
 ln -s "${source_dir}" "${package_link}"
 
 packages_dir="${repo_root}/packages"
+if [ "${package_mode}" = platform ]; then
+	packages_dir="${packages_dir}/platform/${package_arch}"
+fi
 if [ -L "${packages_dir}" ] ||
 	{ [ -e "${packages_dir}" ] && [ ! -d "${packages_dir}" ]; }; then
 	echo "Unsafe package output directory: ${packages_dir}" >&2
@@ -83,8 +104,8 @@ if [ -L "${packages_dir}" ] ||
 fi
 mkdir -p "${packages_dir}"
 find "${packages_dir}" -maxdepth 1 -type f \
-	-name 'mors_*_all.ipk' -exec rm -f {} +
-find bin/targets -type f -name 'mors_*_all.ipk' -exec rm -f {} +
+	-name "mors_*_${package_arch}.ipk" -exec rm -f {} +
+find bin/targets -type f -name "mors_*_${package_arch}.ipk" -exec rm -f {} +
 
 package_make=(
 	make -w -r -C package/mors
@@ -99,6 +120,9 @@ package_make=(
 	BUILD_VARIANT=
 	ALL_VARIANTS=
 )
+if [ "${package_mode}" = platform ]; then
+	package_make+=(MORS_CORE_PACKAGE=1)
+fi
 
 "${package_make[@]}" clean V=sc
 build_started_at="$(date +%s)"
@@ -106,7 +130,7 @@ build_started_at="$(date +%s)"
 build_elapsed_seconds="$(($(date +%s) - build_started_at))"
 
 mapfile -t built_packages < <(
-	find bin/targets -type f -name 'mors_*_all.ipk' -print
+	find bin/targets -type f -name "mors_*_${package_arch}.ipk" -print
 )
 if [ "${#built_packages[@]}" -ne 1 ]; then
 	echo "Expected exactly one Mors IPK, found ${#built_packages[@]}." >&2
@@ -120,6 +144,10 @@ fi
 cp -p "${built_packages[0]}" "${packages_dir}/${expected_package}"
 "${package_make[@]}" clean V=sc
 rm -f "${built_packages[0]}"
+if [ "${package_mode}" = platform ]; then
+	python3 "${repo_root}/scripts/qa/entware-platform-package.py" verify \
+		"${packages_dir}/${expected_package}"
+fi
 
 printf 'Builder package compile: %s seconds\n' "${build_elapsed_seconds}"
 printf 'Package source epoch: %s\n' "${source_epoch}"

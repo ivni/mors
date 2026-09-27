@@ -1,0 +1,337 @@
+{
+  "schema": "mors-naiveproxy-packaging-evidence-v1",
+  "date": "2026-09-27",
+  "architecture": "mipsel-3.4",
+  "package": "mors-naiveproxy_150.0.7871.63-1_mipsel-3.4.ipk",
+  "package_sha256": "b8a3bd93ed5d875614d4906df46559992d8ab64760ac1f2bf1feb3094ad24c1c",
+  "package_size": 4377242,
+  "runtime_sha256": "a3834179b767fc165a963100bb0f1f7692b69b2ea355f5c5e5672a2ebb763010",
+  "source_commit": "3ba967e2d36cc133a896e81a36257ad4c6ea20f4",
+  "input_lock_sha256": "b64387b991a8f2774e23702ff7bbecb64531d21af41ee8f4cc82d821cd855c3f",
+  "recipe_sha256": {
+    "builder/entware/naiveproxy-inputs.json": "b64387b991a8f2774e23702ff7bbecb64531d21af41ee8f4cc82d821cd855c3f",
+    "builder/entware/naiveproxy-common.gn": "93e480f260ec9604e972b1fc5ff439dd9e1c226eb1b7d1af237a8d0da181849d",
+    "builder/entware/naiveproxy-linkmap.patch": "76f8368046618d88b731676c2c006e60f29a569f9ef505149343b765de8c94a2",
+    "docs/research/naiveproxy-63/idle-handshake-created-at.patch": "01b7d7d4356ce8d6b9d5367c1322d919f96201a8fd99d96b9a896a943d0c935f",
+    "scripts/qa/naiveproxy-inputs.py": "af6e61a45db1e19aab68ad714f2cd4fe88c6ed5fa778312b61ccb1621d6d99b4",
+    "scripts/qa/naiveproxy-runtime-build.py": "c4dc7212497ecec8e077fd9b8d0806ca6bb657b6f03d6c74e6dac86b28055d55",
+    "scripts/qa/naiveproxy-ninja.sh": "0a5a970660893976fc2a050daaede1418230fdbce5c801c176b866872684dea9"
+  },
+  "finalization": {
+    "schema": "mors-runtime-finalization-v1",
+    "linked_elf_sha256": "b5bc01303d7afc4360f0a95a4f691aff39dd016a3e7b8bc86ad582dd4bdad470",
+    "elf_sha256": "a3834179b767fc165a963100bb0f1f7692b69b2ea355f5c5e5672a2ebb763010",
+    "allocated_sections": {
+      ".MIPS.abiflags": {
+        "address": 65976,
+        "size": 24,
+        "type": 1879048234,
+        "flags": 2,
+        "alignment": 8,
+        "sha256": "f74c71c8049704e6d1f4f20df1ea2022a9bb3e331e032a6643419fdfb5490aec"
+      },
+      ".reginfo": {
+        "address": 66000,
+        "size": 24,
+        "type": 1879048198,
+        "flags": 2,
+        "alignment": 4,
+        "sha256": "a5b974aa6eb46b2409ddaec59599afc4b170d8889de7a381837d05eeb4ad9b90"
+      },
+      ".note.gnu.build-id": {
+        "address": 66024,
+        "size": 36,
+        "type": 7,
+        "flags": 2,
+        "alignment": 4,
+        "sha256": "211184f99d1515d443df18699fc06b44047ae2a1e53262b4ca8f6c350b5a8100"
+      },
+      ".rodata": {
+        "address": 66112,
+        "size": 1001464,
+        "type": 1,
+        "flags": 50,
+        "alignment": 64,
+        "sha256": "e474b48bb4f41946879945a6dcea88a7cbf8d8d44fc2e526916c2517473a263a"
+      },
+      ".eh_frame_hdr": {
+        "address": 1067576,
+        "size": 44,
+        "type": 1,
+        "flags": 2,
+        "alignment": 4,
+        "sha256": "4de01b2e3701779da4db3b1798b23d8ad244cd4c8a77be13a6f56ecbe7c04f50"
+      },
+      ".eh_frame": {
+        "address": 1067620,
+        "size": 104,
+        "type": 1,
+        "flags": 2,
+        "alignment": 4,
+        "sha256": "af0dc5e98711655b676615665dc8a9f1da9d27ba5904378469f3c0974024792a"
+      },
+      ".text": {
+        "address": 1133264,
+        "size": 7841852,
+        "type": 1,
+        "flags": 6,
+        "alignment": 16,
+        "sha256": "3e18dc09e64b8ff9b6f35475e807a074f6e90a8c17dc10139db74437e79fea5f"
+      },
+      ".init": {
+        "address": 8975116,
+        "size": 28,
+        "type": 1,
+        "flags": 6,
+        "alignment": 4,
+        "sha256": "f96a2afbc8a8427e28280e54088d15f5e721553f0833e1b657036bc166a7d5fe"
+      },
+      ".fini": {
+        "address": 8975144,
+        "size": 28,
+        "type": 1,
+        "flags": 6,
+        "alignment": 4,
+        "sha256": "f96a2afbc8a8427e28280e54088d15f5e721553f0833e1b657036bc166a7d5fe"
+      },
+      "malloc_hook": {
+        "address": 8975172,
+        "size": 2520,
+        "type": 1,
+        "flags": 6,
+        "alignment": 4,
+        "sha256": "7b9e33eee3ccd373ff8974d7ff429c7890500feeb533d8480098a8232f5b7f86"
+      },
+      "__lcxx_override": {
+        "address": 8977692,
+        "size": 404,
+        "type": 1,
+        "flags": 6,
+        "alignment": 4,
+        "sha256": "691d43ae9636b9d5e2003daac7f8067c112fa28ef0c075e6f1bb03354d02e507"
+      },
+      ".tdata": {
+        "address": 9043632,
+        "size": 69,
+        "type": 1,
+        "flags": 1027,
+        "alignment": 4,
+        "sha256": "17096fbbb86c4bb8d56f00a97f5625dbbb7359ecf409118b5ac1187cf41282aa"
+      },
+      ".tbss": {
+        "address": 9043704,
+        "size": 152,
+        "type": 8,
+        "flags": 1027,
+        "alignment": 8,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      ".fini_array": {
+        "address": 9043704,
+        "size": 4,
+        "type": 15,
+        "flags": 3,
+        "alignment": 4,
+        "sha256": "ca938072f29be9c35ca99260a7e1beacf3b3ec8f9a8a9e8bbe6a9887f4ba9295"
+      },
+      ".init_array": {
+        "address": 9043708,
+        "size": 8,
+        "type": 14,
+        "flags": 3,
+        "alignment": 4,
+        "sha256": "6d9403151769dedac0566aa7679793c42f5ca560a483ed3837a249ea959ee241"
+      },
+      ".relro_padding": {
+        "address": 9043716,
+        "size": 252,
+        "type": 8,
+        "flags": 3,
+        "alignment": 1,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      ".data": {
+        "address": 9109256,
+        "size": 3432,
+        "type": 1,
+        "flags": 3,
+        "alignment": 8,
+        "sha256": "be1fe90590990f8070abd9bf6d23fecfb4efe36b4e1b04a87fd874b066a418d4"
+      },
+      ".got": {
+        "address": 9112688,
+        "size": 84,
+        "type": 1,
+        "flags": 268435459,
+        "alignment": 16,
+        "sha256": "049d8a58202952c246b0d1e11c54fd7d7c133eb5572814cfd51cfb5df8594c48"
+      },
+      ".sdata": {
+        "address": 9112772,
+        "size": 4,
+        "type": 1,
+        "flags": 268435459,
+        "alignment": 4,
+        "sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+      },
+      ".bss": {
+        "address": 9112832,
+        "size": 40188,
+        "type": 8,
+        "flags": 3,
+        "alignment": 64,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "allocated_sections_unchanged": true,
+    "program_headers_unchanged": true,
+    "gnu_attribute_records_before": 495,
+    "gnu_attribute_records_after": 1,
+    "objcopy_sha256": "f5097a6644a99a6b36e2b4a711ddd2cb1dfd609f79bd86d1f7fe2fcb3cfff10a",
+    "recipe_sha256": "858e12069b9735957a93876ccbf788587c28104e65a4df861a54a2bc15b53fb9"
+  },
+  "trust": {
+    "file": "/opt/apps/mors-naiveproxy/share/ca/ca-bundle.crt",
+    "directory": "/opt/apps/mors-naiveproxy/share/ca/empty",
+    "version": "2026.7.22",
+    "sha256": "9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f",
+    "embedded_chrome_root_store": true
+  },
+  "payload_sha256": {
+    "opt/apps/mors-naiveproxy/bin/naive": "a3834179b767fc165a963100bb0f1f7692b69b2ea355f5c5e5672a2ebb763010",
+    "opt/apps/mors-naiveproxy/share/ca/ca-bundle.crt": "9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f",
+    "opt/apps/mors-naiveproxy/share/sbom.cdx.json": "46d1b8223c2efc85ccc34ccc97587b86f247cf8e770c4987c037b0db2a80c8ba",
+    "opt/apps/mors-naiveproxy/share/components.json": "cb7ac321a6005e5635a5afdbbb39ac256e62f6959d28766078618b1ca0d0af3a",
+    "opt/apps/mors-naiveproxy/share/licenses/LICENSE": "368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/cityhash/COPYING": "3ed00dd93c75655599456c83cba2f69c6824fd53f24fc24206ba27b65057709d",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/cityhash_v103/COPYING": "3ed00dd93c75655599456c83cba2f69c6824fd53f24fc24206ba27b65057709d",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/double_conversion/LICENSE": "4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/icu/LICENSE": "5d85142a5609ad177a2d7a2e7cae060b886b8b42f25c5b9803cf0cb5ee04ad2f",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/nspr/LICENSE": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/superfasthash/LICENSE": "90b2201c340cee36b40a443f949d9eb416f0a0d204c32d350aff87fedeb67ae8",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/symbolize/LICENSE": "538edc6f52c563cf06eca1bac8dd785ff60ef5a371a950265700d5d40386db6e",
+    "opt/apps/mors-naiveproxy/share/licenses/base/third_party/xdg_user_dirs/LICENSE": "18351de3d7e2dc469cc83e77d38a3e25d010251e34eb348bbd1a76275e313997",
+    "opt/apps/mors-naiveproxy/share/licenses/net/third_party/quiche/src/LICENSE": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308",
+    "opt/apps/mors-naiveproxy/share/licenses/net/third_party/uri_template/LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/abseil-cpp/LICENSE": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/boringssl/src/LICENSE": "827c8d8fc207c2392794eef9e00fe246f9f61fdcc132556c275be3dd8c3cd97f",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/boringssl/src/third_party/fiat/LICENSE": "9eacbcb81be660840c714a560a9d65ba07913db98dd4baf969f78dd499fdd60f",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/brotli/LICENSE": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+    "opt/apps/mors-naiveproxy/share/licenses/external/compiler-rt-LICENSE.txt": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/googletest/src/googletest/include/gtest/gtest_prod.h.NOTICE.txt": "c3ff484b9a6cef5e77fe08be4939e016480b69465e56f10d14099ff81fef1b17",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/libc++/src/LICENSE.TXT": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/libc++abi/src/LICENSE.TXT": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/llvm-libc/src/LICENSE.TXT": "ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/lss/linux_syscall_support.h.NOTICE.txt": "325b8440550179bd46d3389d9defd6cdab7bb9a3519ef38d2eda008dd02236ab",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/modp_b64/LICENSE": "d47e8390fb0d7ad4a18f26aedd6283c7ab6b5b4fabab536ccb4db7f9f6d90c08",
+    "opt/apps/mors-naiveproxy/share/licenses/external/perfetto-LICENSE.txt": "9a682a56cffc9524dfa9b0b1c0dca9cb81a19e96d5bd0793aaf02c08a95ee7ca",
+    "opt/apps/mors-naiveproxy/share/licenses/external/protobuf-LICENSE.txt": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/protobuf/third_party/utf8_range/LICENSE": "02de69b64fc36d9e938f418e52723e42f0b2b226d58a9cb3c8dcbdf7059f5074",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/simdutf/LICENSE": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/zlib/LICENSE": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+    "opt/apps/mors-naiveproxy/share/licenses/third_party/zstd/src/LICENSE": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+    "opt/apps/mors-naiveproxy/share/licenses/url/third_party/mozilla/LICENSE.txt": "284545e873c704952e5b1b39d457dd83a3b115a51d9f1eb5175137bd69b8fa1b",
+    "opt/apps/mors-naiveproxy/share/licenses/external/certifi-NOTICE.txt": "e93716da6b9c0d5a4a1df60fe695b370f0695603d21f6f83f053e42cfc10caf7",
+    "opt/apps/mors-naiveproxy/share/licenses/external/MPL-2.0.txt": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172",
+    "opt/apps/mors-naiveproxy/share/licenses/external/GPL-3.0.txt": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "opt/apps/mors-naiveproxy/share/licenses/external/GCC-exception-3.1.txt": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+    "opt/apps/mors-naiveproxy/share/licenses/external/musl-COPYRIGHT.txt": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+    "opt/apps/mors-naiveproxy/share/licenses/external/LLVM-LICENSE.txt": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+    "opt/apps/mors-naiveproxy/share/licenses/external/compiler-COPYRIGHT.txt": "b2ed2fd344e8ddbf2e0c83113bd40fa1853438be61a0ff20af5acd187c07cbf6"
+  },
+  "repeated_packaging_same_sha256": true,
+  "independent_cold_rebuild_verified": false,
+  "sbom_schema": "CycloneDX 1.6 PASS",
+  "package_smoke": {
+    "package": "mors-naiveproxy_150.0.7871.63-1_mipsel-3.4.ipk",
+    "sha256": "b8a3bd93ed5d875614d4906df46559992d8ab64760ac1f2bf1feb3094ad24c1c",
+    "architecture": "mipsel-3.4",
+    "qemu_cpu": "24Kc",
+    "execution": {
+      "--version": {
+        "exit_code": 0,
+        "output": "naive 150.0.7871.63\n"
+      },
+      "--help": {
+        "exit_code": 0,
+        "output": "Usage: naive { OPTIONS | config.json }\n\nOptions:\n-h, --help                 Show this message\n--version                  Print version\n--listen=<proto>://[addr][:port] [--listen=...]\n                           proto: socks, http\n                                  redir (Linux only)\n--proxy=<proto>://[<user>:<pass>@]<hostname>[:<port>]\n                           proto: https, quic\n--insecure-concurrency=<N> Use N connections, insecure\n--tunnel-timeout=<SECONDS> Rotate tunnels after timeout\n--idle-timeout=<SECONDS>   Close idle streams after timeout\n--extra-headers=...        Extra headers split by CRLF\n--host-resolver-rules=...  Resolver rules\n--resolver-range=...       Redirect resolver range\n--log[=<path>]             Log to stderr, or file\n--log-net-log=<path>       Save NetLog\n--ssl-key-log-file=<path>  Save SSL keys for Wireshark\n--no-post-quantum          No post-quantum key agreement\n\n"
+      }
+    },
+    "opkg_noaction": {
+      "aarch64-3.10": {
+        "exit_code": 255,
+        "compatible": false
+      },
+      "mipsel-3.4": {
+        "exit_code": 0,
+        "compatible": true
+      },
+      "mips-3.4": {
+        "exit_code": 255,
+        "compatible": false
+      }
+    },
+    "router_tested": false,
+    "release_admitted": false
+  },
+  "tls_smoke": {
+    "package": "mors-naiveproxy_150.0.7871.63-1_mipsel-3.4.ipk",
+    "sha256": "b8a3bd93ed5d875614d4906df46559992d8ab64760ac1f2bf1feb3094ad24c1c",
+    "architecture": "mipsel-3.4",
+    "scope": "loopback-QEMU-HTTP2-CONNECT-no-padding",
+    "cases": {
+      "packaged-ca-rejects-private-root": {
+        "expected_success": false,
+        "observed_success": false,
+        "curl_exit_code": 35
+      },
+      "custom-ca-valid": {
+        "expected_success": true,
+        "observed_success": true,
+        "curl_exit_code": 0
+      },
+      "udp-associate": {
+        "reply": 7,
+        "supported": false
+      },
+      "wrong-name": {
+        "expected_success": false,
+        "observed_success": false,
+        "curl_exit_code": 35
+      },
+      "expired": {
+        "expected_success": false,
+        "observed_success": false,
+        "curl_exit_code": 35
+      },
+      "incomplete-chain": {
+        "expected_success": false,
+        "observed_success": false,
+        "curl_exit_code": 35
+      },
+      "full-chain": {
+        "expected_success": true,
+        "observed_success": true,
+        "curl_exit_code": 0
+      },
+      "unknown-ca": {
+        "expected_success": false,
+        "observed_success": false,
+        "curl_exit_code": 35
+      }
+    },
+    "temporary_files_cleaned": true,
+    "router_tested": false
+  },
+  "physical_smoke": {
+    "target": "NC-1913",
+    "architecture": "mipsel-3.4",
+    "install": "pass",
+    "version_help": "pass",
+    "runtime_unchanged": "pass",
+    "remove": "pass",
+    "package_tree_absent": true,
+    "package_sha256": "b8a3bd93ed5d875614d4906df46559992d8ab64760ac1f2bf1feb3094ad24c1c"
+  },
+  "release_admitted": false
+}

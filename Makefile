@@ -3,19 +3,32 @@ include $(TOPDIR)/package/mors/builder/entware/runtime-dependencies.mk
 
 PKG_NAME:=mors
 PKG_VERSION:=1.3.0~rc2
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)-$(PKG_RELEASE)
 MOLOT_UNINSTALL:=mors uninstall full
 
 include $(INCLUDE_DIR)/package.mk
 
+# Opt-in candidate path; release/updater migration belongs to #116.
+ifeq ($(MORS_CORE_PACKAGE),1)
+  ifeq ($(filter $(ARCH_PACKAGES),aarch64-3.10 mips-3.4 mipsel-3.4),)
+    $(error Unsupported Mors core package ABI: $(ARCH_PACKAGES))
+  endif
+  MORS_PACKAGE_ARCH:=$(ARCH_PACKAGES)
+  MORS_CORE_DEPENDS:=+libc +libgcc +libpthread
+  # Cargo already strips the ELF; retain the attested core digest in the IPK.
+  RSTRIP:=:
+else
+  MORS_PACKAGE_ARCH:=all
+endif
+
 define Package/mors
 	SECTION:=utils
 	CATEGORY:=Keendev
-	DEPENDS:=$(MORS_RUNTIME_DEPENDS)
+	DEPENDS:=$(MORS_RUNTIME_DEPENDS) $(MORS_CORE_DEPENDS)
 	URL:=no
 	TITLE:=VPN клиент для обработки запросов по внесению хостов в белый список.
-	PKGARCH:=all
+	PKGARCH:=$(MORS_PACKAGE_ARCH)
 endef
 # +libstdcpp 
 define Package/mors/description
@@ -41,6 +54,7 @@ define Package/mors/install
 	chmod -R 0755 $(1)/opt/apps/mors/bin/*
 	chmod -R 0755 $(1)/opt/apps/mors/etc/init.d/*
 	chmod -R 0755 $(1)/opt/apps/mors/etc/ndm/*
+	$(if $(filter 1,$(MORS_CORE_PACKAGE)),$(INSTALL_BIN) ./core/mors-core $(1)/opt/apps/mors/bin/mors-core)
 endef
 
 # Legacy bootstrap is intentionally self-contained: during an upgrade the new

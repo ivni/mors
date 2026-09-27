@@ -1,0 +1,42 @@
+{
+  "schema": "mors-naiveproxy-candidates-v1",
+  "package": "mors-naiveproxy",
+  "version": "150.0.7871.63-1",
+  "upstream_commit": "3ba967e2d36cc133a896e81a36257ad4c6ea20f4",
+  "chromium_version": "150.0.7871.63",
+  "distribution_admitted": false,
+  "packaging_verified": true,
+  "input_lock": "builder/entware/naiveproxy-inputs.json",
+  "notice_lock": "builder/entware/naiveproxy-notices.json",
+  "ca_bundle": {
+    "source": "certifi",
+    "version": "2026.7.22",
+    "roots": 121,
+    "sha256": "9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f",
+    "embedded_chrome_roots_enabled": true
+  },
+  "sbom": {"format": "CycloneDX", "version": "1.6", "components": 33},
+  "notices": {"files": 36, "basis": "target compilation dependencies and final link map"},
+  "targets": {
+    "aarch64-3.10": {
+      "asset": "mors-naiveproxy_150.0.7871.63-1_aarch64-3.10.ipk",
+      "archive_sha256": "3e4c881bb8b025e52609acad379aa9b9b34bbcebcf43cef0b44cb0ec59dcad56",
+      "elf_sha256": "cadb0398c37a0e3d4b69f78e7cae8d9474ae1ed24f4efff714e36725f02dfbb3",
+      "physical_version_help": "Raspberry Pi 3 B+ without AES/SHA extensions: pass",
+      "packaging_blockers": []
+    },
+    "mipsel-3.4": {
+      "asset": "mors-naiveproxy_150.0.7871.63-1_mipsel-3.4.ipk",
+      "archive_sha256": "b8a3bd93ed5d875614d4906df46559992d8ab64760ac1f2bf1feb3094ad24c1c",
+      "elf_sha256": "a3834179b767fc165a963100bb0f1f7692b69b2ea355f5c5e5672a2ebb763010",
+      "physical_passive_install_remove": "NC-1913: pass",
+      "packaging_blockers": []
+    },
+    "mips-3.4": {
+      "asset": null,
+      "archive_sha256": null,
+      "elf_sha256": null,
+      "packaging_blockers": ["no-upstream-big-endian-runtime"]
+    }
+  }
+}

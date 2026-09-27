@@ -1,0 +1,7 @@
+diff --git a/src/net/BUILD.gn b/src/net/BUILD.gn
+--- a/src/net/BUILD.gn
++++ b/src/net/BUILD.gn
+@@ -2045,2 +2045,3 @@
+ executable("naive") {
++  ldflags = [ "-Wl,-Map=naive.linkmap", "-Wl,--cref" ]
+   sources = [

@@ -1,0 +1,97 @@
+{
+  "schema": 1,
+  "upstream_commit": "3ba967e2d36cc133a896e81a36257ad4c6ea20f4",
+  "upstream_version": "150.0.7871.63",
+  "package_release": 1,
+  "idle_patch_sha256": "01b7d7d4356ce8d6b9d5367c1322d919f96201a8fd99d96b9a896a943d0c935f",
+  "gn_commit": "3357c4f51b1a9e676378c695dd9c7e9911c35ee6",
+  "clang_revision": "llvmorg-23-init-10931-g20b6ec66-11",
+  "compiler": {
+    "version": "23.1.2",
+    "apt_version": "1:23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77",
+    "source_revision": "4b1925210476",
+    "pgo": false
+  },
+  "ca": {
+    "version": "2026.7.22",
+    "bundle_member": "certifi/cacert.pem",
+    "bundle_sha256": "9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f",
+    "notice_member": "certifi-2026.7.22.dist-info/licenses/LICENSE",
+    "notice_sha256": "e93716da6b9c0d5a4a1df60fe695b370f0695603d21f6f83f053e42cfc10caf7",
+    "license": "MPL-2.0"
+  },
+  "downloads": {
+    "libclang-rt-23-dev.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/libclang-rt-23-dev_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "90474f54c6a424faabd653359be6f71a45fa92f2de91209ce0473c51f556918d"
+    },
+    "llvm-23.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/llvm-23_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "c45ebf3c492e86457a82bc9ba57235d7b812826e735565971d07a1a2d7f89518"
+    },
+    "llvm-23-runtime.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/llvm-23-runtime_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "f5bbce212fef1c55a48f9cc569b80aaf4fdbe61f51e76cbec73413fe2beab060"
+    },
+    "llvm-23-tools.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/llvm-23-tools_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "591abcd801553f7f52a0448c3fa607af7aec8e62bf41ccb7a1e7f0d9b700aef5"
+    },
+    "clang-23.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/clang-23_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "4b5eeb55b76eb1f35d8757036c9ff569ce057bd05d44d36470148cf6b466d911"
+    },
+    "libclang-common-23-dev.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/libclang-common-23-dev_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "232e7517e8b7fde7061fa3d0980bcd9f6cdf3010e6472ce706500b5a8012e9ee"
+    },
+    "libclang-cpp23.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/libclang-cpp23_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "0ac292594b2dab9724ed021d201ef759fbda2b4f97826f46c023a44e063bd37b"
+    },
+    "libclang1-23.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/libclang1-23_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "a322fb32a01ec5fc6124446df29ce38c1b4362ce9cdd1c99c831bc046503583d"
+    },
+    "libllvm23.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/libllvm23_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "d1924e86c346a7aabd40e3d36b2df5353551219fb8bb2683255243afd213ddf9"
+    },
+    "lld-23.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/lld-23_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "b290dc5de25409d14543d455aad9a3129ab5c255144b2949ff8abf472a3c58bc"
+    },
+    "llvm-23-linker-tools.deb": {
+      "url": "https://apt.llvm.org/noble/pool/main/l/llvm-toolchain-23/llvm-23-linker-tools_23.1.2~++20260919103626+4b1925210476-1~exp1~20260919223755.77_amd64.deb",
+      "sha256": "fe637989272d6fe0ada5b053f611a1ac5d7f23f703359824aad4fa196c79c2ea"
+    },
+    "certifi-2026.7.22-py3-none-any.whl": {
+      "url": "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl",
+      "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775"
+    },
+    "musl-1.2.5.tar.gz": {
+      "url": "https://musl.libc.org/releases/musl-1.2.5.tar.gz",
+      "sha256": "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4"
+    },
+    "MPL-2.0.txt": {
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/31ba1a50e5397e00a304dbadc76531740e89ee48/text/MPL-2.0.txt",
+      "sha256": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172"
+    },
+    "GPL-3.0.txt": {
+      "url": "https://raw.githubusercontent.com/gcc-mirror/gcc/releases/gcc-13.3.0/COPYING3",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    "GCC-exception-3.1.txt": {
+      "url": "https://raw.githubusercontent.com/gcc-mirror/gcc/releases/gcc-13.3.0/COPYING.RUNTIME",
+      "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+    },
+    "openwrt-toolchain-24.10.0-ramips-rt305x_gcc-13.3.0_musl.Linux-x86_64.tar.zst": {
+      "url": "https://downloads.openwrt.org/releases/24.10.0/targets/ramips/rt305x/openwrt-toolchain-24.10.0-ramips-rt305x_gcc-13.3.0_musl.Linux-x86_64.tar.zst",
+      "sha256": "082d430654079c101d6dfc39857562d52d2b073850a0a995ca2e96642170dbad"
+    },
+    "openwrt-toolchain-24.10.0-sunxi-cortexa53_gcc-13.3.0_musl.Linux-x86_64.tar.zst": {
+      "url": "https://downloads.openwrt.org/releases/24.10.0/targets/sunxi/cortexa53/openwrt-toolchain-24.10.0-sunxi-cortexa53_gcc-13.3.0_musl.Linux-x86_64.tar.zst",
+      "sha256": "9bf0f2963c4e22538838f39561ea851a84433aef36d654e60d343bbe9e64b934"
+    }
+  }
+}
