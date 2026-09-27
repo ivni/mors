@@ -5,6 +5,7 @@ pub mod local_api;
 pub mod snapshot;
 
 pub mod fake_transaction;
+pub mod supervisor;
 pub mod transaction;
 #[cfg(target_os = "linux")]
 pub mod transaction_journal;

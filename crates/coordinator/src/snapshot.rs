@@ -215,8 +215,16 @@ impl Publisher {
     /// Timestamp is captured once per cycle; the whole frame and sequence are
     /// committed under the same publication lock.
     /// The caller has already serialized config/health/routing decisions.
-    pub fn publish(&mut self, mut frame: Frame, event: Option<EventKind>) -> Result<u64, Error> {
-        let at = self.now();
+    pub fn publish(&mut self, frame: Frame, event: Option<EventKind>) -> Result<u64, Error> {
+        self.publish_at(frame, event, self.now())
+    }
+    /// Injected monotonic clock for deterministic supervisor tests.
+    pub fn publish_at(
+        &mut self,
+        mut frame: Frame,
+        event: Option<EventKind>,
+        at: Time,
+    ) -> Result<u64, Error> {
         frame.validate(at)?;
         // Do not retain arbitrarily oversized caller-owned Vec capacity.
         frame.connections = frame.connections.into_boxed_slice().into_vec();
@@ -225,7 +233,8 @@ impl Publisher {
             .snapshot
             .write()
             .map_err(|_| Error::Unavailable)?;
-        if frame.config_revision < s.frame.config_revision
+        if at < s.observed_at
+            || frame.config_revision < s.frame.config_revision
             || frame.observed_generation < s.frame.observed_generation
         {
             return Err(Error::InvalidFrame);

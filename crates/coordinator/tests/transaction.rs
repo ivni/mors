@@ -491,3 +491,175 @@ fn failed_final_verification_rolls_back_instead_of_committing() {
         Value::Blocked
     );
 }
+
+// Integration of #74's sole owner with the actual #73 executor. This fake
+// implements only the fixture's initial blocked path and NaiveProxy activation.
+// It does not claim a production routing adapter for other decision paths.
+struct ScheduledExecutor {
+    executor: Executor<Memory, FakeNaiveProxy>,
+    pending: Option<mors_coordinator::supervisor::Operation>,
+    preference_writes: usize,
+}
+impl mors_coordinator::supervisor::Runtime for ScheduledExecutor {
+    fn start_operation(
+        &mut self,
+        op: mors_coordinator::supervisor::Operation,
+    ) -> std::result::Result<(), mors_coordinator::supervisor::Error> {
+        assert!(self.pending.is_none());
+        self.pending = Some(op);
+        Ok(())
+    }
+    fn poll_operation(
+        &mut self,
+        ticket: u64,
+    ) -> Option<std::result::Result<(), mors_coordinator::supervisor::Error>> {
+        use mors_coordinator::supervisor::{Error, Work};
+        use mors_domain::selection::Path;
+        let op = self.pending.take().unwrap();
+        assert_eq!(op.ticket, ticket);
+        let result = match op.work {
+            Work::Recover => self.executor.recover(FENCE),
+            Work::Apply {
+                decision,
+                preference_changed,
+            } => {
+                let outcome = match decision.tcp {
+                    Path::Connection(_) => self.executor.execute(ticket, FENCE, || false),
+                    Path::Block
+                        if self.executor.adapter().observe(Resource::TcpRoute).value
+                            == Value::Blocked =>
+                    {
+                        Ok(())
+                    }
+                    _ => panic!("outside fake fixture routing contract"),
+                };
+                if outcome.is_ok() && preference_changed {
+                    self.preference_writes += 1;
+                }
+                outcome
+            }
+        };
+        Some(result.map_err(|_| Error::Backend))
+    }
+    fn cancel_operation(&mut self, _: u64) {
+        self.pending = None;
+    }
+    fn start_tcp_probe(
+        &mut self,
+        _: mors_coordinator::supervisor::Probe,
+    ) -> std::result::Result<(), mors_coordinator::supervisor::Error> {
+        Ok(())
+    }
+    fn poll_tcp_probe(&mut self, _: u64) -> Option<mors_domain::health::ProbeResult> {
+        Some(mors_domain::health::ProbeResult::Success { latency_ms: 1 })
+    }
+    fn cancel_tcp_probe(&mut self, _: u64) {}
+}
+fn scheduled(
+    adapter: FakeNaiveProxy,
+    memory: Memory,
+) -> (
+    mors_coordinator::supervisor::Supervisor<ScheduledExecutor>,
+    mors_coordinator::snapshot::Reader,
+) {
+    use mors_coordinator::{snapshot::*, supervisor::*};
+    use mors_domain::{health::*, selection::*, Capability};
+    let (publisher, reader) = channel([9; 16], None);
+    let configuration = Configuration {
+        revision: FENCE.revision,
+        policy: HealthPolicy::default(),
+        paused: false,
+        direct: DirectPolicy::Forbidden,
+        connections: vec![Connection {
+            backend: Backend::NaiveProxy,
+            udp_protection: UdpProtection::Unknown,
+            next_probe_at: None,
+            candidate: Candidate {
+                id: ConnectionId(1),
+                generation: 1,
+                intent: Intent {
+                    enabled: true,
+                    in_pool: true,
+                },
+                admitted: true,
+                draining: false,
+                tcp_capability: Capability::Supported,
+                udp_capability: Capability::Unsupported,
+                tcp: Health::new(1),
+                udp: Health::new(1),
+            },
+        }],
+    };
+    let (owner, _) = Supervisor::new(
+        ScheduledExecutor {
+            executor: Executor::new(memory, adapter),
+            pending: None,
+            preference_writes: 0,
+        },
+        publisher,
+        configuration,
+        None,
+        Timing::default(),
+    )
+    .unwrap();
+    (owner, reader)
+}
+#[test]
+fn supervisor_commits_active_only_after_transaction_verification() {
+    for tcp_ok in [false, true] {
+        let mut adapter = fake();
+        adapter.tcp_ok = tcp_ok;
+        let (mut owner, reader) = scheduled(adapter, Memory::default());
+        for now in 0..5 {
+            owner.tick(now).unwrap();
+        }
+        let status = reader
+            .read_at(mors_coordinator::snapshot::ReadOperation::Status, 5)
+            .unwrap();
+        assert_eq!(status.contains("recovery_required"), !tcp_ok);
+        assert_eq!(owner.runtime().preference_writes, usize::from(tcp_ok));
+        safe(owner.runtime().executor.adapter());
+        let route = owner
+            .runtime()
+            .executor
+            .adapter()
+            .observe(Resource::TcpRoute)
+            .value;
+        assert_eq!(matches!(route, Value::Proxy(_)), tcp_ok);
+    }
+}
+#[test]
+fn supervisor_panic_restart_recovers_durable_partial_transaction_before_selection() {
+    let memory = Memory {
+        crash: Some(7),
+        ..Memory::default()
+    };
+    let shared = memory.record.clone();
+    let (mut owner, _) = scheduled(fake(), memory);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for now in 0..5 {
+            owner.tick(now).unwrap();
+        }
+    }))
+    .is_err());
+    let adapter = owner.runtime().executor.adapter().clone();
+    drop(owner);
+    assert!(!shared.lock().unwrap().as_ref().unwrap().terminal());
+    let memory = Memory {
+        record: shared.clone(),
+        ..Memory::default()
+    };
+    let (mut restarted, reader) = scheduled(adapter, memory);
+    restarted.tick(0).unwrap();
+    assert!(reader
+        .read_at(mors_coordinator::snapshot::ReadOperation::Status, 0)
+        .unwrap()
+        .contains("starting"));
+    restarted.tick(1).unwrap();
+    assert_eq!(
+        shared.lock().unwrap().as_ref().unwrap().phase,
+        Phase::RolledBack
+    );
+    safe(restarted.runtime().executor.adapter());
+    assert_eq!(restarted.runtime().preference_writes, 0);
+}
