@@ -18,6 +18,7 @@
 | `mors-platform` | Отдельная граница допуска platform routing | domain |
 | `mors-coordinator` | Volatile snapshot, root-only API чтения и fake transaction executor | domain, adapters, platform, storage; serde, Linux rustix |
 | `mors-storage` | Versioned registry и защищённые immutable secrets, Linux I/O | Нет |
+| `mors-probe` | Bounded проверки конкретного выхода и отдельного upstream (#75) | domain; Linux libcurl, socket2 |
 | `mors-core` | Безопасный бинарник help/version, пока без подключения coordinator | Нет |
 
 Чистые health/selection реализованы в [#70](health-selection.md) без подключения к runtime.
@@ -68,7 +69,9 @@ dependency resolution, не обещание побитового совпаде
 
 ## Проверка
 
-На host с rustup, Bash и установленным toolchain:
+На host с rustup, Bash и установленным toolchain. На Linux для probe нужны
+`libcurl4-openssl-dev`, `pkg-config`, `python3`, `openssl` (пакеты Debian/Ubuntu).
+Контракт и проверки описаны в [connection-probes.md](connection-probes.md):
 
 ```sh
 rustup show active-toolchain
